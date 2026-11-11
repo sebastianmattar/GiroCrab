@@ -14,6 +14,8 @@ struct InspectorView: View {
                 if let b = model.selectedBooking {
                     ReceiptCard(booking: b)
                     NoteCard(booking: b).id(b.id)
+                    if b.amountCents > 0 { SalaryCard(booking: b) }
+                    RecurringCard(booking: b)
                     MerchantHistoryCard(booking: b)
                     CategoryGridCard(booking: b)
                     DocumentsCard(booking: b)
@@ -216,6 +218,58 @@ struct MerchantDomainRow: View {
     }
 }
 
+/// Salary / pension marking of an inflow (GitHub #37). Drives the
+/// "Seit letztem Gehalt" period of the income tiles.
+struct SalaryCard: View {
+    @Environment(AppModel.self) private var model
+    let booking: Booking
+
+    private enum Choice: Hashable { case auto, yes, no }
+
+    private var choice: Choice {
+        switch booking.salaryFlag {
+        case .some(true): .yes
+        case .some(false): .no
+        case .none: .auto
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Gehalt / Rente")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(booking.isSalary ? Theme.inflow : Theme.text)
+            Picker("Gehalt / Rente", selection: Binding(
+                get: { choice },
+                set: { new in
+                    model.setSalaryFlag(booking, new == .auto ? nil : new == .yes)
+                }
+            )) {
+                Text("Automatisch").tag(Choice.auto)
+                Text("Ja").tag(Choice.yes)
+                Text("Nein").tag(Choice.no)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    private var hint: LocalizedStringKey {
+        switch choice {
+        case .yes: "Als Gehalt markiert. Weitere Eingänge von diesem Konto zählen ebenfalls als Gehalt."
+        case .no: "Wird nie als Gehalt gezählt."
+        case .auto where booking.isSalary: "Als Gehalt erkannt (Purpose-Code, Geschäftsvorfallcode oder Verwendungszweck)."
+        case .auto: "Nicht als Gehalt erkannt. Markieren Sie den Eingang, damit der Zeitraum „Seit letztem Gehalt“ ihn nutzt."
+        }
+    }
+}
+
 struct FlowBadge: View {
     let flow: FlowKind
 
@@ -382,6 +436,8 @@ struct RawDataCard: View {
                 if let e = sepa("EREF") { row("EREF (Ende-zu-Ende-Referenz)", e) }
                 if let m = sepa("MREF") { row("MREF (Mandatsreferenz)", m) }
                 if let c = sepa("CRED") { row("Gläubiger-ID", c) }
+                if !booking.purposeCode.isEmpty { row("Purpose-Code", booking.purposeCode) }
+                if !booking.gvc.isEmpty { row("Geschäftsvorfallcode", booking.gvc) }
                 if !booking.counterpartyIban.isEmpty { row("IBAN Gegenkonto", formatIBAN(booking.counterpartyIban)) }
                 row("Gegenpartei (roh)", booking.counterparty)
                 if !booking.valueDate.isEmpty { row("Wertstellung", DateText.medium(booking.valueDate)) }

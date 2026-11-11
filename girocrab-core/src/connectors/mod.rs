@@ -435,7 +435,7 @@ pub struct RemoteHolding {
     pub holding: crate::models::Holding,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RemoteTransaction {
     pub account_ref: String,
     /// De-duplication key; derived from bank ids or a content hash.
@@ -448,6 +448,10 @@ pub struct RemoteTransaction {
     pub counterparty_iban: String,
     pub purpose: String,
     pub booking_text: String,
+    /// SEPA purpose code (ISO 20022 `Purp/Cd`, e.g. `SALA`); "" = unknown.
+    pub purpose_code: String,
+    /// German Geschäftsvorfallcode (3 digits, e.g. `153`); "" = unknown.
+    pub gvc: String,
 }
 
 impl RemoteTransaction {
@@ -479,6 +483,8 @@ pub struct FetchResult {
     /// Keep stored balances and add newly imported bookings to them
     /// (for sources that don't report a balance).
     pub adjust_balances: bool,
+    /// Accounts (external refs) whose statements were fetched automatically.
+    pub statements_fetched: Vec<String>,
     /// PDFs fetched from the bank (trade confirmations, PostBox, statements).
     pub documents: Vec<crate::documents::RemoteDocument>,
     /// external_id prefix of provisional bookings (card holds) this fetch
@@ -1005,8 +1011,8 @@ pub(crate) fn store_fetch(
         {
             let mut ins = tx.prepare(
                 "INSERT OR IGNORE INTO transactions(account_id, external_id, booking_date, value_date, amount_cents, currency,
-                         counterparty, counterparty_iban, purpose, booking_text)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                         counterparty, counterparty_iban, purpose, booking_text, purpose_code, gvc)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             for t in &data.transactions {
                 let Some(acc_id) = account_ids.get(&t.account_ref) else {
@@ -1044,7 +1050,9 @@ pub(crate) fn store_fetch(
                     t.counterparty,
                     t.counterparty_iban,
                     t.purpose,
-                    t.booking_text
+                    t.booking_text,
+                    t.purpose_code,
+                    t.gvc
                 ])? as u32;
                 if n > 0 && data.adjust_balances {
                     tx.execute(
@@ -1078,6 +1086,14 @@ pub(crate) fn store_fetch(
                         )
                         .ok();
                     if let Some((row_id, cp, pu)) = existing {
+                        // Backfill bank codes for bookings imported before they were stored.
+                        if !t.purpose_code.is_empty() || !t.gvc.is_empty() {
+                            tx.execute(
+                                "UPDATE transactions SET purpose_code = ?1, gvc = ?2
+                                 WHERE id = ?3 AND purpose_code = '' AND gvc = ''",
+                                params![t.purpose_code, t.gvc, row_id],
+                            )?;
+                        }
                         if bad(&cp) && good(&t.counterparty) {
                             tx.execute(
                                 "UPDATE transactions SET counterparty = ?1 WHERE id = ?2",
@@ -1176,6 +1192,15 @@ pub(crate) fn store_fetch(
                 &d.date,
             );
         }
+        for r in &data.statements_fetched {
+            if let Some(id) = account_ids.get(r) {
+                tx.execute(
+                    "INSERT INTO settings(key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![statements_last_key(*id), today()],
+                )?;
+            }
+        }
         for acc in data.accounts.iter().filter(|a| a.kind == AccountKind::Loan) {
             if let Some(id) = account_ids.get(&acc.external_ref) {
                 Vault::derive_initial_balance(&tx, *id)?;
@@ -1271,6 +1296,21 @@ impl SyncSession {
 
 /// Setting key marking a statements-only session (value = external_ref of the account).
 pub(crate) const STATEMENTS_ONLY: &str = "__statements_only";
+/// Setting listing the accounts (external refs, comma-separated) whose PDF
+/// statements a regular sync should also fetch (opt-in, GitHub #57).
+pub(crate) const STATEMENTS_AUTO: &str = "__statements_auto";
+/// Days between two automatic statement fetches of one account.
+const STATEMENTS_AUTO_DAYS: i64 = 7;
+
+/// Vault setting key: fetch PDF statements of this account automatically.
+pub(crate) fn statements_auto_key(account_id: i64) -> String {
+    format!("statements.auto.{account_id}")
+}
+
+/// Vault setting key: date (YYYY-MM-DD) of the last automatic statement fetch.
+pub(crate) fn statements_last_key(account_id: i64) -> String {
+    format!("statements.last.{account_id}")
+}
 
 #[uniffi::export]
 impl Vault {
@@ -1284,6 +1324,34 @@ impl Vault {
         demo: bool,
     ) -> Result<Arc<SyncSession>, CoreError> {
         self.begin_sync_inner(connection_id, secret, demo, None)
+    }
+
+    /// Turns the automatic PDF statement fetch (FinTS HKEKA, at most weekly,
+    /// during regular syncs) of one account on or off.
+    pub fn set_auto_statements(&self, account_id: i64, enabled: bool) -> Result<(), CoreError> {
+        let db = self.db()?;
+        if enabled {
+            db.execute(
+                "INSERT INTO settings(key, value) VALUES (?1, '1')
+                 ON CONFLICT(key) DO UPDATE SET value = '1'",
+                [statements_auto_key(account_id)],
+            )?;
+        } else {
+            db.execute(
+                "DELETE FROM settings WHERE key IN (?1, ?2)",
+                params![
+                    statements_auto_key(account_id),
+                    statements_last_key(account_id)
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Is the automatic statement fetch on for this account?
+    pub fn auto_statements_enabled(&self, account_id: i64) -> Result<bool, CoreError> {
+        let db = self.db()?;
+        Ok(Vault::setting_inner(&db, &statements_auto_key(account_id))?.as_deref() == Some("1"))
     }
 
     /// Explicitly fetches the electronic bank statements (FinTS HKEKA, PDF) of ONE account
@@ -1333,6 +1401,31 @@ impl Vault {
 }
 
 impl Vault {
+    /// External refs of this connection's accounts whose automatic statement
+    /// fetch is on and due (never, or more than `STATEMENTS_AUTO_DAYS` ago).
+    fn statements_due(&self, connection_id: i64) -> CoreResult<Vec<String>> {
+        let db = self.db()?;
+        let mut stmt = db.prepare(
+            "SELECT id, external_ref FROM accounts WHERE connection_id = ?1 AND kind != 'loan'",
+        )?;
+        let accounts: Vec<(i64, String)> = stmt
+            .query_map([connection_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let today = chrono::Local::now().date_naive();
+        let mut due = Vec::new();
+        for (id, ext) in accounts {
+            if Vault::setting_inner(&db, &statements_auto_key(id))?.as_deref() != Some("1") {
+                continue;
+            }
+            let last = Vault::setting_inner(&db, &statements_last_key(id))?
+                .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok());
+            if last.is_none_or(|d| (today - d).num_days() >= STATEMENTS_AUTO_DAYS) {
+                due.push(ext);
+            }
+        }
+        Ok(due)
+    }
+
     fn begin_sync_inner(
         self: Arc<Self>,
         connection_id: i64,
@@ -1424,6 +1517,11 @@ impl Vault {
         let mut ctx_settings = ctx_settings;
         if let Some(ext) = statements_only {
             ctx_settings.insert(STATEMENTS_ONLY.into(), SecretString::new(ext));
+        } else {
+            let due = self.statements_due(connection_id)?;
+            if !due.is_empty() {
+                ctx_settings.insert(STATEMENTS_AUTO.into(), SecretString::new(due.join(",")));
+            }
         }
         let ctx = ConnectContext {
             connection_id,
@@ -2112,6 +2210,7 @@ mod tests {
             counterparty_iban: String::new(),
             purpose: String::new(),
             booking_text: String::new(),
+            ..Default::default()
         };
         let fetch = |balance: i64, ids: &[&str]| FetchResult {
             accounts: vec![
@@ -2241,6 +2340,7 @@ mod tests {
             counterparty_iban: String::new(),
             purpose: String::new(),
             booking_text: "Kartenzahlung (vorgemerkt)".into(),
+            ..Default::default()
         };
         let fetch = |txs: Vec<RemoteTransaction>| FetchResult {
             accounts: vec![acc.clone()],
@@ -2990,5 +3090,58 @@ mod tests {
             Err(CoreError::SessionClosed)
         ));
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod statements_auto_tests {
+    use super::*;
+
+    #[test]
+    fn auto_statements_are_due_weekly_and_only_when_enabled() {
+        let dir = std::env::temp_dir().join(format!("gc-stmt-auto-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![4u8; 32]).unwrap();
+        let (conn, giro, loan) = {
+            let c = v.db().unwrap();
+            c.execute(
+                "INSERT INTO bank_connections(connector, login_name, display_name) VALUES ('fints:12345678', 'x', 'Bank')",
+                [],
+            )
+            .unwrap();
+            let conn = c.last_insert_rowid();
+            c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
+                .unwrap();
+            c.execute(
+                "INSERT INTO accounts(group_id, connection_id, external_ref, name) VALUES ((SELECT id FROM account_groups), ?1, 'giro', 'Giro')",
+                [conn],
+            )
+            .unwrap();
+            let giro = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO accounts(group_id, connection_id, external_ref, name, kind) VALUES ((SELECT id FROM account_groups), ?1, 'loan', 'Kredit', 'loan')",
+                [conn],
+            )
+            .unwrap();
+            (conn, giro, c.last_insert_rowid())
+        };
+        assert!(v.statements_due(conn).unwrap().is_empty());
+        v.set_auto_statements(giro, true).unwrap();
+        v.set_auto_statements(loan, true).unwrap();
+        assert!(v.auto_statements_enabled(giro).unwrap());
+        assert_eq!(v.statements_due(conn).unwrap(), vec!["giro".to_string()]);
+        // fetched today -> not due; 8 days ago -> due again
+        v.set_setting(statements_last_key(giro), today()).unwrap();
+        assert!(v.statements_due(conn).unwrap().is_empty());
+        let old = (chrono::Local::now().date_naive() - chrono::Duration::days(8))
+            .format("%Y-%m-%d")
+            .to_string();
+        v.set_setting(statements_last_key(giro), old).unwrap();
+        assert_eq!(v.statements_due(conn).unwrap().len(), 1);
+        v.set_auto_statements(giro, false).unwrap();
+        assert!(!v.auto_statements_enabled(giro).unwrap());
+        assert!(v.statements_due(conn).unwrap().is_empty());
+        drop(v);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

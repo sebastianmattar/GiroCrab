@@ -11,11 +11,12 @@ struct InvestmentDashboardView: View {
     var body: some View {
         if let d = model.dashboard {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
                     KPI(title: "Monatlich investiert", subtitle: "\(d.plans.filter(\.active).count) aktive Sparpläne", value: Money.format(d.totalMonthlyCents), tint: Theme.invest)
                     KPI(title: "Saveback (1 %)", subtitle: "\(d.savebackCount)× gutgeschrieben", value: Money.format(d.savebackEarnedCents), tint: Theme.inflow)
                     KPI(title: "Round up", subtitle: "\(d.roundupCount)× investiert", value: Money.format(d.roundupInvestedCents), tint: Theme.invest)
                 }
+                .fixedSize(horizontal: false, vertical: true)
                 PlanGrid(dashboard: d)
                 PerksCard(dashboard: d)
                 FlowChartCard(dashboard: d)
@@ -27,22 +28,30 @@ struct InvestmentDashboardView: View {
 
 struct PlanGrid: View {
     let dashboard: InvestmentDashboard
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    private var compact: Bool { sizeClass == .compact }
+    /// Compact screens show only the last 4 months, with short month labels.
+    private var shownMonths: [String] { compact ? Array(dashboard.months.suffix(4)) : dashboard.months }
+    private var cell: CGFloat { compact ? 28 : 40 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Monatliche Sparpläne").font(.subheadline.weight(.semibold))
+                Text("Monatliche Sparpläne").font(.subheadline.weight(.semibold)).lineLimit(1)
                 Spacer()
-                Text("Ausführungen der letzten \(dashboard.months.count) Monate").font(.caption).foregroundStyle(Theme.secondary)
+                if !compact {
+                    Text("Ausführungen der letzten \(dashboard.months.count) Monate").font(.caption).foregroundStyle(Theme.secondary)
+                }
             }
             .padding(.bottom, 10)
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 0) {
+            Grid(alignment: .leading, horizontalSpacing: compact ? 3 : 10, verticalSpacing: 0) {
                 GridRow {
                     Text("Plan").gridColumnAlignment(.leading)
-                    ForEach(dashboard.months, id: \.self) { m in
-                        Text(DateText.monthLabel(m)).frame(width: 40)
+                    ForEach(shownMonths, id: \.self) { m in
+                        Text(compact ? DateText.monthName(m) : DateText.monthLabel(m)).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(width: cell)
                     }
-                    Text("pro Monat").gridColumnAlignment(.trailing)
+                    Text("pro Monat").lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing).gridColumnAlignment(.trailing)
                 }
                 .font(.caption2)
                 .foregroundStyle(Theme.tertiary)
@@ -53,11 +62,11 @@ struct PlanGrid: View {
                         HStack(spacing: 8) {
                             MerchantSignet(merchant: plan.merchant, size: 28)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(plan.merchant.name).font(.callout.weight(.medium)).lineLimit(1)
+                                Text(plan.merchant.name).font((compact ? Font.footnote : Font.callout).weight(.medium)).lineLimit(compact ? 2 : 1).minimumScaleFactor(0.85)
                                 Text(planSubtitle(plan)).font(.caption2.monospaced()).foregroundStyle(Theme.secondary).lineLimit(1)
                             }
                         }
-                        ForEach(plan.executions, id: \.month) { e in
+                        ForEach(plan.executions.filter { shownMonths.contains($0.month) }, id: \.month) { e in
                             ZStack {
                                 if e.amountCents > 0 {
                                     Circle().fill(Theme.invest.opacity(0.85)).frame(width: 12, height: 12)
@@ -65,20 +74,22 @@ struct PlanGrid: View {
                                     Circle().strokeBorder(Theme.border, lineWidth: 1.5).frame(width: 12, height: 12)
                                 }
                             }
-                            .frame(width: 40)
+                            .frame(width: cell)
                             .help(e.amountCents > 0 ? "\(DateText.monthLabel(e.month)): \(Money.format(e.amountCents))" : String(localized: "nicht ausgeführt"))
                         }
                         Text(Money.format(plan.monthlyCents))
                             .font(.callout.monospacedDigit())
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                            .frame(minWidth: compact ? 64 : nil, alignment: .trailing)
                             .foregroundStyle(plan.active ? Theme.text : Theme.tertiary)
                     }
                     .padding(.vertical, 7)
                 }
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    Text("Summe aktive Pläne").font(.callout.weight(.semibold))
-                    ForEach(dashboard.months, id: \.self) { _ in Color.clear.frame(width: 40, height: 1) }
-                    Text(Money.format(dashboard.totalMonthlyCents)).font(.callout.weight(.semibold).monospacedDigit())
+                    Text("Summe aktive Pläne").font(.callout.weight(.semibold)).lineLimit(compact ? 2 : 1)
+                    ForEach(shownMonths, id: \.self) { _ in Color.clear.frame(width: cell, height: 1) }
+                    Text(Money.format(dashboard.totalMonthlyCents)).font(.callout.weight(.semibold).monospacedDigit()).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing)
                 }
                 .padding(.top, 8)
             }

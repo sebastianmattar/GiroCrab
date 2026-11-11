@@ -370,6 +370,7 @@ pub(crate) fn map_transaction(
         counterparty_iban: String::new(),
         purpose,
         booking_text,
+        ..Default::default()
     })
 }
 

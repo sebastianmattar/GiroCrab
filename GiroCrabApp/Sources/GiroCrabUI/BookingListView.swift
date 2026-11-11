@@ -53,6 +53,7 @@ struct BookingStreamView: View {
                             }
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 14).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
                             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.card))
                             #else
                             CashflowCard().transition(.opacity.combined(with: .move(edge: .top)))
@@ -89,6 +90,7 @@ struct BookingStreamView: View {
                     .padding(.bottom, 18)
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
                 }
                 .frame(minHeight: 0, maxHeight: .infinity)
                 #if os(iOS)
@@ -99,6 +101,7 @@ struct BookingStreamView: View {
                 #endif
             }
             .background(Theme.canvas)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { columnWidth = $0 }
             #if os(iOS)
             // iPhone: the detail column is not reachable by tapping, so show it as a sheet.
             .sheet(isPresented: Binding(
@@ -115,7 +118,15 @@ struct BookingStreamView: View {
                 return !urls.isEmpty
             }
             .onChange(of: model.selectedBookingID) { _, id in
-                if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+                guard let id else { return }
+                // Rows live inside lazily built day cards: an off-screen day must be
+                // scrolled to first, otherwise the row's id is unknown to the proxy.
+                if let day = model.dayGroups.first(where: { $0.bookings.contains { $0.id == id } }) {
+                    proxy.scrollTo(day.id)
+                }
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                }
             }
             // another account, group, period or view: back to the newest day
             .onChange(of: model.sidebarSelection) { _, _ in scrollToTop(proxy) }
@@ -178,6 +189,11 @@ struct BookingStreamView: View {
                     Button { model.exportFilteredBookingsCSV() } label: { Label("CSV exportieren…", systemImage: "square.and.arrow.up") }
                     Button { model.openRuleEditor() } label: { Label("Regeln", systemImage: "wand.and.stars") }
                     Button { model.showSettings = true } label: { Label("Einstellungen", systemImage: "gearshape") }
+                    if model.demoActive && model.hasOwnVault {
+                        Button { model.showOwnVault() } label: { Label("Demo beenden", systemImage: "theatermasks") }
+                    } else if !model.demoActive && model.hasOwnVault && model.allAccounts.isEmpty {
+                        Button { model.showDemo() } label: { Label("Demo-Daten laden", systemImage: "theatermasks") }
+                    }
                 } label: { Label("Mehr", systemImage: "ellipsis.circle") }
             }
             #else
@@ -220,7 +236,7 @@ struct BookingStreamView: View {
                     }
                     #if os(iOS)
                     Picker("Ansicht", selection: scope) {
-                        ForEach(BookingScope.ordered, id: \.self) { Text($0.title).tag($0) }
+                        ForEach(BookingScope.ordered, id: \.self) { Text($0.shortTitle).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     #endif
@@ -245,7 +261,7 @@ struct BookingStreamView: View {
                     }
                 }
                 #if os(iOS)
-                .padding(.horizontal, 16)
+                // the scroll content already carries the 20pt side padding
                 .padding(.top, 4)
                 .padding(.bottom, 6)
                 #else
@@ -255,9 +271,23 @@ struct BookingStreamView: View {
                 #endif
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
+                .padding(.trailing, scrollerInset)
+    }
+
+    /// macOS: width a scroller takes from the scroll area; the pinned header
+    /// (outside the ScrollView) gets the same trailing inset to stay aligned.
+    @State private var columnWidth: CGFloat = 0
+    @State private var contentWidth: CGFloat = 0
+    private var scrollerInset: CGFloat {
+        #if os(macOS)
+        (columnWidth > 0 && contentWidth > 0) ? max(0, columnWidth - contentWidth) : 0
+        #else
+        0
+        #endif
     }
 
     private static let topID = "stream-top"
+
 
     private func scrollToTop(_ proxy: ScrollViewProxy) {
         proxy.scrollTo(Self.topID, anchor: .top)
@@ -346,6 +376,7 @@ struct DayCard: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.card))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -397,6 +428,13 @@ struct BookingRow: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.accent.opacity(0.8))
                             .help("\(booking.documentCount) Beleg(e) – Leertaste für QuickLook")
+                    }
+                    if model.recurringSeries(for: booking) != nil {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                            .help("Wiederkehrende Buchung")
+                            .accessibilityLabel("Wiederkehrend")
                     }
                 }
                 HStack(spacing: 6) {

@@ -41,6 +41,7 @@ struct CardBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.card))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
@@ -136,6 +137,7 @@ enum DateText {
     private static let medium = make(template: "ddMMyyyy")
     private static let full = make(template: "EEEEdMMMMyyyy")
     private static let monthShort = make(template: "MMMyy")
+    private static let monthOnly = make(template: "MMM")
 
     static func date(_ s: String) -> Date? { iso.date(from: s) }
     static func iso(_ d: Date) -> String { iso.string(from: d) }
@@ -155,6 +157,10 @@ enum DateText {
     }
 
     /// "2026-11" -> "Nov. 26"
+    /// "Jun" – month name without year (compact tables).
+    static func monthName(_ ym: String) -> String {
+        date(ym + "-01").map { monthOnly.string(from: $0) } ?? ym
+    }
     static func monthLabel(_ ym: String) -> String {
         date(ym + "-01").map { monthShort.string(from: $0) } ?? ym
     }

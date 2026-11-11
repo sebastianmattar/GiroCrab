@@ -478,6 +478,7 @@ impl BankConnector for ComdirectConnector {
                             .as_str()
                             .unwrap_or_default()
                             .to_string(),
+                        ..Default::default()
                     };
                     if rt.external_id.is_empty() {
                         rt.external_id = rt.content_id(index);

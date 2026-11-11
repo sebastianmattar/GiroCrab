@@ -1104,6 +1104,7 @@ fn parse_hold(a: &Value, account_ref: &str) -> Option<RemoteTransaction> {
         counterparty_iban: String::new(),
         purpose,
         booking_text: format!("{} ({})", tr("Kartenzahlung"), tr("vorgemerkt")),
+        ..Default::default()
     })
 }
 
@@ -1398,6 +1399,7 @@ fn parse_payment(p: &Value, account_ref: &str) -> Option<RemoteTransaction> {
             p["type"].as_str().unwrap_or_default(),
             p["sub_type"].as_str().unwrap_or_default(),
         ),
+        ..Default::default()
     })
 }
 

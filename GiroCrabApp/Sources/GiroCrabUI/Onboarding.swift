@@ -6,8 +6,13 @@ struct DemoBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let button = Button(model.hasOwnVault ? "Eigener Tresor" : "Tresor öffnen") { model.showOwnVault() }
-            .controlSize(.small)
+        let button = HStack(spacing: 14) {
+            Button(model.hasOwnVault ? "Eigener Tresor" : "Eigenes Konto anlegen") { model.showOwnVault() }
+            if !model.hasOwnVault && !AppModel.vaultMayHoldRealData {
+                Button("Sperrbildschirm testen") { model.previewLock() }
+            }
+        }
+        .controlSize(.small)
         let content = HStack(alignment: .top, spacing: 12) {
             Image(systemName: "theatermasks.fill")
                 .font(.title3)
@@ -16,7 +21,7 @@ struct DemoBanner: View {
                 Text("Demo-Daten").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
                 Text(model.hasOwnVault
                      ? "Ihr eigener Tresor ist noch leer. Hier sehen Sie erfundene Buchungen aller 7 Banken."
-                     : "Erfundene Buchungen aller 7 Banken – keine echte Bank verbunden.")
+                     : "Erfundene Buchungen aller 7 Banken – keine echte Bank verbunden. Sobald echte Daten da sind, schützt Face ID bzw. Ihr Gerätecode den Tresor automatisch; hier können Sie den Sperrbildschirm testen.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)

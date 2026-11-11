@@ -808,6 +808,7 @@ fn to_fetch(
             counterparty_iban: String::new(),
             purpose: String::new(),
             booking_text: "Kartenumsatz".into(),
+            ..Default::default()
         };
         let n = seen.entry((p.date, p.cents, p.text)).or_insert(0);
         t.external_id = match p.id {

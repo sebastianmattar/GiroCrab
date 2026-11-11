@@ -208,6 +208,7 @@ impl BankConnector for PayPalConnector {
                             .as_str()
                             .unwrap_or_default()
                             .to_string(),
+                        ..Default::default()
                     });
                 }
                 let total_pages = v["total_pages"].as_u64().unwrap_or(1);

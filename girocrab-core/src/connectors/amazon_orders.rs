@@ -253,6 +253,7 @@ fn to_fetch(connection_id: i64, name: &str, bookings: Vec<Booking>) -> FetchResu
             counterparty_iban: String::new(),
             purpose: b.purpose,
             booking_text: b.text.into(),
+            ..Default::default()
         })
         .collect();
     FetchResult {

@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         if LaunchOptions.current.dark {
             NSApp.appearance = NSAppearance(named: .darkAqua)
+        } else if CommandLine.arguments.contains("--light") {
+            NSApp.appearance = NSAppearance(named: .aqua)
         }
         if let icon = Self.appIcon() {
             NSApp.applicationIconImage = icon

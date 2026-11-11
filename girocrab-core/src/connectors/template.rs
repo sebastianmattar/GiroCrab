@@ -75,6 +75,7 @@ impl BankConnector for TemplateConnector {
             counterparty_iban: String::new(),
             purpose: "Kartenzahlung".into(),
             booking_text: "KARTENZAHLUNG".into(),
+            ..Default::default()
         });
         Ok(out)
     }

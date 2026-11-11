@@ -282,6 +282,7 @@ impl BankConnector for DemoConnector {
                 counterparty_iban: String::new(),
                 purpose: purpose.into(),
                 booking_text: "DEMO".into(),
+                ..Default::default()
             });
         }
         // Balances are not re-reported by the simulated bank; the vault adds

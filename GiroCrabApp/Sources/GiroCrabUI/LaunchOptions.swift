@@ -12,10 +12,11 @@ import Foundation
 ///  --try-add-bank <name>  (developer, with --fresh-vault) add a bank on start,
 ///                         e.g. 1822direkt, to see the setup form
 ///  --select <text>        (demo) preselect the account whose name contains <text>
-///  --demo-sheet transfer|moneymoney|moneymoney-db
+///  --demo-sheet transfer|moneymoney|moneymoney-db|recurring
 ///                         (demo) open that sheet pre-filled with fictional data,
 ///                         for README screenshots
 ///  --dark                 (macOS) force the Dark Aqua appearance (README screenshots)
+///  --light                (macOS, `swift run`) force the light Aqua appearance
 ///  --screenshot <file>    (macOS) render the main window, save a PNG, quit.
 ///                         Implies --demo-seed so the picture is reproducible.
 public struct LaunchOptions: Sendable {

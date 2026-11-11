@@ -24,6 +24,11 @@ struct SettingsView: View {
             LogoSettings()
                 .tabItem { Label("Händler-Logos", systemImage: "photo.on.rectangle") }
                 .tag(SettingsTab.logos)
+            #if os(macOS)
+            DocumentFolderSettings()
+                .tabItem { Label("Dokumente", systemImage: "doc.on.doc") }
+                .tag(SettingsTab.documents)
+            #endif
             SecuritySettings()
                 .tabItem { Label("Sicherheit", systemImage: "lock.shield") }
                 .tag(SettingsTab.security)
@@ -38,7 +43,7 @@ struct SettingsView: View {
 
 /// Tabs of the settings window (macOS) / sheet (iOS).
 enum SettingsTab: Hashable {
-    case banks, groups, credentials, logos, security
+    case banks, groups, credentials, logos, documents, security
 }
 
 struct BankConnectionsSettings: View {
@@ -214,6 +219,71 @@ struct LogoSettings: View {
         .formStyle(.grouped)
     }
 }
+
+#if os(macOS)
+/// Automatic copy of all documents (statements, receipts, PostBox) into a
+/// folder, e.g. in iCloud Drive (GitHub #57).
+struct DocumentFolderSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var choosing = false
+
+    var body: some View {
+        Form {
+            Section("Dokumentenordner") {
+                Toggle("Dokumente automatisch in einen Ordner sichern", isOn: Binding(
+                    get: { model.documentMirrorPath != nil },
+                    set: { on in
+                        if !on { model.setDocumentMirror(nil) }
+                        else if let url = AppModel.suggestedMirrorURL { model.setDocumentMirror(url) }
+                        else { choosing = true }
+                    }
+                ))
+                if let path = model.documentMirrorPath {
+                    LabeledContent("Ordner") {
+                        HStack {
+                            Text(displayPath(path))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(path)
+                            Button("Ändern …") { choosing = true }
+                            Button("Im Finder zeigen") {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                            }
+                        }
+                    }
+                    LabeledContent("Status") {
+                        HStack {
+                            Text(model.documentMirrorStatus ?? "–").foregroundStyle(.secondary)
+                            Button("Jetzt sichern") { model.mirrorDocumentsIfEnabled() }
+                        }
+                    }
+                }
+                Text("Kontoauszüge, Belege und PostBox-Dokumente werden nach jedem Sync als Kopie abgelegt: <Ordner>/<Konto>/<Jahr>/. Vorhandene Dateien werden nie überschrieben. Achtung: Im Ordner liegen die PDFs unverschlüsselt – in iCloud Drive also auch in Ihrer iCloud.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Automatischer Abruf") {
+                Text("Ob GiroCrab die PDF-Kontoauszüge eines FinTS-Kontos bei jedem Sync mit abruft, stellen Sie pro Konto unter „Dokumente / Kontoauszüge“ ein.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { model.setDocumentMirror(url) }
+        }
+    }
+
+    /// "~/Library/Mobile Documents/com~apple~CloudDocs/GiroCrab" -> "iCloud Drive/GiroCrab".
+    private func displayPath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let cloud = home + "/Library/Mobile Documents/com~apple~CloudDocs"
+        if path.hasPrefix(cloud) { return "iCloud Drive" + path.dropFirst(cloud.count) }
+        if path.hasPrefix(home) { return "~" + path.dropFirst(home.count) }
+        return path
+    }
+}
+#endif
 
 struct SecuritySettings: View {
     @Environment(AppModel.self) private var model

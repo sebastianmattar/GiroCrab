@@ -570,6 +570,20 @@ impl FinTsConnector {
                 if !v.contains(&s.version()) {
                     v.push(s.version());
                 }
+                if id == "HIEKAS" {
+                    // bank parameters only (formats, flags) – no customer data
+                    let params: Vec<String> = s
+                        .elements
+                        .iter()
+                        .skip(4)
+                        .map(|el| el.iter().map(|v| v.text()).collect::<Vec<_>>().join(":"))
+                        .collect();
+                    crate::depot_debug::log(&format!(
+                        "statements: BPD HIEKAS v{} params={}",
+                        s.version(),
+                        params.join("+")
+                    ));
+                }
             }
             if id == "HIPINS" {
                 // last element: list of (segment, J/N) pairs after 5 PIN fields
@@ -1223,6 +1237,18 @@ impl FinTsConnector {
             }
         }
         Ok(docs)
+    }
+
+    /// Non-sensitive trace whether the bank offers PDF statements (HIEKAS), e.g.
+    /// to check banks like ING (GitHub #57). No account data is logged.
+    fn log_statement_support(&self, upd_allows: Option<bool>) {
+        crate::depot_debug::log(&format!(
+            "statements: HIEKAS versions={:?} negotiated={:?} upd_allows={:?} tan_required={:?}",
+            self.st.versions.get("HKEKA"),
+            self.negotiated("HKEKA"),
+            upd_allows,
+            self.st.tan_required.get("HKEKA"),
+        ));
     }
 
     fn check_reply(&self, reply: &BankReply) -> CoreResult<()> {
@@ -2042,6 +2068,11 @@ impl BankConnector for FinTsConnector {
         let mut result = FetchResult::default();
         let mut ok_any = false;
         // Explicit statements fetch (Vault::fetch_account_statements): HKEKA of one account only.
+        let auto_statements: Vec<String> = ctx
+            .settings
+            .get(super::STATEMENTS_AUTO)
+            .map(|v| v.expose().split(',').map(str::to_string).collect())
+            .unwrap_or_default();
         if let Some(wanted) = ctx.settings.get(super::STATEMENTS_ONLY) {
             let wanted = wanted.expose().to_string();
             let Some((acc, upd)) = accounts.iter().find(|(a, _)| account_label(a) == wanted) else {
@@ -2054,6 +2085,10 @@ impl BankConnector for FinTsConnector {
                     .as_ref()
                     .map(|u| u.allowed.is_empty() || u.allowed.contains("HKEKA"))
                     .unwrap_or(true);
+            self.log_statement_support(
+                upd.as_ref()
+                    .map(|u| u.allowed.is_empty() || u.allowed.contains("HKEKA")),
+            );
             if !supported {
                 return Err(CoreError::Bank {
                     code: "HKEKA".into(),
@@ -2213,7 +2248,27 @@ impl BankConnector for FinTsConnector {
             }
             result.transactions.extend(txs);
 
-            // Not part of regular syncs (fast, no extra TAN): see `Vault::fetch_account_statements`.
+            // Opt-in (GitHub #57): PDF statements, at most weekly per account. A failure
+            // never fails the sync; the explicit fetch reports errors instead.
+            if auto_statements.contains(&label) {
+                self.log_statement_support(Some(allowed("HKEKA")));
+                if allowed("HKEKA") && self.bank_supports("HKEKA") {
+                    match self.statements_pdf(ctx, acc, &label).await {
+                        Ok(docs) => {
+                            crate::depot_debug::log(&format!(
+                                "statements: auto fetch ok, {} PDF(s)",
+                                docs.len()
+                            ));
+                            result.documents.extend(docs);
+                            result.statements_fetched.push(label.clone());
+                        }
+                        Err(e) => crate::depot_debug::log(&format!(
+                            "statements: auto fetch failed: {}",
+                            e.to_string().chars().take(160).collect::<String>()
+                        )),
+                    }
+                }
+            }
             let name = upd
                 .as_ref()
                 .map(|u| u.product.clone())

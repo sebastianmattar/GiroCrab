@@ -44,6 +44,7 @@ pub(crate) fn enrich(t: &mut Booking) {
     );
     t.payment_method = payment_method(&t.booking_text, &t.purpose, t.account_kind, t.amount_cents);
     t.clean_purpose = clean_purpose(&t.purpose);
+    t.recurrence_key = crate::recurring::series_key(t);
 }
 
 /// Securities positions of depot accounts (replaced on every sync).
@@ -150,6 +151,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     imported_unix      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
     note               TEXT    NOT NULL DEFAULT '',        -- user note (MoneyMoney import / detail view)
     import_fp          TEXT    NOT NULL DEFAULT '',        -- MoneyMoney de-duplication fingerprint
+    purpose_code       TEXT    NOT NULL DEFAULT '',        -- SEPA purpose code (SALA, PENS, …)
+    gvc                TEXT    NOT NULL DEFAULT '',        -- German Geschäftsvorfallcode (153, …)
+    salary_flag        INTEGER,                            -- NULL = auto, 1 = salary, 0 = not salary (user)
     UNIQUE (account_id, external_id)
 );
 CREATE INDEX IF NOT EXISTS tx_account_date ON transactions(account_id, booking_date DESC);
@@ -295,11 +299,46 @@ impl Vault {
                 )?;
             }
         }
+        // transactions.purpose_code / gvc / salary_flag (salary detection) – idempotent
+        if version > 0 {
+            for (col, ddl) in [
+                (
+                    "purpose_code",
+                    "ALTER TABLE transactions ADD COLUMN purpose_code TEXT NOT NULL DEFAULT '';",
+                ),
+                (
+                    "gvc",
+                    "ALTER TABLE transactions ADD COLUMN gvc TEXT NOT NULL DEFAULT '';",
+                ),
+                (
+                    "salary_flag",
+                    "ALTER TABLE transactions ADD COLUMN salary_flag INTEGER;",
+                ),
+            ] {
+                let has: i64 = conn.query_row(
+                    "SELECT count(*) FROM pragma_table_info('transactions') WHERE name = ?1",
+                    [col],
+                    |r| r.get(0),
+                )?;
+                if has == 0 {
+                    conn.execute_batch(ddl)?;
+                }
+            }
+        }
         // v4: encrypted documents (Beleg-Abruf & PostBox) – idempotent
         conn.execute_batch(crate::documents::DOC_SCHEMA)?;
+        let has_export: i64 = conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('booking_documents') WHERE name = 'exported_at'",
+            [],
+            |r| r.get(0),
+        )?;
+        if has_export == 0 {
+            conn.execute_batch("ALTER TABLE booking_documents ADD COLUMN exported_at INTEGER;")?;
+        }
         conn.execute_batch(crate::insights::OVERRIDE_SCHEMA)?;
         conn.execute_batch(HOLDINGS_SCHEMA)?;
         conn.execute_batch(crate::planning::PLANNING_SCHEMA)?;
+        conn.execute_batch(crate::recurring::RECURRING_SCHEMA)?;
         // v7: user-defined account groups – idempotent
         crate::user_groups::migrate(conn)?;
         if version < SCHEMA_VERSION {
@@ -1942,7 +1981,8 @@ impl Vault {
         let sql = format!(
             "{cte}SELECT t.id, t.account_id, a.name, t.booking_date, t.value_date, t.amount_cents, t.currency, t.counterparty,
                     t.counterparty_iban, t.purpose, t.booking_text, t.category_id, t.category_source, t.rule_id, t.checked, a.kind,
-                    (SELECT count(*) FROM booking_documents d WHERE d.booking_id = t.id), t.note
+                    (SELECT count(*) FROM booking_documents d WHERE d.booking_id = t.id), t.note,
+                    t.purpose_code, t.gvc, t.salary_flag
              {from_sql} WHERE {where_sql} ORDER BY t.booking_date DESC, t.id DESC"
         );
         let mut stmt = db.prepare(&sql)?;
@@ -1984,9 +2024,15 @@ impl Vault {
                 account_kind: AccountKind::from_str(&r.get::<_, String>(15)?),
                 document_count: r.get::<_, i64>(16)? as u32,
                 note: r.get(17)?,
+                purpose_code: r.get(18)?,
+                gvc: r.get(19)?,
+                salary_flag: r.get::<_, Option<i64>>(20)?.map(|f| f != 0),
+                is_salary: false,
+                recurrence_key: String::new(),
             })
         })?;
         let mut txs = Vec::new();
+        let salary_ibans = crate::salary::marked_salary_ibans(&db)?;
         let overrides = crate::insights::load_overrides(&db).unwrap_or_default();
         let (mut income, mut expense, mut consumption, mut investment, mut perk) =
             (0i64, 0i64, 0i64, 0i64, 0i64);
@@ -1999,6 +2045,7 @@ impl Vault {
                 t.category_symbol = sym.clone();
             }
             enrich(&mut t);
+            t.is_salary = crate::salary::is_salary(&t, &salary_ibans);
             // Localise after `enrich`: flow classification needs the stored names.
             t.category_name = display_name(&t.category_name);
             t.category_path = display_path(&t.category_path);
@@ -2529,5 +2576,70 @@ mod expression_rule_tests {
         });
         assert!(err.is_err(), "unsupported field can't be saved");
         let _ = std::fs::remove_file(p);
+    }
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+
+    /// A vault written before #35/#37/#57 (no bank codes, salary flag,
+    /// recurring table or mirror column) opens, migrates and keeps its data.
+    #[test]
+    fn pre_feature_vault_is_migrated_in_place() {
+        let dir = std::env::temp_dir().join(format!("gc-upgrade-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("v.db").to_string_lossy().to_string();
+        {
+            let v = Vault::open(path.clone(), vec![2u8; 32]).unwrap();
+            let c = v.db().unwrap();
+            c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
+                .unwrap();
+            c.execute(
+                "INSERT INTO accounts(group_id, external_ref, name) VALUES ((SELECT id FROM account_groups), 'A', 'Giro')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO transactions(account_id, external_id, booking_date, amount_cents, counterparty, purpose)
+                 VALUES ((SELECT id FROM accounts), 'x', date('now','-3 days'), 250000, 'ACME', 'Gehalt')",
+                [],
+            )
+            .unwrap();
+            c.execute_batch(
+                "ALTER TABLE transactions DROP COLUMN purpose_code;
+                 ALTER TABLE transactions DROP COLUMN gvc;
+                 ALTER TABLE transactions DROP COLUMN salary_flag;
+                 ALTER TABLE booking_documents DROP COLUMN exported_at;
+                 DROP TABLE recurring_series;",
+            )
+            .unwrap();
+        }
+        let v = Vault::open(path, vec![2u8; 32]).unwrap();
+        let cols: Vec<String> = {
+            let c = v.db().unwrap();
+            let mut st = c
+                .prepare("SELECT name FROM pragma_table_info('transactions')")
+                .unwrap();
+            let names = st
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            names
+        };
+        for col in ["purpose_code", "gvc", "salary_flag"] {
+            assert!(cols.iter().any(|c| c == col), "{col} missing");
+        }
+        let page = v.list_transactions(BookingFilter::default()).unwrap();
+        assert_eq!(page.transactions.len(), 1);
+        assert!(page.transactions[0].is_salary);
+        assert!(v.salary_cycle(vec![]).unwrap().is_some());
+        assert!(v.list_recurring(vec![]).unwrap().is_empty());
+        v.set_booking_salary_flag(page.transactions[0].id, Some(false))
+            .unwrap();
+        v.reset_document_mirror().unwrap();
+        drop(v);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

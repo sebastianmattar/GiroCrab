@@ -295,6 +295,7 @@ struct PeriodQuickPicker: View {
         @Bindable var model = model
         Picker("Zeitraum", selection: $model.period) {
             Text("Monat").tag(Period.thisMonth)
+            Text("Gehalt").tag(Period.sinceSalary)
             Text("Quartal").tag(Period.thisQuarter)
             Text("Jahr").tag(Period.thisYear)
             Text("Alle").tag(Period.all)

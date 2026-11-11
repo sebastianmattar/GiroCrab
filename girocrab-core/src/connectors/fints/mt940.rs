@@ -61,6 +61,10 @@ pub struct Details {
     pub purpose: String,
     pub counterparty: String,
     pub counterparty_iban: String,
+    /// Geschäftsvorfallcode (first three digits of `:86:`), "" if absent.
+    pub gvc: String,
+    /// SEPA purpose code (`PURP+SALA` keyword), "" if absent.
+    pub purpose_code: String,
 }
 
 pub fn parse_86(raw: &str) -> Details {
@@ -75,6 +79,9 @@ pub fn parse_86(raw: &str) -> Details {
     {
         d.purpose = s.trim().to_string();
         return d;
+    }
+    if s.as_bytes()[..3].iter().all(u8::is_ascii_digit) {
+        d.gvc = s[..3].to_string();
     }
     let sep = s.as_bytes()[3] as char;
     let mut purpose_parts = Vec::new();
@@ -95,14 +102,29 @@ pub fn parse_86(raw: &str) -> Details {
     }
     d.counterparty = name_parts.concat().trim().to_string();
     let joined = purpose_parts.concat();
+    d.purpose_code = sepa_purpose_code(&joined);
     d.purpose = sepa_purpose(&joined);
     d
 }
 
+/// SEPA purpose code from a `PURP+XXXX` keyword (some banks put it into `:86:`).
+fn sepa_purpose_code(text: &str) -> String {
+    text.find("PURP+")
+        .map(|p| &text[p + 5..])
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect::<String>()
+        })
+        .filter(|c| c.len() == 4)
+        .map(|c| c.to_ascii_uppercase())
+        .unwrap_or_default()
+}
+
 /// Extracts the human purpose ("SVWZ+") from SEPA keyword text if present.
 fn sepa_purpose(text: &str) -> String {
-    const KEYS: [&str; 9] = [
-        "EREF+", "KREF+", "MREF+", "CRED+", "DEBT+", "SVWZ+", "ABWA+", "ABWE+", "IBAN+",
+    const KEYS: [&str; 10] = [
+        "EREF+", "KREF+", "MREF+", "CRED+", "DEBT+", "SVWZ+", "ABWA+", "ABWE+", "IBAN+", "PURP+",
     ];
     if let Some(pos) = text.find("SVWZ+") {
         let rest = &text[pos + 5..];
@@ -223,6 +245,7 @@ pub fn parse(
                         .chars()
                         .skip(4)
                         .collect(),
+                    ..Default::default()
                 });
             }
             "86" => {
@@ -234,6 +257,8 @@ pub fn parse(
                     t.purpose = d.purpose;
                     t.counterparty = d.counterparty;
                     t.counterparty_iban = d.counterparty_iban;
+                    t.gvc = d.gvc;
+                    t.purpose_code = d.purpose_code;
                 }
             }
             _ => {}
@@ -258,6 +283,18 @@ mod tests {
     const SAMPLE: &str = ":20:STARTUMSE\r\n:25:52090000/0012345678\r\n:28C:00000/001\r\n:60F:C250101EUR1000,00\r\n\
 :61:2501020102DR23,45NDDTNONREF\r\n:86:105?00FOLGELASTSCHRIFT?20EREF+123 MREF+M1 CRED+DE1?21SVWZ+Einkauf REWE Markt?22 Kassel?30GENODEF1S08?31DE02520900000000000001?32REWE Markt GmbH\r\n\
 :61:2501030103CR2500,00NTRFNONREF\r\n:86:166?00GUTSCHRIFT?20SVWZ+Gehalt Januar?32Muster GmbH\r\n:62F:C250103EUR3476,55\r\n-\r\n";
+
+    #[test]
+    fn keeps_gvc_and_purpose_code() {
+        let d = parse_86("153?00LOHN/GEHALT?20SVWZ+Gehalt 10/2026 ?21PURP+SALA?32ACME GmbH");
+        assert_eq!(d.gvc, "153");
+        assert_eq!(d.purpose_code, "SALA");
+        assert_eq!(d.purpose, "Gehalt 10/2026");
+        let (txs, _) = parse(SAMPLE, "acc", "EUR");
+        assert_eq!(txs[0].gvc, "105");
+        assert_eq!(txs[1].gvc, "166");
+        assert!(parse_86("free text").gvc.is_empty());
+    }
 
     #[test]
     fn parses_sample() {

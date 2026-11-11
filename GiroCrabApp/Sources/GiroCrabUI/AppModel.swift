@@ -23,6 +23,8 @@ enum Period: String, CaseIterable, Identifiable {
     case last3Months = "Letzte 3 Monate"
     case thisQuarter = "Dieses Quartal"
     case thisYear = "Dieses Jahr"
+    /// Pay cycle: from the latest detected salary inflow (GitHub #37).
+    case sinceSalary = "Seit letztem Gehalt"
     var id: String { rawValue }
 
     var title: String {
@@ -33,6 +35,7 @@ enum Period: String, CaseIterable, Identifiable {
         case .last3Months: return String(localized: "Letzte 3 Monate")
         case .thisQuarter: return String(localized: "Dieses Quartal")
         case .thisYear: return String(localized: "Dieses Jahr")
+        case .sinceSalary: return String(localized: "Seit letztem Gehalt")
         }
     }
 
@@ -42,7 +45,8 @@ enum Period: String, CaseIterable, Identifiable {
         let startOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: now))!
         switch self {
         case .all: return (nil, nil)
-        case .thisMonth: return (DateText.iso(startOfMonth), nil)
+        // The salary start date lives in `AppModel.periodRange`; calendar month as fallback.
+        case .thisMonth, .sinceSalary: return (DateText.iso(startOfMonth), nil)
         case .lastMonth:
             let start = cal.date(byAdding: .month, value: -1, to: startOfMonth)!
             let end = cal.date(byAdding: .day, value: -1, to: startOfMonth)!
@@ -78,6 +82,14 @@ extension BookingScope {
         case .all: return String(localized: "Alle Buchungen")
         case .everyday: return String(localized: "Alltag & Konsum")
         case .investments: return String(localized: "Sparpläne & Perks")
+        }
+    }
+    /// Short labels for narrow (compact) screens.
+    var shortTitle: String {
+        switch self {
+        case .all: return String(localized: "Alle")
+        case .everyday: return String(localized: "Alltag")
+        case .investments: return String(localized: "Sparpläne")
         }
     }
     static let ordered: [BookingScope] = [.all, .everyday, .investments]
@@ -214,7 +226,7 @@ public final class AppModel {
     private var logoCache: [String: (image: Image, pixels: Int)] = [:]
 
     // UI state
-    var sidebarSelection: SidebarItem? = .allAccounts { didSet { listLimit = Self.defaultListLimit; reloadBookings(); reloadHistory() } }
+    var sidebarSelection: SidebarItem? = .allAccounts { didSet { listLimit = Self.defaultListLimit; refreshSalaryCycle(); refreshRecurring(); reloadBookings(); reloadHistory() } }
     var scope: BookingScope = .all {
         didSet {
             guard scope != oldValue else { return }
@@ -222,10 +234,30 @@ public final class AppModel {
             reloadScopeBookings()
         }
     }
-    var period: Period = .all { didSet { listLimit = Self.defaultListLimit; reloadCategories(); reloadBookings(); reloadHistory() } }
+    var period: Period = .all { didSet { listLimit = Self.defaultListLimit; refreshSalaryCycle(); reloadCategories(); reloadBookings(); reloadHistory() } }
+    /// Latest salary of the selected accounts; start of the `.sinceSalary` period.
+    var salaryCycle: SalaryCycle?
+    /// Recurring series of the selected accounts (GitHub #35).
+    var recurring: [RecurringSeries] = []
+    /// Recurring bookings of the current month: booked vs. still due.
+    var recurringMonth: RecurringMonthOverview?
+    var showRecurringSheet = false
+    /// Series hidden with "Nicht wiederkehrend" (can be shown again).
+    var recurringHidden: [IgnoredRecurring] = []
+    /// Booking whose custom recurrence dates are being edited.
+    var customRecurringBooking: Booking?
     var statusFilter: StatusFilter = .all
     var searchText: String = "" { didSet { scheduleSearch() } }
-    var selectedBookingID: Booking.ID? { didSet { reloadMerchantStats() } }
+    var selectedBookingID: Booking.ID? {
+        didSet {
+            if stickyBooking?.id != selectedBookingID { stickyBooking = nil }
+            reloadMerchantStats()
+        }
+    }
+    /// A booking that left the filtered list because the user just edited it
+    /// (e.g. "kein Gehalt" in the salary period). It stays selected and visible
+    /// in the inspector until the user selects something else, like in Mail.
+    private var stickyBooking: Booking?
     /// iPhone: set by a tap on a booking row, presents the detail sheet.
     var showBookingSheet = false
     var collapsedGroups: Set<Int64> = Set(UserDefaults.standard.array(forKey: "sidebar.collapsedKindGroups") as? [Int64] ?? []) {
@@ -310,6 +342,11 @@ public final class AppModel {
             openFreshVault()
             return
         }
+        if !options.demoSeed && !Self.vaultMayHoldRealData {
+            // First start / nothing real yet: straight into the demo, no lock, no prompt.
+            openDemoVault()
+            return
+        }
         if options.demoSeed {
             openDemoVault()
             switch options.initialView {
@@ -358,6 +395,8 @@ public final class AppModel {
                 detectedCategories: ["Haushalt > Lebensmittel", "Gehalt", "Steuern", "Wohnen > Miete", "Mobilität > Tanken", "Freizeit > Restaurants", "Versicherungen", "Reisen"],
                 sampleBookings: [], suggestedAccountName: "MoneyMoney-Archiv")
             showMoneyMoneyImport = true
+        case "recurring":
+            showRecurringSheet = true
         case "moneymoney-db":
             #if os(macOS)
             demoDbPreview = Self.demoMoneyMoneyDbPreview(existingGiro: allAccounts.first { $0.kind == .checking })
@@ -390,6 +429,7 @@ public final class AppModel {
             let v = try Vault.open(path: url.path, key: key)
             _ = try v.seedDemoData()
             vault = v
+            lockPreview = false
             demoActive = true
             vaultState = .open
             selectedBookingID = nil
@@ -445,6 +485,8 @@ public final class AppModel {
 
     func unlock() {
         guard vaultState != .unlocking else { return }
+        demoDismissedLock = false
+        lockPreview = false
         vaultState = .unlocking
         Task {
             do {
@@ -457,6 +499,7 @@ public final class AppModel {
                 self.ownVault = v
                 if try v.accountCount() == 0 && self.connectionsExist(v) == false {
                     // Nothing synced yet: show demo bookings so the UI can be judged.
+                    UserDefaults.standard.set(false, forKey: Self.realDataKey)
                     self.openDemoVault()
                     self.toast = String(localized: "Ihr Tresor ist noch leer – Sie sehen Demo-Daten")
                 } else {
@@ -467,7 +510,12 @@ public final class AppModel {
                         await self.performSyncOrAutoAdopt(vault: v, key: key)
                     }
             } catch {
-                self.vaultState = .failed(describe(error))
+                if self.ownVault == nil && !Self.vaultMayHoldRealData {
+                    // Cancelled before any real data exists: back to the demo, never a dead end.
+                    self.openDemoVault()
+                } else {
+                    self.vaultState = .failed(describe(error))
+                }
             }
         }
     }
@@ -536,6 +584,7 @@ public final class AppModel {
     private func useVault(_ v: Vault, demo: Bool) {
         vault = v
         demoActive = demo
+        if !demo { UserDefaults.standard.set(true, forKey: Self.realDataKey) }
         vaultState = .open
         selectedBookingID = nil
         sidebarSelection = .allAccounts
@@ -561,8 +610,41 @@ public final class AppModel {
         }
     }
 
+    /// Set when the user left the demo to the lock screen: no automatic prompt then.
+    var demoDismissedLock = false
+
+    private static let realDataKey = "girocrab.hasRealData"
+
+    /// Real data may exist in the (encrypted, hence unreadable while locked) vault.
+    /// Without a stored answer, an existing vault file counts as real data.
+    static var vaultMayHoldRealData: Bool {
+        if let v = UserDefaults.standard.object(forKey: realDataKey) as? Bool { return v }
+        return FileManager.default.fileExists(atPath: vaultURL.path)
+    }
+
+    /// The personal vault is what is shown (not the demo): must be locked in the background.
+    var holdsRealData: Bool { ownVault != nil && !demoActive }
+
+    /// Demo only: shows the lock screen once so the protection can be tried out.
+    /// Unlocking afterwards opens the personal vault (or comes back to the demo while it is empty).
+    var lockPreview = false
+    func previewLock() {
+        guard demoActive, ownVault == nil, !Self.vaultMayHoldRealData else { return }
+        lockPreview = true
+        demoDismissedLock = true
+        vaultState = .locked
+    }
+
+    /// Leaves the lock-screen preview back to the demo (never offered with real data).
+    func endLockPreview() {
+        guard lockPreview, !Self.vaultMayHoldRealData else { return }
+        lockPreview = false
+        openDemoVault()
+    }
+
     func lock() {
-        guard ownVault != nil else { return }
+        guard holdsRealData else { return }
+        demoDismissedLock = true
         scopeLoadTask?.cancel()
         stopAutoSync()
         ownVault = nil
@@ -577,6 +659,9 @@ public final class AppModel {
 
     func reloadAll() {
         reloadAccounts()
+        refreshSalaryCycle()
+        refreshRecurring()
+        mirrorDocumentsIfEnabled()
         reloadHistory()
         reloadCategories()
         reloadBookings()
@@ -601,7 +686,7 @@ public final class AppModel {
 
     func reloadCategories() {
         guard let vault else { return }
-        let (from, to) = period.range
+        let (from, to) = periodRange
         run {
             categories = try vault.listCategories(dateFrom: from, dateTo: to)
             categoryTree = Self.buildTree(categories)
@@ -656,7 +741,7 @@ public final class AppModel {
     }
 
     var currentFilter: BookingFilter {
-        let (from, to) = period.range
+        let (from, to) = periodRange
         var accountIDs: [Int64] = []
         var category: Int64?
         var uncategorized = false
@@ -705,7 +790,7 @@ public final class AppModel {
             page = p
             bookings = p.transactions
         }
-        if let sel = selectedBookingID, !bookings.contains(where: { $0.id == sel }) {
+        if let sel = selectedBookingID, !bookings.contains(where: { $0.id == sel }), stickyBooking?.id != sel {
             selectedBookingID = bookings.first?.id
         }
         reloadSelectionKPIs()
@@ -749,7 +834,7 @@ public final class AppModel {
     /// period and account/group (no account selected = all accounts).
     func reloadSelectionKPIs() {
         guard let vault else { selectionFlow = nil; return }
-        let (from, to) = period.range
+        let (from, to) = periodRange
         let filter = BookingFilter(
             accountIds: currentFilter.accountIds, categoryId: nil, includeSubcategories: true, uncategorizedOnly: false,
             search: nil, dateFrom: from, dateTo: to, limit: 0, offset: 0,
@@ -783,7 +868,7 @@ public final class AppModel {
         if ids.isEmpty { ids = [-1] }
         // The chart follows the selected period. "Gesamter Zeitraum": up to ~15 years back,
         // then the flat lead-in before the first booking is cut off.
-        let (from, to) = period.range
+        let (from, to) = periodRange
         let today = Calendar.current.startOfDay(for: Date())
         let start = from.flatMap(DateText.date) ?? Calendar.current.date(byAdding: .year, value: -15, to: today)!
         let days = max(2, (Calendar.current.dateComponents([.day], from: start, to: today).day ?? 120) + 1)
@@ -818,6 +903,185 @@ public final class AppModel {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
             self?.reloadBookings()
+        }
+    }
+
+    // MARK: - Pay cycle (GitHub #37)
+
+    /// Accounts of the sidebar selection; empty = all accounts.
+    private var selectionAccountIDs: [Int64] {
+        switch sidebarSelection {
+        case .account(let id): return [id]
+        case .group(let gid): return groups.first(where: { $0.id == gid })?.accounts.map(\.id) ?? []
+        case .userGroup(let uuid): return userGroupAccountIDs(uuid)
+        default: return []
+        }
+    }
+
+    /// Date range of the selected period; `.sinceSalary` starts at the latest salary.
+    var periodRange: (String?, String?) {
+        if period == .sinceSalary, let c = salaryCycle { return (c.lastDate, nil) }
+        return period.range
+    }
+
+    /// Subtitle of the period-based KPI tiles.
+    var periodSubtitle: String {
+        guard period == .sinceSalary else { return period.title }
+        guard let c = salaryCycle else { return String(localized: "Monat (kein Gehalt)") }
+        return String(localized: "Seit Gehalt am \(DateText.medium(c.lastDate))")
+    }
+
+    func refreshSalaryCycle() {
+        guard let vault else { salaryCycle = nil; return }
+        let ids = selectionAccountIDs
+        run { salaryCycle = try vault.salaryCycle(accountIds: ids) }
+    }
+
+    /// `true` = salary, `false` = never salary, `nil` = automatic detection.
+    func setSalaryFlag(_ booking: Booking, _ flag: Bool?) {
+        guard let vault else { return }
+        run { try vault.setBookingSalaryFlag(bookingId: booking.id, flag: flag) }
+        // keep the edited booking selected even if it leaves the period
+        if selectedBookingID == booking.id { stickyBooking = freshBooking(booking) }
+        refreshSalaryCycle()
+        if period == .sinceSalary { reloadCategories(); reloadHistory() }
+        reloadBookings()
+    }
+
+    /// Re-reads one booking from the vault (independent of the list filter).
+    private func freshBooking(_ b: Booking) -> Booking? {
+        guard let vault else { return nil }
+        let f = BookingFilter(accountIds: [b.accountId], categoryId: nil, includeSubcategories: true, uncategorizedOnly: false,
+                              search: nil, dateFrom: b.bookingDate, dateTo: b.bookingDate, limit: 0, offset: 0,
+                              scope: .all, merchantKey: nil)
+        return (try? vault.listTransactions(filter: f))?.transactions.first { $0.id == b.id }
+    }
+
+    // MARK: - PDF statements & document folder (GitHub #57)
+
+    private static let mirrorDirKey = "documents.mirrorDir"
+    /// Folder that receives a copy of every document (nil = off). Per Mac, not per vault.
+    var documentMirrorPath: String? = UserDefaults.standard.string(forKey: "documents.mirrorDir")
+    /// Result of the latest mirror run, for the settings.
+    var documentMirrorStatus: String?
+    private var mirrorRunning = false
+
+    /// Suggested mirror folder: iCloud Drive/GiroCrab/Kontoauszüge (if iCloud Drive exists).
+    static var suggestedMirrorURL: URL? {
+        #if os(macOS)
+        let docs = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: docs.path) else { return nil }
+        return docs.appendingPathComponent("GiroCrab/Kontoauszüge", isDirectory: true)
+        #else
+        return nil
+        #endif
+    }
+
+    /// Turns the document folder on (all documents are copied once) or off.
+    func setDocumentMirror(_ url: URL?) {
+        if let url {
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            documentMirrorPath = url.path
+            UserDefaults.standard.set(url.path, forKey: Self.mirrorDirKey)
+            if let vault { run { try vault.resetDocumentMirror() } }
+            mirrorDocumentsIfEnabled()
+        } else {
+            documentMirrorPath = nil
+            documentMirrorStatus = nil
+            UserDefaults.standard.removeObject(forKey: Self.mirrorDirKey)
+        }
+    }
+
+    /// Copies documents that are not in the folder yet (after syncs, imports, drops).
+    func mirrorDocumentsIfEnabled() {
+        guard let vault, let dir = documentMirrorPath, !isDemo, !mirrorRunning else { return }
+        mirrorRunning = true
+        Task { @MainActor [weak self] in
+            let result: Result<UInt32, Error> = await Task.detached(priority: .utility) {
+                Result { try vault.mirrorNewDocuments(destDir: dir) }
+            }.value
+            guard let self else { return }
+            mirrorRunning = false
+            switch result {
+            case .success(let n):
+                let time = Date().formatted(date: .omitted, time: .shortened)
+                documentMirrorStatus = n == 0
+                    ? String(localized: "Aktuell (geprüft \(time))")
+                    : String(localized: "\(n) Dokument(e) gesichert (\(time))")
+            case .failure(let e):
+                documentMirrorStatus = describe(e)
+            }
+        }
+    }
+
+    func autoStatements(_ account: Account) -> Bool {
+        guard let vault else { return false }
+        return (try? vault.autoStatementsEnabled(accountId: account.id)) ?? false
+    }
+
+    func setAutoStatements(_ account: Account, _ on: Bool) {
+        guard let vault else { return }
+        run { try vault.setAutoStatements(accountId: account.id, enabled: on) }
+    }
+
+    // MARK: - Recurring bookings (GitHub #35)
+
+    func refreshRecurring() {
+        guard let vault else { recurring = []; recurringMonth = nil; return }
+        let ids = selectionAccountIDs
+        let c = Calendar(identifier: .gregorian).dateComponents([.year, .month], from: Date())
+        run {
+            recurring = try vault.listRecurring(accountIds: ids)
+            recurringHidden = try vault.listIgnoredRecurring(accountIds: ids)
+            recurringMonth = try vault.recurringMonth(accountIds: ids, year: Int32(c.year ?? 2026), month: UInt32(c.month ?? 1))
+        }
+    }
+
+    /// The recurring series a booking belongs to, if any.
+    func recurringSeries(for b: Booking) -> RecurringSeries? {
+        guard !b.recurrenceKey.isEmpty else { return nil }
+        return recurring.first { s in
+            s.baseKey == b.recurrenceKey
+                && (!s.amountSpecific || abs(b.amountCents - s.amountCents) * 100 <= abs(s.amountCents) * 15)
+        }
+    }
+
+    func markRecurring(_ b: Booking, _ interval: RecurrenceInterval, customDates: [String] = []) {
+        guard let vault else { return }
+        run { try vault.markBookingRecurring(bookingId: b.id, interval: interval, customDates: customDates) }
+        refreshRecurring()
+    }
+
+    /// "Nicht wiederkehrend" for a detected or marked series.
+    func ignoreRecurring(_ s: RecurringSeries) {
+        guard let vault else { return }
+        run { try vault.ignoreRecurring(seriesKey: s.seriesKey) }
+        refreshRecurring()
+    }
+
+    /// Back to automatic detection (also shows a hidden series again).
+    func resetRecurring(_ s: RecurringSeries) { resetRecurring(key: s.seriesKey) }
+
+    func resetRecurring(key: String) {
+        guard let vault else { return }
+        run { try vault.resetRecurring(seriesKey: key) }
+        refreshRecurring()
+    }
+
+    /// Selects a booking in the list, widening the period if it is outside of it.
+    func revealBooking(_ id: Int64) {
+        if !bookings.contains(where: { $0.id == id }) {
+            sidebarSelection = .allAccounts
+            period = .all
+            searchText = ""
+        }
+        // After a closing sheet / list reload, so the list can scroll to the row.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard let self else { return }
+            if selectedBookingID == id { selectedBookingID = nil }
+            selectedBookingID = id
         }
     }
 
@@ -970,7 +1234,7 @@ public final class AppModel {
 
     var selectedBooking: Booking? {
         guard let id = selectedBookingID else { return nil }
-        return bookings.first { $0.id == id }
+        return bookings.first { $0.id == id } ?? (stickyBooking?.id == id ? stickyBooking : nil)
     }
 
     var allAccounts: [Account] { groups.flatMap(\.accounts) }

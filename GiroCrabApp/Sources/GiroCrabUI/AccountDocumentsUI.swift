@@ -41,6 +41,11 @@ struct AccountDocumentsSheet: View {
                 Button("Fertig") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .padding()
+            if model.canFetchStatements(account) {
+                AutoStatementsToggle(account: account)
+                    .padding(.horizontal)
+                    .padding(.bottom, 10)
+            }
             Divider()
             if docs.isEmpty {
                 ContentUnavailableView(
@@ -73,6 +78,26 @@ struct AccountDocumentsSheet: View {
         .frame(minWidth: 520, minHeight: 440)
         #endif
         .sheet(item: $preview) { d in DocumentPreviewSheet(doc: d) }
+    }
+}
+
+/// Opt-in: fetch this account's PDF statements during regular syncs (GitHub #57).
+struct AutoStatementsToggle: View {
+    @Environment(AppModel.self) private var model
+    let account: Account
+    @State private var on = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle("Kontoauszüge automatisch beim Sync abrufen", isOn: $on)
+                .onChange(of: on) { _, new in model.setAutoStatements(account, new) }
+            Text("Höchstens einmal pro Woche. Je nach Bank ist dafür eine zusätzliche TAN nötig. Ist ein Dokumentenordner eingestellt, landen die PDFs auch dort.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { on = model.autoStatements(account) }
     }
 }
 

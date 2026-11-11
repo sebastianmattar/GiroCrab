@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS booking_documents (
     pdf_bytes   BLOB    NOT NULL,
     source_url  TEXT    NOT NULL DEFAULT '',
     doc_date    TEXT    NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    exported_at INTEGER                                -- copied to the mirror folder (GitHub #57)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS booking_documents_source ON booking_documents(source_url) WHERE source_url != '';
 CREATE INDEX IF NOT EXISTS booking_documents_booking ON booking_documents(booking_id);
@@ -680,6 +681,102 @@ impl Vault {
     }
 }
 
+/// File name of a document in the mirror folder: `<Datum>_<Händler>_<Titel>.<ext>`.
+fn mirror_file_name(d: &DocumentInfo) -> String {
+    let ext = match d.mime_type.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/heic" => "heic",
+        _ => "pdf",
+    };
+    let who = d.booking_label.split(" · ").next().unwrap_or("");
+    let stem: Vec<&str> = [d.doc_date.as_str(), who, d.title.as_str()]
+        .into_iter()
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    let mut file = safe_name(&stem.join("_"));
+    if file.is_empty() {
+        file = format!("Dokument_{}", d.id);
+    }
+    file.truncate(120);
+    format!("{file}.{ext}")
+}
+
+#[uniffi::export]
+impl Vault {
+    /// Copies every document not mirrored yet into
+    /// `dest_dir/<Konto>/<Jahr>/<Datum>_<Händler>_<Titel>.pdf` (GitHub #57,
+    /// e.g. a folder in iCloud Drive). Existing files are never overwritten.
+    /// Returns the number of files written.
+    pub fn mirror_new_documents(&self, dest_dir: String) -> Result<u32, CoreError> {
+        let base = std::path::Path::new(&dest_dir);
+        if dest_dir.trim().is_empty() || !base.is_dir() {
+            return Err(CoreError::InvalidInput {
+                message: trf("Ordner nicht gefunden: {0}", &[&dest_dir]),
+            });
+        }
+        let pending: HashSet<i64> = {
+            let db = self.db()?;
+            let mut st =
+                db.prepare("SELECT id FROM booking_documents WHERE exported_at IS NULL")?;
+            let ids = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            ids
+        };
+        if pending.is_empty() {
+            return Ok(0);
+        }
+        let io = |e: std::io::Error| CoreError::InvalidInput {
+            message: format!("{e}"),
+        };
+        let mut written = 0u32;
+        for d in self
+            .list_all_documents(DocumentFilter::default())?
+            .into_iter()
+            .filter(|d| pending.contains(&d.id))
+        {
+            let account = if d.account_name.trim().is_empty() {
+                tr("Ohne Konto").to_string()
+            } else {
+                safe_name(&d.account_name)
+            };
+            let year = d.doc_date.get(..4).unwrap_or(tr("ohne-Datum")).to_string();
+            let dir = base.join(account).join(year);
+            std::fs::create_dir_all(&dir).map_err(io)?;
+            let bytes = self.get_document_bytes(d.id)?;
+            let name = mirror_file_name(&d);
+            let (stem, ext) = name.rsplit_once('.').unwrap_or((name.as_str(), "pdf"));
+            let mut target = dir.join(&name);
+            let mut k = 2;
+            let mut already = false;
+            while target.exists() {
+                // same file from an earlier mirror run (e.g. after a folder reset)
+                if std::fs::read(&target).map(|b| b == bytes).unwrap_or(false) {
+                    already = true;
+                    break;
+                }
+                target = dir.join(format!("{stem}_{k}.{ext}"));
+                k += 1;
+            }
+            if !already {
+                std::fs::write(&target, &bytes).map_err(io)?;
+                written += 1;
+            }
+            self.db()?.execute(
+                "UPDATE booking_documents SET exported_at = strftime('%s','now') WHERE id = ?1",
+                [d.id],
+            )?;
+        }
+        Ok(written)
+    }
+
+    /// Marks all documents as not mirrored (new mirror folder chosen).
+    pub fn reset_document_mirror(&self) -> Result<(), CoreError> {
+        self.db()?
+            .execute("UPDATE booking_documents SET exported_at = NULL", [])?;
+        Ok(())
+    }
+}
+
 // ------------------------------------------------------------------ demo PDFs
 
 /// Minimal valid one-page PDF (Helvetica) – used for demo receipts.
@@ -842,5 +939,58 @@ mod pdf_limit_tests {
         let pdf = pdf_with(&vec![one; MAX_PDF_STREAMS + 50]);
         let n = extract_pdf_text(&pdf).matches("Tick").count();
         assert_eq!(n, MAX_PDF_STREAMS);
+    }
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+
+    #[test]
+    fn mirrors_each_document_once_into_account_and_year_folders() {
+        let root = std::env::temp_dir().join(format!("gc-mirror-{}", std::process::id()));
+        let out = root.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let v = Vault::open(root.join("v.db").to_string_lossy().into(), vec![9u8; 32]).unwrap();
+        let pdf = simple_pdf(&["Kontoauszug".into()]);
+        {
+            let c = v.db().unwrap();
+            c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
+                .unwrap();
+            c.execute(
+                "INSERT INTO accounts(group_id, external_ref, name) VALUES ((SELECT id FROM account_groups), 'A', 'Giro/Konto')",
+                [],
+            )
+            .unwrap();
+            let acc = c.last_insert_rowid();
+            for (src, date) in [("s1", "2026-09-30"), ("s2", "2026-10-31")] {
+                insert_doc(
+                    &c,
+                    None,
+                    Some(acc),
+                    "Kontoauszug",
+                    "kontoauszug",
+                    "application/pdf",
+                    "k.pdf",
+                    &pdf,
+                    src,
+                    date,
+                )
+                .unwrap();
+            }
+        }
+        let dest = out.to_string_lossy().to_string();
+        assert!(v.mirror_new_documents("/nonexistent/gc".into()).is_err());
+        assert_eq!(v.mirror_new_documents(dest.clone()).unwrap(), 2);
+        let year = out.join("Giro_Konto").join("2026");
+        assert!(year.join("2026-09-30_Kontoauszug.pdf").is_file());
+        assert!(year.join("2026-10-31_Kontoauszug.pdf").is_file());
+        // nothing new -> nothing written; after a reset identical files are kept, not duplicated
+        assert_eq!(v.mirror_new_documents(dest.clone()).unwrap(), 0);
+        v.reset_document_mirror().unwrap();
+        assert_eq!(v.mirror_new_documents(dest).unwrap(), 0);
+        assert_eq!(std::fs::read_dir(&year).unwrap().count(), 2);
+        drop(v);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

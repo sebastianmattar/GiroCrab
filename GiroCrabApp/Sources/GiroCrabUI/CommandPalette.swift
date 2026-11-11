@@ -31,6 +31,8 @@ struct CommandPaletteView: View {
         }
         out.append(Item(title: String(localized: "Alle Konten abrufen"), subtitle: "\(action) · ⇧⌘R", symbol: "arrow.triangle.2.circlepath") { model.requestSyncAll() })
         out.append(Item(title: String(localized: "Regeln bearbeiten"), subtitle: action, symbol: "wand.and.stars") { model.openRuleEditor() })
+        out.append(Item(title: String(localized: "Wiederkehrende Buchungen"), subtitle: "\(action) · ⇧⌘F", symbol: "repeat") { model.showRecurringSheet = true })
+        out.append(Item(title: String(localized: "Zeitraum: Seit letztem Gehalt"), subtitle: String(localized: "Ansicht"), symbol: "banknote") { model.period = .sinceSalary })
         if let b = model.selectedBooking {
             out.append(Item(title: String(localized: "„\(b.merchant.name)“ kategorisieren"), subtitle: "\(action) · C", symbol: "tag") { model.showCategorizer = true })
             out.append(Item(title: String(localized: "Regel für „\(b.merchant.name)“ erstellen"), subtitle: "\(action) · R", symbol: "wand.and.stars") { model.openRuleEditor(from: b) })

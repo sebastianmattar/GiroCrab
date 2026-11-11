@@ -131,6 +131,12 @@ struct Entry {
     creditor: String,
     debtor_iban: String,
     creditor_iban: String,
+    /// `TxDtls/Purp/Cd` (SEPA purpose code, e.g. SALA).
+    purpose_code: String,
+    /// `BkTxCd/Domn/Fmly/SubFmlyCd` (ISO bank transaction sub-family, e.g. SALA).
+    sub_family: String,
+    /// `BkTxCd/Prtry/Cd` (DK format `NTRF+153+…`).
+    proprietary: String,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -138,6 +144,17 @@ pub struct CamtReport {
     pub closing_balance_cents: Option<i64>,
     pub closing_date: Option<String>,
     pub currency: Option<String>,
+}
+
+/// Geschäftsvorfallcode from a DK proprietary bank transaction code
+/// (`NTRF+153+931` → `153`).
+fn dk_gvc(proprietary: &str) -> String {
+    proprietary
+        .split('+')
+        .nth(1)
+        .filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()))
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn ends_with(stack: &[String], tail: &[&str]) -> bool {
@@ -251,6 +268,18 @@ pub fn parse(xml: &str, account_ref: &str) -> (Vec<RemoteTransaction>, CamtRepor
                     e.end_to_end = text;
                 } else if ends_with(&stack, &["Refs", "MndtId"]) {
                     e.mandate = text;
+                } else if ends_with(&stack, &["Purp", "Cd"]) {
+                    if e.purpose_code.is_empty() {
+                        e.purpose_code = text.trim().to_ascii_uppercase();
+                    }
+                } else if ends_with(&stack, &["BkTxCd", "Domn", "Fmly", "SubFmlyCd"]) {
+                    if e.sub_family.is_empty() {
+                        e.sub_family = text.trim().to_ascii_uppercase();
+                    }
+                } else if ends_with(&stack, &["BkTxCd", "Prtry", "Cd"]) {
+                    if e.proprietary.is_empty() {
+                        e.proprietary = text.trim().to_string();
+                    }
                 } else if ends_with(&stack, &["RmtInf", "Ustrd"]) {
                     e.remittance.push(text);
                 } else if has(&stack, "RltdPties")
@@ -319,6 +348,12 @@ pub fn parse(xml: &str, account_ref: &str) -> (Vec<RemoteTransaction>, CamtRepor
             counterparty_iban: iban,
             purpose: purpose.trim().to_string(),
             booking_text: e.booking_text.clone(),
+            purpose_code: if e.purpose_code.is_empty() && e.sub_family == "SALA" {
+                "SALA".into()
+            } else {
+                e.purpose_code.clone()
+            },
+            gvc: dk_gvc(&e.proprietary),
         };
         let key = format!(
             "{}{}{}{}",
@@ -349,6 +384,7 @@ mod tests {
    <Amt Ccy="EUR">31.96</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts><Cd>BOOK</Cd></Sts>
    <BookgDt><Dt>2026-11-07</Dt></BookgDt><ValDt><Dt>2026-11-07</Dt></ValDt>
    <AcctSvcrRef>2026110712345</AcctSvcrRef>
+   <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>CCRD</Cd><SubFmlyCd>POSD</SubFmlyCd></Fmly></Domn><Prtry><Cd>NMSC+106+931</Cd><Issr>DK</Issr></Prtry></BkTxCd>
    <AddtlNtryInf>Kartenzahlung</AddtlNtryInf>
    <NtryDtls><TxDtls>
      <Refs><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
@@ -363,6 +399,7 @@ mod tests {
      <Refs><EndToEndId>NT-2026-10</EndToEndId><MndtId>M-1</MndtId></Refs>
      <RltdPties><Dbtr><Nm>Nordhessen Technik GmbH</Nm></Dbtr></RltdPties>
      <RmtInf><Ustrd>Gehalt Oktober</Ustrd></RmtInf>
+     <Purp><Cd>SALA</Cd></Purp>
    </TxDtls></NtryDtls>
   </Ntry>
   <Ntry><Amt Ccy="EUR">9.99</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts><Cd>PDNG</Cd></Sts><BookgDt><Dt>2026-11-09</Dt></BookgDt></Ntry>
@@ -387,5 +424,22 @@ mod tests {
             "EREF+NT-2026-10 MREF+M-1 SVWZ+Gehalt Oktober"
         );
         assert_eq!(rep.closing_balance_cents, Some(1_234_56));
+        // bank codes for salary detection (#37)
+        assert_eq!(txs[0].gvc, "106");
+        assert_eq!(txs[0].purpose_code, "");
+        assert_eq!(txs[1].purpose_code, "SALA");
+    }
+
+    #[test]
+    fn sala_sub_family_without_purpose() {
+        let xml = SAMPLE_08
+            .replace("<Purp><Cd>SALA</Cd></Purp>", "")
+            .replace(
+                "<Sts>BOOK</Sts>",
+                "<Sts>BOOK</Sts><BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>SALA</SubFmlyCd></Fmly></Domn><Prtry><Cd>NTRF+153+000</Cd></Prtry></BkTxCd>",
+            );
+        let (txs, _) = parse(&xml, "acc");
+        assert_eq!(txs[1].purpose_code, "SALA");
+        assert_eq!(txs[1].gvc, "153");
     }
 }

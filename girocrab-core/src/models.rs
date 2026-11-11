@@ -317,6 +317,16 @@ pub struct Booking {
     pub document_count: u32,
     /// Free-text user note (imported from MoneyMoney or typed in the detail view).
     pub note: String,
+    /// SEPA purpose code from the bank (e.g. `SALA`), "" = unknown.
+    pub purpose_code: String,
+    /// German Geschäftsvorfallcode from the bank (e.g. `153`), "" = unknown.
+    pub gvc: String,
+    /// User override: `Some(true)` = salary, `Some(false)` = never salary, `None` = automatic.
+    pub salary_flag: Option<bool>,
+    /// Detected (or marked) salary / pension inflow.
+    pub is_salary: bool,
+    /// Series key for recurring bookings (see `list_recurring`); "" = none.
+    pub recurrence_key: String,
 }
 
 /// Dry-run result of a MoneyMoney import (nothing stored).

@@ -462,6 +462,8 @@ fn map_transaction(t: &Value, account_ref: &str) -> RemoteTransaction {
             .as_str()
             .unwrap_or_default()
             .to_string(),
+        purpose_code: eb_purpose_code(t),
+        ..Default::default()
     };
     if rt.counterparty.is_empty() {
         rt.counterparty = rt
@@ -1348,6 +1350,7 @@ impl EnableBankingConnector {
                             .as_str()
                             .unwrap_or_default()
                             .to_string(),
+                        ..Default::default()
                     };
                     if rt.counterparty.is_empty() {
                         rt.counterparty = rt
@@ -1430,6 +1433,19 @@ impl EnableBankingConnector {
             ));
         }
         Ok(())
+    }
+}
+
+/// SEPA purpose code of an Enable Banking transaction (`purpose_code`, or the
+/// ISO bank transaction sub-family `SALA`).
+fn eb_purpose_code(t: &serde_json::Value) -> String {
+    let code = t["purpose_code"].as_str().unwrap_or_default().trim();
+    if code.len() == 4 {
+        return code.to_ascii_uppercase();
+    }
+    match t["bank_transaction_code"]["sub_code"].as_str() {
+        Some(c) if c.eq_ignore_ascii_case("SALA") => "SALA".into(),
+        _ => String::new(),
     }
 }
 

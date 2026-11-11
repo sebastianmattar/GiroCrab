@@ -685,6 +685,7 @@ impl BankConnector for TradeRepublicConnector {
                     } else {
                         subtitle
                     },
+                    ..Default::default()
                 });
             }
             cursor = page["cursors"]["after"].as_str().map(|s| s.to_string());
