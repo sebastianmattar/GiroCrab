@@ -25,7 +25,7 @@ final class OpeningBalanceTests: XCTestCase {
         return r.accountId
     }
 
-    func testOpeningBalanceDrivesTheSidebarBalance() throws {
+    func testOpeningBalanceDrivesTheSidebarBalance() async throws {
         let id = try importedAccount()
         XCTAssertEqual(model.account(for: id)?.balanceDerived, true)
 
@@ -38,7 +38,8 @@ final class OpeningBalanceTests: XCTestCase {
         XCTAssertEqual(model.account(for: id)?.openingBalanceDate, "2024-02-01")
 
         // "Kalibrieren" in the sheet: target − bookings since the date; nothing stored
-        let preview = try model.previewOpeningBalance(id, date: "2024-02-01")
+        let loaded = try await model.previewOpeningBalance(id, date: "2024-02-01")
+        let preview = try XCTUnwrap(loaded)
         XCTAssertEqual(preview.sumCents, 20_00)
         XCTAssertEqual([preview.counted, preview.older], [1, 1])
         XCTAssertEqual(model.account(for: id)?.openingBalanceCents, 1_000_00)

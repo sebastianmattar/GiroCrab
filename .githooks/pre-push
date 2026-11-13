@@ -3,3 +3,4 @@
 # Aktivieren: git config core.hooksPath .githooks
 cargo fmt --all -- --check || { echo "pre-push: cargo fmt --all ausführen und erneut pushen." >&2; exit 1; }
 scripts/fints-registrierung.sh scan >/dev/null || { echo "pre-push: scripts/fints-registrierung.sh scan meldet eine eingecheckte Produkt-ID." >&2; exit 1; }
+scripts/lint-vault-access.sh >/dev/null || { echo "pre-push: Vault-Zugriff aus einer View – über AppModel (vaultOffMain/isUnlocked) gehen." >&2; exit 1; }

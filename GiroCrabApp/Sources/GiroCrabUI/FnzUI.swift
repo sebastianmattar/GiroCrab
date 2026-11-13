@@ -153,25 +153,19 @@ struct FnzWebSheet: View {
         running = true
         notice = nil
         task = Task {
-            guard let vault = model.vault else { running = false; return }
-            defer {
-                // PDFs are committed individually; flush them on success,
-                // cancellation and partial failure before a vault file copy.
-                try? vault.checkpoint()
-                running = false
-                model.documentsVersion += 1
-                model.reloadAll()
-            }
+            // Pinned: a lock or demo switch mid-run must not send later steps to another vault.
+            guard let pin = model.pinVault() else { running = false; return }
+            let connectionId = connection.id
             do {
                 progress = String(localized: "Kontosalden und Depotwerte abrufen …")
                 let overview = try await run(FnzScripts.overview)
-                let summary = try vault.importFnzOverview(connectionId: connection.id, overviewJson: overview)
+                let summary = try await pin.run { try $0.importFnzOverview(connectionId: connectionId, overviewJson: overview) }
                 var downloaded = 0
                 var failed = 0
                 if includeDocuments {
                     progress = String(localized: "Postkorb und Archiv auflisten …")
                     let list = try await run(FnzScripts.documents)
-                    let pending = try vault.pendingFnzDocuments(connectionId: connection.id, documentsJson: list)
+                    let pending = try await pin.run { try $0.pendingFnzDocuments(connectionId: connectionId, documentsJson: list) }
                     var consecutiveFailures = 0
                     for (i, metadata) in pending.enumerated() {
                         try Task.checkCancellation()
@@ -182,7 +176,7 @@ struct FnzWebSheet: View {
                                   let id = doc["id"] as? String else { throw FnzError.unreadable }
                             let b64 = try await run(FnzScripts.pdf, arguments: ["id": id])
                             guard let bytes = Data(base64Encoded: b64) else { throw FnzError.unreadable }
-                            if try vault.importFnzDocument(connectionId: connection.id, documentJson: metadata, bytes: bytes) {
+                            if try await pin.run({ try $0.importFnzDocument(connectionId: connectionId, documentJson: metadata, bytes: bytes) }) {
                                 downloaded += 1
                             }
                             consecutiveFailures = 0
@@ -206,6 +200,12 @@ struct FnzWebSheet: View {
             } catch {
                 notice = describe(error)
             }
+            // PDFs are committed individually; flush them on success, cancellation and
+            // partial failure before a vault file copy – in the vault they were written to.
+            await pin.checkpoint()
+            running = false
+            model.documentsVersion += 1
+            model.reloadAll()
         }
     }
 }

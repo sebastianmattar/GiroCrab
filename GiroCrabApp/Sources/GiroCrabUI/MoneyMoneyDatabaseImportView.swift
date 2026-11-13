@@ -897,18 +897,18 @@ struct MoneyMoneyDatabaseImportView: View {
 
     /// Reads the database; `stay` = keep the current step (statements folder changed).
     private func loadPreview(stay: Bool = false) {
-        guard let vault = model.vault, let url = fileURL else { return }
+        guard let url = fileURL else { return }
         let statements = statementsURL
         let pw = password
         loading = true; error = nil
         Task {
-            let result = await Task.detached { () -> Result<MoneyMoneyDbPreview, Error> in
-                let ok = url.startAccessingSecurityScopedResource()
-                defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                let ok2 = statements?.startAccessingSecurityScopedResource() ?? false
-                defer { if ok2 { statements?.stopAccessingSecurityScopedResource() } }
-                return Result { try vault.previewMoneymoneyDatabase(path: url.path, password: pw, statementsDir: statements?.path) }
-            }.value
+            let result = await Result(catchingAsync: {
+                try await model.requireVaultOffMain { vault in
+                    try withSecurityScope(url, statements) {
+                        try vault.previewMoneymoneyDatabase(path: url.path, password: pw, statementsDir: statements?.path)
+                    }
+                }
+            })
             loading = false
             switch result {
             case .success(let p):
@@ -921,7 +921,7 @@ struct MoneyMoneyDatabaseImportView: View {
     }
 
     private func runImport() {
-        guard let vault = model.vault, let url = fileURL, let preview else { return }
+        guard let url = fileURL, let preview else { return }
         error = nil
         if model.demoDbPreview != nil {
             // demo: nothing to read – show what the summary looks like
@@ -952,13 +952,13 @@ struct MoneyMoneyDatabaseImportView: View {
         let from = step
         step = .importing
         Task {
-            let result = await Task.detached { () -> Result<MoneyMoneyDbImportResult, Error> in
-                let ok = url.startAccessingSecurityScopedResource()
-                defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                let ok2 = statements?.startAccessingSecurityScopedResource() ?? false
-                defer { if ok2 { statements?.stopAccessingSecurityScopedResource() } }
-                return Result { try vault.importMoneymoneyDatabaseWithProgress(path: url.path, password: pw, options: options, observer: observer) }
-            }.value
+            let result = await Result(catchingAsync: {
+                try await model.requireVaultOffMain { vault in
+                    try withSecurityScope(url, statements) {
+                        try vault.importMoneymoneyDatabaseWithProgress(path: url.path, password: pw, options: options, observer: observer)
+                    }
+                }
+            })
             relay = nil
             // after a cancel or an error the assistant goes back, ready for another try
             let wasCancelled = cancelling
@@ -1048,6 +1048,15 @@ extension AccountKind {
         case .loan: return String(localized: "Darlehen")
         }
     }
+}
+
+/// Opens the security scope of the picked database and statements folder around `body`.
+private func withSecurityScope<T>(_ url: URL, _ statements: URL?, _ body: () throws -> T) rethrows -> T {
+    let ok = url.startAccessingSecurityScopedResource()
+    defer { if ok { url.stopAccessingSecurityScopedResource() } }
+    let ok2 = statements?.startAccessingSecurityScopedResource() ?? false
+    defer { if ok2 { statements?.stopAccessingSecurityScopedResource() } }
+    return try body()
 }
 
 extension AppModel {

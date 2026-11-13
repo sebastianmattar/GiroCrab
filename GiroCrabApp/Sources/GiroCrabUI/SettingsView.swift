@@ -18,34 +18,34 @@ struct SettingsView: View {
                 .tag(SettingsTab.general)
             BankConnectionsSettings()
                 .settingsPane(height: 520)
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("Banken", systemImage: "building.columns") }
                 .tag(SettingsTab.banks)
             AccountGroupsSettings()
                 .settingsPane(height: 560)
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("Kontogruppen", systemImage: "folder") }
                 .tag(SettingsTab.groups)
             CredentialsSettings()
                 .settingsPane(height: 560)
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("FinTS & API-Schlüssel", systemImage: "key.horizontal") }
                 .tag(SettingsTab.credentials)
             LogoSettings()
                 .settingsPane(height: 460)
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("Händler-Logos", systemImage: "photo.on.rectangle") }
                 .tag(SettingsTab.logos)
             #if os(macOS)
             DocumentFolderSettings()
                 .settingsPane(height: 420)
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("Dokumente", systemImage: "doc.on.doc") }
                 .tag(SettingsTab.documents)
             #endif
             SecuritySettings()
                 .settingsPane(height: 760)   // incl. "Sicherheitssperre für Bankverbindungen"
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 .tabItem { Label("Sicherheit", systemImage: "lock.shield") }
                 .tag(SettingsTab.security)
             #if os(macOS)
@@ -481,7 +481,7 @@ struct SecuritySettings: View {
                         }
                 }
                 #endif
-                LabeledContent("Datei", value: model.vault?.filePath() ?? "–")
+                LabeledContent("Datei", value: model.vaultFilePath ?? "–")
                     .textSelection(.enabled)
                 LabeledContent("Version", value: AppVersionDisplay.current(core: coreVersion()))
                     .textSelection(.enabled)

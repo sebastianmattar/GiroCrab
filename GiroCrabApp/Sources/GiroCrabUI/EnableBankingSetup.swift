@@ -186,11 +186,11 @@ struct EnableBankingSetupSection: View {
     }
 
     private func runCheck() async {
-        guard let vault = model.vault else { return }
+        guard model.isUnlocked else { return }
         checking = true
         defer { checking = false }
         do {
-            check = try await vault.checkEnableBankingApplication(
+            check = try await model.checkEnableBankingApplication(
                 applicationId: (values[idKey] ?? "").trimmingCharacters(in: .whitespaces),
                 privateKeyPem: values[pemKey] ?? "",
                 redirectUrl: redirect)

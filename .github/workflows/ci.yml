@@ -39,6 +39,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - name: Keine FinTS-Produkt-ID im Repo
         run: scripts/fints-registrierung.sh scan
+      - name: Kein Vault-Zugriff aus Views (nur über AppModel)
+        run: scripts/lint-vault-access.sh
       - name: Test FNZ portal browser scripts
         run: node --test scripts/test-fnz-portal.cjs
       - run: cargo clippy --workspace --all-targets -- -D warnings

@@ -1140,6 +1140,8 @@ public final class AppModel {
         merchantStatsTask?.cancel()
         merchantStatsCache = [:]
         searchTask?.cancel()
+        loanStore.loadTask?.cancel()
+        loanStore.loans = []; loanStore.linkByBooking = [:]
         stopAutoSync()
         endBankDialogsForLock()
         quickLookURL = nil
@@ -1624,8 +1626,50 @@ public final class AppModel {
         reloadHistory()
     }
 
+    /// Runs a core call against the open vault off the main thread. Returns `nil` when the
+    /// vault is locked or was swapped (lock, demo switch) while the read ran, so a
+    /// caller never publishes data from a vault that is no longer current.
+    /// Use this for every core call from UI code that may take longer than a frame.
+    func vaultOffMain<T: Sendable>(_ work: @escaping @Sendable (Vault) throws -> T) async throws -> T? {
+        guard let vault else { return nil }
+        let result = try await Self.offMain { try work(vault) }
+        guard self.vault === vault else { return nil }
+        return result
+    }
+
+    /// For writes and imports: throws when no vault is open, but always returns the
+    /// result of a call that ran – a committed write is never reported as failed just
+    /// because the vault was swapped meanwhile. Multi-step jobs use `pinVault()`.
+    func requireVaultOffMain<T: Sendable>(_ work: @escaping @Sendable (Vault) throws -> T) async throws -> T {
+        guard let pin = pinVault() else { throw CoreError.Database(message: "vault locked") }
+        return try await pin.run(work)
+    }
+
+    /// The open vault, bound for a job of several calls (FNZ import): every step and the
+    /// final checkpoint hit the vault the job started on, even if the user locks or
+    /// switches to the demo meanwhile. Check `isCurrent` before publishing results.
+    func pinVault() -> VaultPin? {
+        vault.map { VaultPin(vault: $0) }
+    }
+
+    /// Whether `pin` still refers to the open vault.
+    func isCurrent(_ pin: VaultPin) -> Bool { vault === pin.vault }
+
+    /// Whether a vault is open – what views check instead of touching `vault`.
+    var isUnlocked: Bool { vault != nil }
+
+    /// Validates Enable Banking credentials against the API (async core call).
+    func checkEnableBankingApplication(applicationId: String, privateKeyPem: String, redirectUrl: String) async throws -> EnableBankingAppCheck {
+        guard let vault else { throw CoreError.Database(message: "vault locked") }
+        return try await vault.checkEnableBankingApplication(applicationId: applicationId, privateKeyPem: privateKeyPem, redirectUrl: redirectUrl)
+    }
+
+    /// Path of the open vault file (Einstellungen › Tresor).
+    var vaultFilePath: String? { vault?.filePath() }
+
     /// Runs blocking core calls off the main thread; cancelling the caller cancels the work.
-    private nonisolated static func offMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+    /// File-private: UI code goes through `vaultOffMain` / `VaultPin`, which carry the vault.
+    fileprivate nonisolated static func offMain<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
         let job = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try work()
@@ -3870,5 +3914,30 @@ extension BookingFilter {
     /// narrowed subset), so its `flow` can stand in for `selectionFlow`.
     var listHasFlow: Bool {
         scope == .all && direction == .all && checked == nil && search == nil && categoryId == nil && !uncategorizedOnly
+    }
+}
+
+/// A vault bound to one job (see `AppModel.pinVault`). Views hold this instead of the
+/// vault itself; every call runs off the main thread.
+struct VaultPin: Sendable {
+    fileprivate let vault: Vault
+
+    func run<T: Sendable>(_ work: @escaping @Sendable (Vault) throws -> T) async throws -> T {
+        let vault = vault
+        return try await AppModel.offMain { try work(vault) }
+    }
+
+    /// Flushes the WAL into the vault file (before a file copy, after bulk imports).
+    /// Not cancellable: it must also run after a cancelled job.
+    func checkpoint() async {
+        let vault = vault
+        await Task.detached(priority: .userInitiated) { try? vault.checkpoint() }.value
+    }
+}
+
+extension Result where Failure == Error {
+    /// Async counterpart of `Result(catching:)`.
+    init(catchingAsync body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
     }
 }

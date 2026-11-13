@@ -5,8 +5,9 @@ import GiroCrabCore
 // MARK: - Model glue
 
 extension AppModel {
-    func budgetProgress(year: Int, month: Int) -> [CategoryBudgetStatus] {
-        (try? vault?.listCategoryBudgetProgress(year: Int32(year), month: UInt32(month))) ?? []
+    /// `nil` = locked, cancelled or the vault changed meanwhile (keep what is shown).
+    func budgetProgress(year: Int, month: Int) async -> [CategoryBudgetStatus]? {
+        try? await vaultOffMain { try $0.listCategoryBudgetProgress(year: Int32(year), month: UInt32(month)) }
     }
 
     func setBudget(_ cents: Int64?, for categoryID: Int64) {
@@ -15,8 +16,10 @@ extension AppModel {
         reloadCategories()
     }
 
-    func splits(for booking: Booking) -> [TransactionSplit] {
-        (try? vault?.listTransactionSplits(transactionId: booking.id)) ?? []
+    /// `nil` = could not be read (error, locked, vault swapped) – not the same as "not split".
+    func splits(for booking: Booking) async -> [TransactionSplit]? {
+        let id = booking.id
+        return try? await vaultOffMain { try $0.listTransactionSplits(transactionId: id) }
     }
 
     func saveSplits(_ parts: [TransactionSplitInput], for booking: Booking) -> String? {
@@ -26,12 +29,13 @@ extension AppModel {
         return nil
     }
 
-    func cashflow(_ g: PeriodGranularity, count: Int) -> [PeriodCashflow] {
-        (try? vault?.cashflowByPeriod(granularity: g, count: UInt32(count))) ?? []
+    /// `nil` = locked, cancelled or the vault changed meanwhile (keep what is shown).
+    func cashflow(_ g: PeriodGranularity, count: Int) async -> [PeriodCashflow]? {
+        try? await vaultOffMain { try $0.cashflowByPeriod(granularity: g, count: UInt32(count)) }
     }
 
-    func transferTemplates() -> [TransferTemplate] {
-        (try? vault?.listTransferTemplates()) ?? []
+    func transferTemplates() async -> [TransferTemplate] {
+        (try? await vaultOffMain { try $0.listTransferTemplates() }) ?? []
     }
 
     func saveTransferTemplate(named name: String) {
@@ -125,7 +129,7 @@ struct BudgetProgressCard: View {
         .card()
         .task(id: token) {
             let now = Calendar(identifier: .gregorian).dateComponents([.year, .month], from: Date())
-            items = model.budgetProgress(year: now.year ?? 2025, month: now.month ?? 1)
+            if let loaded = await model.budgetProgress(year: now.year ?? 2025, month: now.month ?? 1) { items = loaded }
         }
         .sheet(item: $editing) { box in BudgetEditorSheet(categoryID: box.id).environment(model) }
     }
@@ -281,7 +285,7 @@ struct CashflowCard: View {
         }
         .card()
         .task(id: "\(granularity)#\(model.bookings.count)") {
-            rows = model.cashflow(granularity, count: granularity == .year ? 5 : (granularity == .quarter ? 6 : 6))
+            if let loaded = await model.cashflow(granularity, count: granularity == .year ? 5 : 6) { rows = loaded }
         }
     }
 }
@@ -347,6 +351,8 @@ struct SplitSheet: View {
     }
     @State private var parts: [Part] = []
     @State private var error: String?
+    /// The booking is split already (loaded with the parts).
+    @State private var hasSplits = false
 
     private var total: Int64 { abs(booking.amountCents) }
     private var sign: Int64 { booking.amountCents < 0 ? -1 : 1 }
@@ -389,7 +395,7 @@ struct SplitSheet: View {
             }
             if let error { Text(error).font(.callout).foregroundStyle(Theme.negative) }
             HStack {
-                if !model.splits(for: booking).isEmpty {
+                if hasSplits {
                     Button("Aufteilung aufheben", role: .destructive) {
                         error = model.saveSplits([], for: booking)
                         if error == nil { dismiss() }
@@ -409,8 +415,13 @@ struct SplitSheet: View {
         }
         .padding(22)
         .macFrame(width: 560)
-        .onAppear {
-            let existing = model.splits(for: booking)
+        .task {
+            guard let existing = await model.splits(for: booking) else {
+                // never offer a fresh split over one that could not be read
+                error = String(localized: "Die bestehende Aufteilung konnte nicht geladen werden.")
+                return
+            }
+            hasSplits = !existing.isEmpty
             if existing.isEmpty {
                 parts = [Part(categoryID: booking.categoryId, amount: Money.plain(total)), Part()]
             } else {
@@ -449,16 +460,16 @@ struct TransferTemplatesMenu: View {
             .disabled(model.transferDraft.name.trimmingCharacters(in: .whitespaces).isEmpty || model.transferDraft.iban.isEmpty)
         } label: { Label("Vorlagen", systemImage: "doc.on.doc") }
         .menuStyle(.borderlessButton).fixedSize()
-        .onAppear { templates = model.transferTemplates() }
+        .task { templates = await model.transferTemplates() }
         .confirmationDialog(Text("Vorlage „\(deleting?.name ?? "")“ löschen?"),
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { t in
-            Button("Löschen", role: .destructive) { model.deleteTransferTemplate(t.id); templates = model.transferTemplates() }
+            Button("Löschen", role: .destructive) { model.deleteTransferTemplate(t.id); Task { templates = await model.transferTemplates() } }
             Button("Abbrechen", role: .cancel) {}
         }
         .alert("Vorlage speichern", isPresented: $naming) {
             TextField("Name der Vorlage", text: $name)
-            Button("Speichern") { model.saveTransferTemplate(named: name); templates = model.transferTemplates() }
+            Button("Speichern") { model.saveTransferTemplate(named: name); Task { templates = await model.transferTemplates() } }
             Button("Abbrechen", role: .cancel) {}
         }
     }

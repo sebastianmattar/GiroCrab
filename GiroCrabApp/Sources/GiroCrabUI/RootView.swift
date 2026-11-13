@@ -57,40 +57,40 @@ public struct GiroCrabScenes: Scene {
                     .disabled(!model.canTransfer)
                 Button("Neue Kontogruppe …") { model.groupDialog = .create() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Button("Bank hinzufügen …") { model.showAddBank = true }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Button("Neues Darlehen …") { model.openLoanEditor(.create) }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Button("Neue Hauptkategorie …") { model.newCategoryRequest = NewCategoryRequest(parent: nil) }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
             }
             // Ablage › Import/Export (every toolbar command is also in the menu bar).
             CommandGroup(replacing: .importExport) {
                 Button("Aus MoneyMoney importieren …") { model.openMoneyMoneyImport() }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Button("Buchungen als CSV exportieren …") { model.exportFilteredBookingsCSV() }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
             }
             CommandGroup(replacing: .printItem) {
                 Button("Papierformat …") { PageSetup.run() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 Button("Drucken …") { model.showPrintSheet = true }
                     .keyboardShortcut("p", modifiers: .command)
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
             }
             // "Bank hinzufügen …" lives in Ablage with the other "create" commands
             // (HIG: one command, one menu – Help search otherwise lists it twice).
             CommandMenu("Konten") {
                 Button("Alle Konten abrufen") { model.requestSyncAll() }
                     .keyboardShortcut("r", modifiers: .command)
-                    .disabled(model.vault == nil || model.bankingBlocksAll)
+                    .disabled(!model.isUnlocked || model.bankingBlocksAll)
                 Divider()
                 Button("Regeln …") { model.openRuleEditor() }
                     .keyboardShortcut("k", modifiers: [.command, .option])
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Button("Wiederkehrende Buchungen …") { model.showRecurringSheet = true }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
             }
             CommandMenu("Buchung") {
                 // In the list, the single keys C and R do the same (kept for speed).
@@ -171,7 +171,7 @@ public struct GiroCrabScenes: Scene {
                     Divider()
                     Button("Suchen …") { ToolbarSearch.focus() }
                         .keyboardShortcut("f", modifiers: .command)
-                        .disabled(model.vault == nil)
+                        .disabled(!model.isUnlocked)
                 }
             }
             SidebarCommands()
@@ -185,21 +185,21 @@ public struct GiroCrabScenes: Scene {
                 Divider()
                 Button("Befehlspalette …") { model.showCommandPalette = true }
                     .keyboardShortcut("k", modifiers: .command)
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Divider()
                 Picker("Konten anzeigen", selection: Binding(get: { model.accountView }, set: { model.accountView = $0 })) {
                     Text("Nach Gruppe").tag(AccountSidebarMode.byGroup)
                     Text("Nach Kontoart").tag(AccountSidebarMode.byKind)
                 }
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
                 Button("Kontogruppen bearbeiten …") { model.openGroupSettings() }
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Divider()
                 Button(model.demoActive ? "Eigenen Tresor anzeigen" : "Demo-Daten anzeigen") {
                     if model.demoActive { model.showOwnVault() } else { model.showDemo() }
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                .disabled(model.vault == nil)
+                .disabled(!model.isUnlocked)
             }
         }
         #endif

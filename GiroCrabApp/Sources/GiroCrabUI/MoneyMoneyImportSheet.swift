@@ -389,13 +389,11 @@ struct MoneyMoneyExportImportView: View {
     }
 
     private func refreshPreview() {
-        guard let vault = model.vault, let data = fileData else { return }
+        guard let data = fileData else { return }
         let (name, tgt) = (fileName, target)
         loading = true; error = nil
         Task {
-            let result = await Task.detached { () -> Result<MoneyMoneyImportPreview, Error> in
-                Result { try vault.previewMoneymoneyImport(data: data, fileName: name, targetAccountId: tgt) }
-            }.value
+            let result = await Result(catchingAsync: { try await model.requireVaultOffMain { try $0.previewMoneymoneyImport(data: data, fileName: name, targetAccountId: tgt) } })
             loading = false
             switch result {
             case .success(let p):
@@ -418,13 +416,15 @@ struct MoneyMoneyExportImportView: View {
     }
 
     private func runImport() {
-        guard let vault = model.vault, let data = fileData else { return }
+        guard let data = fileData else { return }
         let (name, tgt, cats, notes) = (fileName, target, keepCategories, keepNotes)
         importing = true
         Task {
-            let result = await Task.detached { () -> Result<MoneyMoneyImportResult, Error> in
-                Result { try vault.importMoneymoneyData(data: data, fileName: name, targetAccountId: tgt, preserveCategories: cats, preserveNotes: notes) }
-            }.value
+            let result = await Result(catchingAsync: {
+                try await model.requireVaultOffMain {
+                    try $0.importMoneymoneyData(data: data, fileName: name, targetAccountId: tgt, preserveCategories: cats, preserveNotes: notes)
+                }
+            })
             importing = false
             switch result {
             case .success(let r):

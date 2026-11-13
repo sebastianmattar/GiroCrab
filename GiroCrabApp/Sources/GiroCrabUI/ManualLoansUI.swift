@@ -15,6 +15,8 @@ import AppKit
     var linkByBooking: [Int64: LoanLink] = [:]
     /// The loan sheet on screen.
     var editor: LoanEditorRequest?
+    /// The running off-main reload (`AppModel.reloadLoans`).
+    @ObservationIgnored var loadTask: Task<Void, Never>?
 }
 
 struct LoanEditorRequest: Identifiable {
@@ -27,11 +29,37 @@ struct LoanEditorRequest: Identifiable {
 }
 
 extension AppModel {
+    /// Reloads loans and booking links off the main thread (both calls walk every
+    /// loan's bookings). A newer reload cancels the running one, so the last call wins.
     func reloadLoans() {
+        loanStore.loadTask?.cancel()
+        loanStore.loadTask = Task { [weak self] in
+            await self?.loadLoans()
+        }
+    }
+
+    /// Synchronous reload after a loan edit: undo entries and the sidebar read the
+    /// store right away. Cancels the background reload `reloadAccounts` just queued.
+    func reloadLoansNow() {
+        loanStore.loadTask?.cancel()
+        loanStore.loadTask = nil
         guard let vault else { return }
         do {
             loanStore.loans = try vault.listManualLoans()
             loanStore.linkByBooking = Dictionary(try vault.listLoanLinks().map { ($0.transactionId, $0) }, uniquingKeysWith: { a, _ in a })
+        } catch {
+            errorMessage = describe(error)
+        }
+    }
+
+    /// Awaitable form of `reloadLoans` (tests, callers that need the result).
+    func loadLoans() async {
+        do {
+            guard let (loans, links) = try await vaultOffMain({ v in (try v.listManualLoans(), try v.listLoanLinks()) }),
+                  !Task.isCancelled else { return }
+            loanStore.loans = loans
+            loanStore.linkByBooking = Dictionary(links.map { ($0.transactionId, $0) }, uniquingKeysWith: { a, _ in a })
+        } catch is CancellationError {
         } catch {
             errorMessage = describe(error)
         }
@@ -54,7 +82,8 @@ extension AppModel {
         #if os(macOS)
         // The main window's manager, also when saving from one of its sheets
         // (a sheet's own undo stack would vanish with the sheet).
-        let app = NSApplication.shared
+        // NSApp is nil without an NSApplication (unit tests): no undo then.
+        guard let app = NSApp as NSApplication? else { return nil }
         let w = app.keyWindow ?? app.mainWindow ?? app.windows.first { $0.isVisible && $0.canBecomeMain }
         return (w?.sheetParent ?? w)?.undoManager
         #else
@@ -83,7 +112,7 @@ extension AppModel {
         } else {
             toast = String(localized: "Zuordnung von „\(name)“ aufgehoben")
         }
-        reloadAccounts(); reloadBookings()
+        reloadAccounts(); reloadLoansNow(); reloadBookings()
     }
 
     /// Creates or changes a manual loan; returns the account id.
@@ -106,7 +135,7 @@ extension AppModel {
                 um.setActionName(String(localized: "Darlehen anlegen"))
             }
         }
-        reloadAccounts(); reloadBookings(); reloadHistory()
+        reloadAccounts(); reloadLoansNow(); reloadBookings(); reloadHistory()
         return id
     }
 
@@ -127,7 +156,7 @@ extension AppModel {
             }
             um.setActionName(String(localized: "Darlehen anlegen"))
         }
-        reloadAccounts(); reloadBookings(); reloadHistory()
+        reloadAccounts(); reloadLoansNow(); reloadBookings(); reloadHistory()
     }
 
     func openLoanEditor(_ mode: LoanEditorRequest.Mode, accountId: Int64? = nil, draft: LoanSetup? = nil) {
@@ -462,13 +491,19 @@ struct LoanEditorSheet: View {
     private func refreshPreview() async {
         if loaded && previewKey != initialKey { touched = true }
         try? await Task.sleep(for: .milliseconds(200))
-        guard !Task.isCancelled, let vault = model.vault else { return }
+        guard !Task.isCancelled else { return }
         guard var s = setup else { preview = nil; previewError = nil; return }
         if s.name.isEmpty { s.name = "-" }
         do {
-            preview = try vault.previewManualLoan(accountId: request.accountId, setup: s, limit: 5)
+            let accountId = request.accountId
+            let setup = s
+            guard let p = try await model.vaultOffMain({ try $0.previewManualLoan(accountId: accountId, setup: setup, limit: 5) }),
+                  !Task.isCancelled else { return }
+            preview = p
             previewRule = s.matchExpr
             previewError = nil
+        } catch is CancellationError {
+            return
         } catch {
             previewError = describe(error)
         }

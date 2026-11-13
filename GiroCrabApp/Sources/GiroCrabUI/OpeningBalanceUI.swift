@@ -36,9 +36,10 @@ extension AppModel {
     }
 
     /// What a Startsaldo at `date` would count; nothing is stored.
-    func previewOpeningBalance(_ accountId: Int64, date: String) throws -> OpeningBalancePreview {
-        guard let vault else { throw CoreError.Database(message: "vault locked") }
-        return try vault.previewAccountOpeningBalance(accountId: accountId, date: date)
+    /// Runs off the main thread (sums every booking of the account); `nil` when the
+    /// vault was locked or swapped meanwhile – keep what is shown.
+    func previewOpeningBalance(_ accountId: Int64, date: String) async throws -> OpeningBalancePreview? {
+        try await vaultOffMain { try $0.previewAccountOpeningBalance(accountId: accountId, date: date) }
     }
 }
 
@@ -122,7 +123,7 @@ struct OpeningBalanceSheet: View {
         }
         .frame(minWidth: 500, idealWidth: 540, minHeight: 520)
         .onAppear(perform: load)
-        .task(id: dateString) { refreshPreview() }
+        .task(id: dateString) { await refreshPreview() }
         #else
         NavigationStack {
             form
@@ -138,7 +139,7 @@ struct OpeningBalanceSheet: View {
                 }
         }
         .onAppear(perform: load)
-        .task(id: dateString) { refreshPreview() }
+        .task(id: dateString) { await refreshPreview() }
         #endif
     }
 
@@ -239,10 +240,13 @@ struct OpeningBalanceSheet: View {
         focus = .amount
     }
 
-    private func refreshPreview() {
+    private func refreshPreview() async {
         do {
-            preview = try model.previewOpeningBalance(request.accountId, date: dateString)
+            guard let p = try await model.previewOpeningBalance(request.accountId, date: dateString),
+                  !Task.isCancelled else { return }
+            preview = p
             error = nil
+        } catch is CancellationError {
         } catch {
             preview = nil
             self.error = describe(error)

@@ -43,6 +43,9 @@ Other UI files live in the same `GiroCrabUI/` dir. Ignore `cashcrab-core/` and `
 ## Architecture rules of thumb
 - Every core call from Swift is synchronous and holds the vault mutex. Anything over ~16 ms goes
   through `AppModel.offMain` and checks `listGeneration` / vault identity before publishing.
+  From UI code use `model.vaultOffMain { try $0.… }` (nil when locked/swapped) or
+  `requireVaultOffMain` (multi-step jobs: `pinVault()`); views never touch `model.vault` (`isUnlocked` for the nil check) –
+  `scripts/lint-vault-access.sh` enforces this in CI.
 - `vault.list_transactions` enriches every row in the filter (merchant, flow, sums); `limit`/`offset`
   only trim the result. Never call it for a count or a sum – add a SQL aggregate.
 - An edit must either reload synchronously or declare what it invalidates (`rulesStale`,

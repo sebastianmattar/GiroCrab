@@ -46,9 +46,10 @@ extension AppModel {
     }
 
     /// Number of bookings currently recognised in the captured JSON / visible table (nothing stored).
-    func previewPortalCapture(_ c: BankConnection, bodies: [String], domRowsJSON: String) -> Int {
-        guard let vault else { return 0 }
-        return Int((try? vault.previewPortalCapture(connectionId: c.id, jsonBodies: bodies, domRowsJson: domRowsJSON)) ?? 0)
+    /// Runs off the main thread: the browser polls this every 1.5 s while the user types.
+    func previewPortalCapture(_ c: BankConnection, bodies: [String], domRowsJSON: String) async -> Int {
+        let id = c.id
+        return Int((try? await vaultOffMain { try $0.previewPortalCapture(connectionId: id, jsonBodies: bodies, domRowsJson: domRowsJSON) }) ?? 0)
     }
 
     func importStatement(_ c: BankConnection, url: URL) {
@@ -495,7 +496,7 @@ struct PortalWebSheet: View {
                 guard !busy else { continue }
                 let away = browser.onLoginPage || !browser.onPortal
                 let rows = away ? "[]" : await browser.domRowsJSON()
-                let n = away ? 0 : model.previewPortalCapture(connection, bodies: browser.bodies, domRowsJSON: rows)
+                let n = away ? 0 : await model.previewPortalCapture(connection, bodies: browser.bodies, domRowsJSON: rows)
                 if n != lastSeenCount || n != recognized { lastSeenCount = n; lastChange = Date() }
                 recognized = n
                 if !openedTransactions, !browser.onLoginPage, !browser.loading,
