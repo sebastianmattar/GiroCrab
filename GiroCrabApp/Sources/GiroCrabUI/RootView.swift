@@ -179,9 +179,9 @@ public struct GiroCrabScenes: Scene {
             CommandGroup(after: .sidebar) {
                 Button(showInspector ? "Informationen ausblenden" : "Informationen einblenden") { showInspector.toggle() }
                     .keyboardShortcut("i", modifiers: [.command, .option])
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Toggle("Auswertungen anzeigen", isOn: $showStatistics)
-                    .disabled(model.vault == nil)
+                    .disabled(!model.isUnlocked)
                 Divider()
                 Button("Befehlspalette …") { model.showCommandPalette = true }
                     .keyboardShortcut("k", modifiers: .command)

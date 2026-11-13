@@ -93,6 +93,7 @@ struct SyncLogView: View {
     @State private var confirmClear = false
     @State private var export = CSVFileDocument(data: Data())
     @State private var exporting = false
+    @State private var reloadToken = 0
 
     private var filter: SyncLogFilter {
         SyncLogFilter(connectionId: connectionID, onlyErrors: onlyErrors,
@@ -163,8 +164,10 @@ struct SyncLogView: View {
         }
         .confirmationDialog("Protokoll leeren?", isPresented: $confirmClear) {
             Button("Protokoll leeren", role: .destructive) {
-                try? model.vault?.clearSyncLog()
-                reload()
+                Task {
+                    _ = try? await model.requireVaultOffMain { try $0.clearSyncLog() }
+                    reload()
+                }
             }
         } message: {
             Text("Alle Einträge des Abruf-Protokolls werden gelöscht. Das lässt sich nicht widerrufen.")
@@ -173,7 +176,7 @@ struct SyncLogView: View {
                       defaultFilename: "GiroCrab-Abrufprotokoll") { _ in }
         .navigationTitle("Abruf-Protokoll")
         .frame(minWidth: 680, minHeight: 320)
-        .task(id: model.syncLogVersion) { reload() }
+        .task(id: "\(model.syncLogVersion)/\(reloadToken)") { await load() }
         .onChange(of: search) { _, _ in reload() }
         .onChange(of: onlyErrors) { _, _ in reload() }
         .onChange(of: connectionID) { _, _ in reload() }
@@ -188,9 +191,14 @@ struct SyncLogView: View {
         return ""
     }
 
-    private func reload() {
-        guard let vault = model.vault else { entries = []; return }
-        entries = (try? vault.listSyncLog(filter: filter)) ?? []
+    /// Restarts `load()` via `.task(id:)`, which cancels a load still in flight.
+    private func reload() { reloadToken &+= 1 }
+
+    private func load() async {
+        let filter = filter
+        let loaded = (try? await model.vaultOffMain { try $0.listSyncLog(filter: filter) }) ?? nil
+        guard !Task.isCancelled else { return }
+        entries = loaded ?? []
         selection = selection.filter { id in entries.contains { $0.id == id } }
     }
 
