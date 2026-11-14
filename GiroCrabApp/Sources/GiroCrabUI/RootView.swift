@@ -577,6 +577,12 @@ struct MainSplitView: View {
                 Text(String(format: String(localized: "Der Auftrag hat die Bank erreicht, aber die Antwort ist nicht eindeutig. Die Überweisung wurde möglicherweise bereits ausgeführt.\n\nBitte prüfen Sie zuerst Ihr Konto (Umsätze oder Online-Banking), bevor Sie sie erneut senden. In GiroCrab ist sie als „Status unklar“ vorgemerkt.\n\nReferenz (EndToEnd-ID): %@\nBank: %@"), u.endToEndId, u.reason))
             }
         }
+        .alert("Stornierung nicht bestätigt", isPresented: Binding(get: { model.transferCancelNotice != nil }, set: { if !$0 { model.transferCancelNotice = nil } })) {
+            Button("Status erneut prüfen") { model.recheckTransferCancel() }
+            Button("Schließen", role: .cancel) { model.transferCancelNotice = nil }
+        } message: {
+            Text(model.transferCancelNotice?.message ?? "")
+        }
         .alert(model.errorTitle ?? String(localized: "Etwas ist schiefgelaufen"),
                isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             if let retry = model.errorRetry {

@@ -2,9 +2,9 @@
 
 ## Schema & migrations
 
-The vault is a SQLCipher database. Its schema is versioned with
-[`rusqlite_migration`](https://crates.io/crates/rusqlite_migration) in
-`girocrab-core/src/schema.rs`; `PRAGMA user_version` counts the steps a vault has run.
+The vault is a SQLCipher database. Its schema is versioned in
+`girocrab-core/src/schema.rs`: `PRAGMA user_version` counts the steps a vault has run,
+and `migrate` runs the missing ones in a single transaction.
 
 | Version | Step |
 |---------|------|

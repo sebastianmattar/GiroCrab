@@ -96,6 +96,7 @@ fn rejects_incomplete_wrong_account_and_duplicate_transactions() {
         ("/details/0/inventory/investmentDepotInventories/0/currentExchangeRate/targetCurrencyId",json!("GBP")),
         ("/details/0/inventory/investmentDepotInventories/0/inventory/value",json!("999")),
         ("/details/0/transactions/0/paymentAmount",Value::Null),
+        ("/details/0/historicalTransactions/0/paymentAmount",Value::Null),
     ] {
         let mut v=fixture();*v.pointer_mut(pointer).unwrap()=value;
         assert!(snapshot(&v.to_string()).is_err(),"{pointer}");
@@ -110,6 +111,54 @@ fn rejects_incomplete_wrong_account_and_duplicate_transactions() {
     let mut v = fixture();
     v["details"].as_array_mut().unwrap().pop();
     assert!(snapshot(&v.to_string()).is_err());
+    // Missing account IDs on every side must not pass as null == null.
+    let mut v = fixture();
+    v["overview"]["ownerGroups"][0]["cashAccounts"][0]["depotOrCashAccount"]
+        ["depotOrCashAccountId"]["subDepotId"] = Value::Null;
+    v["details"][1]["cashAccountId"] = Value::Null;
+    v["details"][1]["transactions"][0]["cashAccountId"] = Value::Null;
+    assert!(snapshot(&v.to_string()).is_err());
+}
+
+#[test]
+fn booked_order_replaces_its_pending_cash_row() {
+    let dir = crate::test_support::TempDir::new("fnz-order");
+    let vault = Vault::open(dir.join("vault.db").to_string_lossy().into(), vec![7; 32]).unwrap();
+    let connection = vault
+        .add_bank_connection(
+            crate::models::ConnectorKind::Fnz,
+            "Test FNZ".into(),
+            "test".into(),
+        )
+        .unwrap();
+    let live = || {
+        vault
+            .db()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM transactions t JOIN accounts a ON a.id = t.account_id
+                  WHERE a.external_ref = 'C1' AND t.deleted_ms IS NULL",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    let mut ordered = fixture();
+    ordered["details"][1]["transactions"][0]["orderOrTransactionId"] = json!({
+        "orderId":{"orderDate":"2025-01-02","orderNumber":"O1"},"transactionId":null});
+    vault
+        .clone()
+        .import_fnz_snapshot(connection, ordered.to_string())
+        .unwrap();
+    assert_eq!(live(), 1);
+    let mut booked = ordered.clone();
+    booked["details"][1]["transactions"][0]["orderOrTransactionId"]["transactionId"] =
+        json!({"belegNummer":"B1","belegLfdNummer":"1","einzelgegenbuchung":""});
+    vault
+        .clone()
+        .import_fnz_snapshot(connection, booked.to_string())
+        .unwrap();
+    assert_eq!(live(), 1);
 }
 
 #[test]

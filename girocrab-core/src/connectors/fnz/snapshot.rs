@@ -8,7 +8,7 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::Value;
 
-use super::{field, invalid, overview};
+use super::{field, invalid, is_currency_code, open_rows, overview};
 use crate::{
     connectors::{store_fetch, FetchResult, RemoteHolding, RemoteTransaction, SyncSummary},
     error::{CoreError, CoreResult},
@@ -39,7 +39,7 @@ fn date(v: &Value, key: &str) -> CoreResult<String> {
 
 fn currency(v: &Value) -> CoreResult<&str> {
     let s = text(v, "/currencyId/id")?;
-    if s.len() != 3 || !s.bytes().all(|b| b.is_ascii_uppercase()) {
+    if !is_currency_code(s) {
         return Err(incomplete());
     }
     Ok(s)
@@ -63,14 +63,25 @@ fn decimal(v: &Value) -> CoreResult<f64> {
         .ok_or_else(incomplete)
 }
 
-fn identifier(v: &Value, prefix: &str) -> CoreResult<String> {
-    fn has_value(v: &Value) -> bool {
-        match v {
-            Value::String(s) => !s.trim().is_empty(),
-            Value::Object(o) => o.values().any(has_value),
-            _ => false,
-        }
+/// Cash bookings that are still only an order. Their ID changes once the bank
+/// books them, so store_fetch keeps such rows only while they are reported.
+const ORDER_PREFIX: &str = "fnz:order:";
+
+fn has_value(v: &Value) -> bool {
+    match v {
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Object(o) => o.values().any(has_value),
+        _ => false,
     }
+}
+
+/// Internal account ID from the overview; a missing one would make the
+/// per-booking account check compare null with null.
+fn account_id(v: &Value) -> CoreResult<&Value> {
+    has_value(v).then_some(v).ok_or_else(incomplete)
+}
+
+fn identifier(v: &Value, prefix: &str) -> CoreResult<String> {
     if !has_value(v) {
         return Err(incomplete());
     }
@@ -185,7 +196,8 @@ fn cash_transactions(
             }
             let id = &t["orderOrTransactionId"];
             let transaction_id = &id["transactionId"];
-            if transaction_id.is_null() {
+            let order = transaction_id.is_null();
+            if order {
                 text(id, "/orderId/orderDate")?;
                 text(id, "/orderId/orderNumber")?;
             } else {
@@ -199,7 +211,7 @@ fn cash_transactions(
             }
             Ok(RemoteTransaction {
                 account_ref: account_ref.into(),
-                external_id: identifier(id, "cash")?,
+                external_id: identifier(id, if order { "order" } else { "cash" })?,
                 booking_date: date(t, "/bookingDate")?,
                 value_date: date(t, "/valutaDate")?,
                 amount_cents: amount(&t["amount"])?,
@@ -240,7 +252,9 @@ fn depot_transactions(
                 text(&t[id_key], "/orderTransactionKindId")?;
             }
             let (value, cur) = if t["paymentAmount"].is_null() {
-                if !historical && text(t, "/numberSign")? != "0" {
+                // Only explicitly neutral events may lack an amount; a missing
+                // amount on a purchase/sale must not become a 0.00 booking.
+                if text(t, "/numberSign")? != "0" {
                     return Err(incomplete());
                 }
                 // Neutral tax/dividend/fee information has no cash amount in
@@ -301,27 +315,14 @@ fn snapshot(json: &str) -> CoreResult<FetchResult> {
     if root["version"].as_u64() != Some(1) {
         return Err(incomplete());
     }
-    let mut result = overview(&root["overview"].to_string())?;
+    let mut result = overview(&root["overview"])?;
     let mut expected = HashMap::new();
-    for group in array(&root["overview"], "ownerGroups")? {
-        for kind in [
-            "investmentDepots",
-            "managedDepots",
-            "stockDepots",
-            "preciousMetalDepots",
-            "cashAccounts",
-        ] {
-            for row in array(group, kind)? {
-                let account = &row["depotOrCashAccount"];
-                if account["closedFlag"].as_bool() == Some(true) {
-                    continue;
-                }
-                expected.insert(
-                    text(account, "/externalDepotNumber/externalDepotNumber")?,
-                    (kind, account),
-                );
-            }
-        }
+    for (_, kind, row) in open_rows(&root["overview"])? {
+        let account = &row["depotOrCashAccount"];
+        expected.insert(
+            text(account, "/externalDepotNumber/externalDepotNumber")?,
+            (kind, account),
+        );
     }
     let mut details = HashMap::new();
     for d in array(&root, "details")? {
@@ -343,7 +344,7 @@ fn snapshot(json: &str) -> CoreResult<FetchResult> {
                 result.transactions.extend(cash_transactions(
                     detail,
                     &account.external_ref,
-                    &remote["depotOrCashAccountId"]["subDepotId"],
+                    account_id(&remote["depotOrCashAccountId"]["subDepotId"])?,
                 )?);
                 account.iban = optional_text(detail, "/iban/iban");
             }
@@ -358,7 +359,7 @@ fn snapshot(json: &str) -> CoreResult<FetchResult> {
                 result.transactions.extend(depot_transactions(
                     detail,
                     &account.external_ref,
-                    &remote["depotOrCashAccountId"]["depotId"],
+                    account_id(&remote["depotOrCashAccountId"]["depotId"])?,
                     &account.currency,
                 )?);
             }
@@ -372,6 +373,7 @@ fn snapshot(json: &str) -> CoreResult<FetchResult> {
             return Err(incomplete());
         }
     }
+    result.hold_prefix = Some(ORDER_PREFIX.into());
     Ok(result)
 }
 
@@ -384,7 +386,6 @@ impl Vault {
         snapshot_json: String,
     ) -> CoreResult<SyncSummary> {
         self.check_fnz(connection_id)?;
-        crate::banking_gate::check_connector("fnz")?;
         let summary = store_fetch(
             &self,
             crate::models::ConnectorKind::Fnz,

@@ -442,9 +442,9 @@ extension AppModel {
             activeTransfer = nil
             activeChallenge = nil
             transferBusy = false
-            transferError = String(localized: "Überweisung abgebrochen – es wurde nichts gesendet, solange die TAN nicht bestätigt wurde.")
-            showTransferSheet = true
-            Task { await t.cancel() }
+            transferError = nil
+            // The bank has to confirm: a bunq draft stays approvable until it is rejected.
+            cancelTransferSession(t, confirmedMessage: String(localized: "Überweisung abgebrochen – es wurde nichts gesendet, solange die TAN nicht bestätigt wurde."))
             return
         }
         let s = activeSession

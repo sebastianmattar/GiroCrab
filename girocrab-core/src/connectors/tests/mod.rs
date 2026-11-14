@@ -1104,3 +1104,4 @@ mod bank_name;
 mod banking_gate;
 mod content_id;
 mod statements_auto;
+mod transfer_cancel;

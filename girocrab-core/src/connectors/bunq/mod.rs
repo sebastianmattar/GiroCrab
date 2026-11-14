@@ -27,8 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    http_client, BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext,
-    FetchResult, Phase, RemoteAccount, RemoteTransaction, TransferJob, TransferResult,
+    http_client, BankConnector, CancelOutcome, Challenge, ChallengeKind, ChallengeResponse,
+    ConnectContext, FetchResult, Phase, RemoteAccount, RemoteTransaction, TransferJob,
+    TransferResult,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -662,6 +663,74 @@ impl BunqConnector {
             .unwrap_or_default()
             .to_string())
     }
+
+    /// Rejects the pending draft at bunq and re-queries its status. The draft
+    /// is dropped only once bunq confirms it is no longer payable, so a
+    /// failed or unanswered request can be retried: calling this again
+    /// sends the (idempotent) rejection again and re-checks the status, it
+    /// never creates anything new. A rejection error of an already rejected
+    /// draft resolves through the status query.
+    async fn withdraw_draft(&mut self) -> CancelOutcome {
+        let Some(d) = self.draft.clone() else {
+            return CancelOutcome::Cancelled;
+        };
+        let path = self.draft_path(d.account_id, Some(d.draft_id));
+        let token = self.state.session_token.clone();
+        let put = self
+            .call(
+                reqwest::Method::PUT,
+                &path,
+                Some(&json!({"status": "REJECTED"})),
+                Some(&token),
+            )
+            .await;
+        let status = self.draft_status(&d).await;
+        let put_err = put_error_reason(&put);
+        match (put_err.is_none(), status) {
+            (_, Ok(s)) => match classify_draft_status(&s) {
+                DraftState::Refused => {
+                    self.draft = None;
+                    self.order_submitted = false;
+                    CancelOutcome::Cancelled
+                }
+                DraftState::Accepted => {
+                    // Approved in the app before the rejection arrived.
+                    self.draft = None;
+                    self.result = TransferResult::Executed { instant: false };
+                    CancelOutcome::CancellationFailed {
+                        reason: tr("Die Überweisung wurde in der bunq-App bereits freigegeben.")
+                            .into(),
+                    }
+                }
+                DraftState::Pending => match put_err {
+                    // bunq accepted the request but still shows it as open.
+                    None => CancelOutcome::CancellationPending {
+                        reason: tr("bunq zeigt die Überweisung noch als offen.").into(),
+                    },
+                    Some(reason) => CancelOutcome::CancellationFailed { reason },
+                },
+                DraftState::Unclear => CancelOutcome::CancellationUnknown {
+                    reason: trf("bunq meldet den Status „{0}“.", &[&s]),
+                },
+            },
+            // Status unavailable: an acknowledged request is pending, an
+            // unanswered or refused one leaves the result unknown.
+            (true, Err(_)) => CancelOutcome::CancellationPending {
+                reason: tr(
+                    "bunq hat die Stornierung angenommen, der Status ist noch nicht bestätigt.",
+                )
+                .into(),
+            },
+            (false, Err(e)) => CancelOutcome::CancellationUnknown {
+                reason: format!("{} / {}", put_err.unwrap_or_default(), e),
+            },
+        }
+    }
+}
+
+/// Reason text if the rejection request itself failed.
+fn put_error_reason(put: &ApiResult<Value>) -> Option<String> {
+    put.as_ref().err().map(|e| e.message.clone())
 }
 
 #[async_trait]
@@ -867,21 +936,19 @@ impl BankConnector for BunqConnector {
         self.order_submitted
     }
 
-    /// Cancelled in GiroCrab while still pending: withdraw the draft at bunq
-    /// so it can't be approved later by accident. Best effort.
+    fn has_open_order(&self) -> bool {
+        self.draft.is_some()
+    }
+
+    /// Session ends: try to withdraw a still pending draft so it can't be
+    /// approved later by accident. Best effort; the draft stays tracked
+    /// unless bunq confirmed the rejection (see `cancel_transfer`).
     async fn finish(&mut self, _ctx: &ConnectContext) {
-        if let Some(d) = self.draft.take() {
-            let path = self.draft_path(d.account_id, Some(d.draft_id));
-            let token = self.state.session_token.clone();
-            let _ = self
-                .call(
-                    reqwest::Method::PUT,
-                    &path,
-                    Some(&json!({"status": "REJECTED"})),
-                    Some(&token),
-                )
-                .await;
-        }
+        let _ = self.withdraw_draft().await;
+    }
+
+    async fn cancel_transfer(&mut self, _ctx: &ConnectContext) -> CancelOutcome {
+        self.withdraw_draft().await
     }
 
     async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult> {

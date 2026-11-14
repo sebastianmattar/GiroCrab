@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{CoreError, CoreResult};
+use crate::i18n::tr;
 use crate::secret::SecretString;
 use crate::vault::Vault;
 
@@ -17,7 +18,14 @@ struct TransferState {
     account_id: i64,
     /// false = still logging in, true = transfer submitted (waiting for TAN).
     submitted: bool,
+    /// The dialog is over (finished, failed or cancelled): no further steps.
+    /// This is internal; it says nothing about whether the bank still holds
+    /// an open order (see `cancel` and `BankConnector::has_open_order`).
     done: bool,
+    /// The bank confirmed the order is not payable any more.
+    cancel_confirmed: bool,
+    /// The order was executed: it can no longer be cancelled.
+    executed: bool,
 }
 
 /// After the order was handed to the bank, only errors that prove it was
@@ -55,6 +63,8 @@ impl TransferSession {
                 account_id,
                 submitted: false,
                 done: false,
+                cancel_confirmed: false,
+                executed: false,
             }),
         }
     }
@@ -96,6 +106,7 @@ impl TransferSession {
                     st.done = true;
                     return match st.connector.transfer_result() {
                         TransferResult::Executed { instant } => {
+                            st.executed = true;
                             self.vault.record_pending_transfer(
                                 st.account_id,
                                 &st.job,
@@ -189,13 +200,31 @@ impl TransferSession {
         self.advance(phase, &mut st).await
     }
 
-    pub async fn cancel(&self) {
+    /// Cancels the transfer. The result says whether the bank confirmed it:
+    /// only `Cancelled` is final. For `CancellationPending`, `-Unknown` and
+    /// `-Failed` the order stays tracked and `cancel()` can simply be called
+    /// again; it re-checks the bank's status and never resends the order.
+    /// Calling it again after `Cancelled` is a no-op.
+    pub async fn cancel(&self) -> CancelOutcome {
         let mut st = self.state.lock().await;
-        if !st.done {
-            let TransferState { connector, ctx, .. } = &mut *st;
-            connector.finish(ctx).await;
-            st.done = true;
+        if st.cancel_confirmed {
+            return CancelOutcome::Cancelled;
         }
+        if st.executed {
+            return CancelOutcome::CancellationFailed {
+                reason: tr("Die Überweisung wurde bereits ausgeführt.").into(),
+            };
+        }
+        // A closed session only needs another round if the bank may still
+        // hold an open order from an earlier, unconfirmed cancellation.
+        if st.done && !st.connector.has_open_order() {
+            return CancelOutcome::Cancelled;
+        }
+        let TransferState { connector, ctx, .. } = &mut *st;
+        let outcome = connector.cancel_transfer(ctx).await;
+        st.done = true;
+        st.cancel_confirmed = outcome == CancelOutcome::Cancelled;
+        outcome
     }
 }
 

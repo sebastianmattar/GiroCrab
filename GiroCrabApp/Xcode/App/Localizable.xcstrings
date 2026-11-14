@@ -5382,6 +5382,17 @@
         }
       }
     },
+    "Die Stornierung wurde von der Bank angenommen, aber noch nicht bestätigt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bank accepted the cancellation but has not confirmed it yet."
+          }
+        }
+      }
+    },
     "Die Systemsprache wurde geändert" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5477,6 +5488,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The new language is used after a restart."
+          }
+        }
+      }
+    },
+    "Die Überweisung konnte nicht storniert werden." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The transfer could not be cancelled."
           }
         }
       }
@@ -6583,6 +6605,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "There is nothing new from the GiroCrab project right now."
+          }
+        }
+      }
+    },
+    "Es ist unklar, ob die Überweisung storniert wurde (keine eindeutige Antwort der Bank)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It is unclear whether the transfer was cancelled (no clear answer from the bank)."
           }
         }
       }
@@ -14214,6 +14247,17 @@
         }
       }
     },
+    "Sie kann möglicherweise noch in der bunq-App freigegeben werden. Prüfen Sie den Status erneut oder lehnen Sie sie dort ab." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It may still be approved in the bunq app. Check the status again or reject it there."
+          }
+        }
+      }
+    },
     "Sie können die Sprache später in den Einstellungen ändern." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14775,6 +14819,17 @@
         }
       }
     },
+    "Status erneut prüfen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check status again"
+          }
+        }
+      }
+    },
     "Status: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14837,6 +14892,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Matches"
+          }
+        }
+      }
+    },
+    "Stornierung nicht bestätigt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancellation not confirmed"
           }
         }
       }
@@ -17902,6 +17968,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transfer cancelled – nothing was sent."
+          }
+        }
+      }
+    },
+    "Überweisung bei bunq storniert (bestätigt)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transfer cancelled at bunq (confirmed)."
           }
         }
       }

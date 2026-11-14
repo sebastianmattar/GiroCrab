@@ -208,7 +208,41 @@ extension AppModel {
             transferError = String(localized: "Überweisung abgebrochen – es wurde nichts gesendet.")
         }
         showTransferSheet = true
-        Task { await transfer?.cancel() }
+        if let transfer { cancelTransferSession(transfer, confirmedMessage: nil) }
+    }
+
+    /// Cancels the session and tells apart a confirmed cancellation from one the
+    /// bank has not confirmed. `confirmedMessage` replaces the sheet's error line
+    /// only when confirmed.
+    func cancelTransferSession(_ transfer: TransferSession, confirmedMessage: String?) {
+        Task {
+            let outcome = await transfer.cancel()
+            settleTransferCancel(transfer, outcome, confirmedMessage: confirmedMessage)
+        }
+    }
+
+    private func settleTransferCancel(_ transfer: TransferSession, _ outcome: CancelOutcome, confirmedMessage: String?) {
+        if case .cancelled = outcome {
+            transferCancelNotice = nil
+            if let confirmedMessage {
+                transferError = confirmedMessage
+                showTransferSheet = true
+            }
+        } else {
+            transferError = nil
+            transferCancelNotice = UnconfirmedTransferCancel(session: transfer, outcome: outcome)
+        }
+    }
+
+    /// "Status erneut prüfen": cancel again; the core re-queries before it resends anything.
+    func recheckTransferCancel() {
+        guard let notice = transferCancelNotice, !notice.busy else { return }
+        transferCancelNotice?.busy = true
+        Task {
+            let outcome = await notice.session.cancel()
+            settleTransferCancel(notice.session, outcome,
+                                 confirmedMessage: String(localized: "Überweisung bei bunq storniert (bestätigt)."))
+        }
     }
 
     func finishTransfer(error: Error) {

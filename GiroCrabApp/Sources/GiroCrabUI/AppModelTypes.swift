@@ -232,6 +232,35 @@ struct TransferUnknownNotice: Identifiable {
     let endToEndId: String
 }
 
+/// A transfer cancellation the bank has not confirmed: the order (bunq draft)
+/// may still be approvable. The session stays alive so the status can be re-checked.
+struct UnconfirmedTransferCancel: Identifiable {
+    let id = UUID()
+    let session: TransferSession
+    var outcome: CancelOutcome
+    var busy = false
+
+    var message: String {
+        let head: String
+        let reason: String
+        switch outcome {
+        case .cancelled:
+            return ""
+        case .cancellationPending(let r):
+            head = String(localized: "Die Stornierung wurde von der Bank angenommen, aber noch nicht bestätigt.")
+            reason = r
+        case .cancellationUnknown(let r):
+            head = String(localized: "Es ist unklar, ob die Überweisung storniert wurde (keine eindeutige Antwort der Bank).")
+            reason = r
+        case .cancellationFailed(let r):
+            head = String(localized: "Die Überweisung konnte nicht storniert werden.")
+            reason = r
+        }
+        let advice = String(localized: "Sie kann möglicherweise noch in der bunq-App freigegeben werden. Prüfen Sie den Status erneut oder lehnen Sie sie dort ab.")
+        return "\(head)\n\n\(reason)\n\n\(advice)"
+    }
+}
+
 /// Name check (Verification of Payee) result awaiting the user's decision.
 struct PendingPayeeCheck: Identifiable {
     let id = UUID()

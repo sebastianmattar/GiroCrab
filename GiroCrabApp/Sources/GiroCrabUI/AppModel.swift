@@ -306,6 +306,8 @@ public final class AppModel {
     var transferInstantDeclined: String?
     /// The order reached the bank but its result is unclear.
     var transferUnknown: TransferUnknownNotice?
+    /// The user cancelled, but the bank did not confirm it (re-check or retry).
+    var transferCancelNotice: UnconfirmedTransferCancel?
     var splitBooking: Booking?
     var transferBusy = false
     var syncQueue: [BankConnection] = []
@@ -948,7 +950,7 @@ public final class AppModel {
         transferDraft.pin = ""
         Task {
             await session?.cancel()
-            await transfer?.cancel()
+            _ = await transfer?.cancel()  // result cannot be shown once locked
         }
     }
 

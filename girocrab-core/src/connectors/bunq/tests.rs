@@ -1568,3 +1568,155 @@ fn survey_shape(o: &Value, now: chrono::NaiveDateTime, prefix: &str) -> String {
     }
     parts.join(" ")
 }
+
+// ---- Draft withdrawal (cancel) against a scripted local server ----
+
+/// Serves one scripted reply per connection (`None` = drop the connection
+/// without answering). Returns the base URL and the request lines seen.
+async fn scripted_server(
+    replies: Vec<Option<(u16, &'static str)>>,
+) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    tokio::spawn(async move {
+        for reply in replies {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = vec![0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]);
+            log.lock()
+                .unwrap()
+                .push(head.lines().next().unwrap_or_default().to_string());
+            if let Some((code, body)) = reply {
+                let resp = format!(
+                    "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+            // Dropping the socket closes it (also the "disconnect" case).
+        }
+    });
+    (base, seen)
+}
+
+const REJECTED: &str = r#"{"Response":[{"DraftPayment":{"status":"REJECTED"}}]}"#;
+const PENDING: &str = r#"{"Response":[{"DraftPayment":{"status":"PENDING"}}]}"#;
+const ACCEPTED: &str = r#"{"Response":[{"DraftPayment":{"status":"ACCEPTED"}}]}"#;
+const HTTP_ERR: &str = r#"{"Error":[{"error_description":"nope"}]}"#;
+
+fn connector_with_draft(base: String) -> BunqConnector {
+    let mut c = BunqConnector::new();
+    c.client = Some(http_client().unwrap());
+    c.base = base;
+    c.state.user_id = 1;
+    c.order_submitted = true;
+    c.draft = Some(PendingDraft {
+        account_id: 5,
+        draft_id: 9,
+        challenge: Challenge {
+            kind: ChallengeKind::DecoupledPush,
+            title: "t".into(),
+            message: "m".into(),
+            method_name: "bunq".into(),
+            redirect_url: None,
+            image: None,
+            expires_in_seconds: None,
+            poll_interval_seconds: 3,
+        },
+        poll_failures: 0,
+    });
+    c
+}
+
+#[tokio::test]
+async fn confirmed_draft_rejection_is_cancelled() {
+    let (base, seen) = scripted_server(vec![Some((200, "{}")), Some((200, REJECTED))]).await;
+    let mut c = connector_with_draft(base);
+    assert_eq!(c.withdraw_draft().await, CancelOutcome::Cancelled);
+    assert!(c.draft.is_none() && !c.has_open_order() && !c.order_submitted());
+    {
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].starts_with("PUT ") && seen[0].contains("/draft-payment/9"));
+        assert!(seen[1].starts_with("GET "));
+    }
+    // Nothing left to withdraw: no further request.
+    assert_eq!(c.withdraw_draft().await, CancelOutcome::Cancelled);
+}
+
+#[tokio::test]
+async fn http_error_on_rejection_keeps_the_draft() {
+    let (base, _) = scripted_server(vec![Some((400, HTTP_ERR)), Some((200, PENDING))]).await;
+    let mut c = connector_with_draft(base);
+    let out = c.withdraw_draft().await;
+    assert!(
+        matches!(out, CancelOutcome::CancellationFailed { .. }),
+        "{out:?}"
+    );
+    assert!(c.draft.is_some() && c.has_open_order());
+    assert!(c.order_submitted(), "still unclear, never plain failed");
+}
+
+#[tokio::test]
+async fn disconnect_on_rejection_is_unknown_and_retryable() {
+    let (base, _) =
+        scripted_server(vec![None, None, Some((200, "{}")), Some((200, REJECTED))]).await;
+    let mut c = connector_with_draft(base);
+    let out = c.withdraw_draft().await;
+    assert!(
+        matches!(out, CancelOutcome::CancellationUnknown { .. }),
+        "{out:?}"
+    );
+    assert!(c.draft.is_some());
+    // Retry re-sends the rejection and re-checks the status.
+    assert_eq!(c.withdraw_draft().await, CancelOutcome::Cancelled);
+    assert!(c.draft.is_none());
+}
+
+#[tokio::test]
+async fn status_still_open_after_rejection_is_pending_then_confirmed() {
+    let (base, _) = scripted_server(vec![
+        Some((200, "{}")),
+        Some((200, PENDING)),
+        Some((200, "{}")),
+        Some((200, REJECTED)),
+    ])
+    .await;
+    let mut c = connector_with_draft(base);
+    let out = c.withdraw_draft().await;
+    assert!(
+        matches!(out, CancelOutcome::CancellationPending { .. }),
+        "{out:?}"
+    );
+    assert!(c.draft.is_some());
+    assert_eq!(c.withdraw_draft().await, CancelOutcome::Cancelled);
+}
+
+#[tokio::test]
+async fn already_rejected_draft_is_cancelled_despite_http_error() {
+    let (base, _) = scripted_server(vec![Some((400, HTTP_ERR)), Some((200, REJECTED))]).await;
+    let mut c = connector_with_draft(base);
+    assert_eq!(c.withdraw_draft().await, CancelOutcome::Cancelled);
+    assert!(c.draft.is_none());
+}
+
+#[tokio::test]
+async fn already_approved_draft_cannot_be_cancelled() {
+    let (base, _) = scripted_server(vec![Some((400, HTTP_ERR)), Some((200, ACCEPTED))]).await;
+    let mut c = connector_with_draft(base);
+    let out = c.withdraw_draft().await;
+    assert!(
+        matches!(out, CancelOutcome::CancellationFailed { .. }),
+        "{out:?}"
+    );
+    assert!(c.draft.is_none());
+    assert_eq!(
+        c.transfer_result(),
+        TransferResult::Executed { instant: false }
+    );
+}

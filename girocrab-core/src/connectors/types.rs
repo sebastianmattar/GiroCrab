@@ -139,6 +139,26 @@ pub struct TransferOutcome {
     pub end_to_end_id: String,
 }
 
+/// Result of `TransferSession::cancel()`. Closing the session in GiroCrab is
+/// not the same as the bank confirming that nothing can be paid any more.
+/// Everything except `Cancelled` leaves the order tracked: `cancel()` can be
+/// called again and re-checks the bank's status before anything is resent.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CancelOutcome {
+    /// Confirmed: no order exists at the bank, or the bank reports it as
+    /// rejected/cancelled/expired.
+    Cancelled,
+    /// The bank took the cancellation request but still shows the order as
+    /// open. Retry to re-check.
+    CancellationPending { reason: String },
+    /// The request or the status check got no answer (network, timeout):
+    /// the order may or may not be cancelled. Retry to re-check.
+    CancellationUnknown { reason: String },
+    /// The bank refused the cancellation (HTTP error) and the order is
+    /// still open, or it was already approved/executed. `reason` says which.
+    CancellationFailed { reason: String },
+}
+
 /// Connector-side result of a transfer once it reached `Phase::Ready`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferResult {
@@ -438,6 +458,13 @@ pub trait BankConnector: Send {
     async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult>;
     /// Close the bank session (FinTS dialog end, logout). Best effort.
     async fn finish(&mut self, _ctx: &ConnectContext) {}
+    /// User cancelled a transfer that is not finished. Connectors whose order
+    /// can outlive the session (bunq draft) override this to withdraw it and
+    /// report whether the bank confirmed. Default: `finish`, nothing to withdraw.
+    async fn cancel_transfer(&mut self, ctx: &ConnectContext) -> CancelOutcome {
+        self.finish(ctx).await;
+        CancelOutcome::Cancelled
+    }
     /// Submit a SEPA credit transfer (only valid after `Ready`). `Ready`
     /// means the bank accepted it; challenges are answered via `respond`.
     async fn send_transfer(
@@ -458,6 +485,11 @@ pub trait BankConnector: Send {
     /// true once the order itself was handed to the bank. A connection error
     /// after that point means the result is unknown, not "not executed".
     fn order_submitted(&self) -> bool {
+        false
+    }
+    /// true while the bank may still hold an order that could be paid
+    /// (bunq: draft not confirmed rejected). Lets `cancel()` retry.
+    fn has_open_order(&self) -> bool {
         false
     }
 }

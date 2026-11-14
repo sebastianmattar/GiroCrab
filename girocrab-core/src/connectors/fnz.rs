@@ -29,21 +29,18 @@ fn field<'a>(v: &'a Value, pointer: &str) -> CoreResult<&'a str> {
         .ok_or_else(|| invalid("FNZ: Unvollständige Portalantwort. Bitte erneut anmelden."))
 }
 
-fn overview(json: &str) -> CoreResult<FetchResult> {
-    let v: Value =
-        serde_json::from_str(json).map_err(|_| invalid("FNZ: Ungültige Kontoübersicht."))?;
+/// ISO 4217 shape: three uppercase ASCII letters.
+fn is_currency_code(s: &str) -> bool {
+    s.len() == 3 && s.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// Open (not closed) account rows as (owner group, account kind, row), in portal order.
+fn open_rows(v: &Value) -> CoreResult<Vec<(&Value, &'static str, &Value)>> {
     let groups = v["ownerGroups"]
         .as_array()
         .ok_or_else(|| invalid("FNZ: Keine Kontoübersicht erkannt. Bitte erneut anmelden."))?;
-    let mut accounts = Vec::new();
-    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
     for group in groups {
-        let owners: Vec<&str> = group["sortedDepotOwners"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|o| o["displayName"].as_str())
-            .collect();
         for key in [
             "investmentDepots",
             "managedDepots",
@@ -51,58 +48,78 @@ fn overview(json: &str) -> CoreResult<FetchResult> {
             "preciousMetalDepots",
             "cashAccounts",
         ] {
-            let Some(rows) = group[key].as_array() else {
+            let Some(list) = group[key].as_array() else {
                 return Err(invalid("FNZ: Unvollständige Kontoübersicht."));
             };
-            for row in rows {
-                let account = &row["depotOrCashAccount"];
-                if account["closedFlag"].as_bool() == Some(true) {
-                    continue;
+            for row in list {
+                if row["depotOrCashAccount"]["closedFlag"].as_bool() != Some(true) {
+                    rows.push((group, key, row));
                 }
-                // Never turn an absent/hidden/stale valuation into a current zero.
-                if [
-                    "hideInventoryAndProfitAndLossFlag",
-                    "inventoryMightBeOutdatedFlag",
-                ]
-                .iter()
-                .any(|k| row[*k].as_bool() == Some(true))
-                {
-                    return Err(invalid("FNZ: Bestände sind ausgeblendet oder veraltet. Es wurden keine Salden aktualisiert."));
-                }
-                let number = field(account, "/externalDepotNumber/externalDepotNumber")?;
-                let amount = field(row, "/depotInventorySumAccountCurrency/value")?;
-                let currency = field(row, "/depotInventorySumAccountCurrency/currencyId/id")?;
-                if currency.len() != 3 || !currency.bytes().all(|b| b.is_ascii_uppercase()) {
-                    return Err(invalid("FNZ: Unbekannte Kontowährung."));
-                }
-                let cents = crate::money::parse_cents(amount)
-                    .map_err(|_| invalid("FNZ: Ungültiger Saldo in der Kontoübersicht."))?;
-                if !seen.insert(number.to_string()) {
-                    continue;
-                }
-                accounts.push(RemoteAccount {
-                    external_ref: number.into(),
-                    account_number: number.into(),
-                    name: field(account, "/externalDepotName")?.into(),
-                    owner: owners.join(", "),
-                    iban: String::new(),
-                    currency: currency.into(),
-                    kind: if key == "cashAccounts" {
-                        match account["cashAccountContractTypeAndSubtype"].as_str() {
-                            Some(
-                                "SAVINGS_ACCOUNT" | "FIXED_TERM_ACCOUNT" | "TIME_DEPOSIT_ACCOUNT",
-                            ) => AccountKind::Savings,
-                            _ => AccountKind::Checking,
-                        }
-                    } else {
-                        AccountKind::Brokerage
-                    },
-                    balance_cents: cents,
-                    // The overview has no valuation timestamp: this is the retrieval date.
-                    balance_date: chrono::Utc::now().date_naive().to_string(),
-                });
             }
         }
+    }
+    Ok(rows)
+}
+
+fn parse_overview(json: &str) -> CoreResult<FetchResult> {
+    let v: Value =
+        serde_json::from_str(json).map_err(|_| invalid("FNZ: Ungültige Kontoübersicht."))?;
+    overview(&v)
+}
+
+fn overview(v: &Value) -> CoreResult<FetchResult> {
+    let mut accounts = Vec::new();
+    let mut seen = HashSet::new();
+    for (group, key, row) in open_rows(v)? {
+        let owners: Vec<&str> = group["sortedDepotOwners"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|o| o["displayName"].as_str())
+            .collect();
+        let account = &row["depotOrCashAccount"];
+        // Never turn an absent/hidden/stale valuation into a current zero.
+        if [
+            "hideInventoryAndProfitAndLossFlag",
+            "inventoryMightBeOutdatedFlag",
+        ]
+        .iter()
+        .any(|k| row[*k].as_bool() == Some(true))
+        {
+            return Err(invalid("FNZ: Bestände sind ausgeblendet oder veraltet. Es wurden keine Salden aktualisiert."));
+        }
+        let number = field(account, "/externalDepotNumber/externalDepotNumber")?;
+        let amount = field(row, "/depotInventorySumAccountCurrency/value")?;
+        let currency = field(row, "/depotInventorySumAccountCurrency/currencyId/id")?;
+        if !is_currency_code(currency) {
+            return Err(invalid("FNZ: Unbekannte Kontowährung."));
+        }
+        let cents = crate::money::parse_cents(amount)
+            .map_err(|_| invalid("FNZ: Ungültiger Saldo in der Kontoübersicht."))?;
+        if !seen.insert(number.to_string()) {
+            continue;
+        }
+        accounts.push(RemoteAccount {
+            external_ref: number.into(),
+            account_number: number.into(),
+            name: field(account, "/externalDepotName")?.into(),
+            owner: owners.join(", "),
+            iban: String::new(),
+            currency: currency.into(),
+            kind: if key == "cashAccounts" {
+                match account["cashAccountContractTypeAndSubtype"].as_str() {
+                    Some("SAVINGS_ACCOUNT" | "FIXED_TERM_ACCOUNT" | "TIME_DEPOSIT_ACCOUNT") => {
+                        AccountKind::Savings
+                    }
+                    _ => AccountKind::Checking,
+                }
+            } else {
+                AccountKind::Brokerage
+            },
+            balance_cents: cents,
+            // The overview has no valuation timestamp: this is the retrieval date.
+            balance_date: chrono::Utc::now().date_naive().to_string(),
+        });
     }
     if accounts.is_empty() {
         return Err(invalid(
@@ -129,7 +146,7 @@ impl Vault {
         if self.portal_connection(connection_id)?.0 != ConnectorKind::Fnz {
             return Err(invalid("Keine FNZ-Bankverbindung."));
         }
-        Ok(())
+        crate::banking_gate::check_connector("fnz")
     }
 }
 
@@ -146,7 +163,7 @@ impl Vault {
             &self,
             ConnectorKind::Fnz,
             connection_id,
-            overview(&overview_json)?,
+            parse_overview(&overview_json)?,
         )?;
         let _ = self.checkpoint();
         Ok(summary)
@@ -164,21 +181,22 @@ impl Vault {
             .map_err(|_| invalid("FNZ: Ungültige Dokumentenliste."))?;
         let db = self.db()?;
         let mut known = db.prepare("SELECT 1 FROM booking_documents WHERE source_url = ?1")?;
+        let mut excluded = db.prepare(
+            "SELECT archived_unix IS NOT NULL OR deleted_ms IS NOT NULL FROM accounts
+              WHERE connection_id = ?1 AND external_ref = ?2",
+        )?;
         let mut seen = HashSet::new();
         let mut pending = Vec::new();
         for doc in docs {
             let id = field(&doc, "/id")?;
             let account_ref = document_account(&doc)?;
-            let excluded: bool = db
-                .query_row(
-                    "SELECT archived_unix IS NOT NULL OR deleted_ms IS NOT NULL FROM accounts
-                 WHERE connection_id = ?1 AND external_ref = ?2",
-                    params![connection_id, account_ref],
-                    |r| r.get(0),
-                )
+            // Unknown accounts (e.g. closed depots the overview skips) would only fail
+            // in import_fnz_document after the download.
+            if excluded
+                .query_row(params![connection_id, account_ref], |r| r.get(0))
                 .optional()?
-                .unwrap_or(false);
-            if excluded {
+                .unwrap_or(true)
+            {
                 continue;
             }
             if seen.insert(id.to_string())
@@ -308,7 +326,7 @@ mod tests {
 
     #[test]
     fn separates_owners_accounts_and_depots_without_counting_totals() {
-        let r = overview(&fixture().to_string()).unwrap();
+        let r = parse_overview(&fixture().to_string()).unwrap();
         assert_eq!(r.accounts.len(), 4);
         assert_eq!(r.accounts[0].kind, AccountKind::Brokerage);
         assert_eq!(r.accounts[1].kind, AccountKind::Checking);
@@ -322,7 +340,7 @@ mod tests {
         zero["ownerGroups"][0]["cashAccounts"][0]["depotInventorySumAccountCurrency"]["value"] =
             json!("0.00");
         assert_eq!(
-            overview(&zero.to_string()).unwrap().accounts[1].balance_cents,
+            parse_overview(&zero.to_string()).unwrap().accounts[1].balance_cents,
             0
         );
     }
@@ -335,16 +353,16 @@ mod tests {
         ] {
             let mut v = fixture();
             v["ownerGroups"][0]["cashAccounts"][0][key] = json!(true);
-            assert!(overview(&v.to_string()).is_err());
+            assert!(parse_overview(&v.to_string()).is_err());
         }
         for value in [Value::Null, json!(""), json!("invalid"), json!("12.345")] {
             let mut v = fixture();
             v["ownerGroups"][0]["cashAccounts"][0]["depotInventorySumAccountCurrency"]["value"] =
                 value;
-            assert!(overview(&v.to_string()).is_err());
+            assert!(parse_overview(&v.to_string()).is_err());
         }
         for v in ["{}", "[]", "<html>login</html>", "{\"ownerGroups\":[]}"] {
-            assert!(overview(v).is_err());
+            assert!(parse_overview(v).is_err());
         }
     }
 
@@ -356,7 +374,7 @@ mod tests {
         let conn = v
             .add_bank_connection(ConnectorKind::Fnz, "FNZ Test".into(), "test".into())
             .unwrap();
-        let mut initial = overview(&fixture().to_string()).unwrap();
+        let mut initial = parse_overview(&fixture().to_string()).unwrap();
         initial.holdings.push(super::super::RemoteHolding {
             account_ref: "D1".into(),
             holding: crate::models::Holding {
@@ -435,6 +453,15 @@ mod tests {
         );
         let other = v
             .add_bank_connection(ConnectorKind::Fnz, "Other FNZ".into(), "other".into())
+            .unwrap();
+        // Not yet known in this connection: nothing to download.
+        assert!(v
+            .clone()
+            .pending_fnz_documents(other, format!("[{doc}]"))
+            .unwrap()
+            .is_empty());
+        v.clone()
+            .import_fnz_overview(other, fixture().to_string())
             .unwrap();
         assert_eq!(
             v.clone()
