@@ -438,14 +438,17 @@ fn import_categories_splits_pending_notes_and_balance() {
     assert_eq!(usd.currency, "USD");
     assert_eq!(bookings(&v, usd.id)[0].amount_cents, 2526);
 
-    // #212: MoneyMoney's opening balances carry over and keep driving the balance
+    // #212: MoneyMoney's opening balances carry over, undated as in
+    // MoneyMoney, and calibrated to the imported balance (100,00 at 2020-01-01
+    // + newer bookings) over all bookings (incl. the 2005 salary)
     assert!(giro.balance_derived);
+    assert_eq!(giro.balance_cents, 10_000 - 4567 - 1230 - 10_000);
     assert_eq!(
         (
             giro.opening_balance_cents,
             giro.opening_balance_date.as_str()
         ),
-        (Some(10_000), "2020-01-01")
+        (Some(10_000 - 250_000), "")
     );
     assert_eq!(
         (usd.opening_balance_cents, usd.opening_balance_date.as_str()),
@@ -456,7 +459,10 @@ fn import_categories_splits_pending_notes_and_balance() {
     assert_eq!(account_by_name(&v, "Depot").opening_balance_cents, None);
     v.calibrate_account_opening_balance(giro.id, 0).unwrap();
     let giro = account_by_name(&v, "Girokonto");
-    assert_eq!(giro.opening_balance_cents, Some(4567 + 1230 + 10_000));
+    assert_eq!(
+        giro.opening_balance_cents,
+        Some(4567 + 1230 + 10_000 - 250_000)
+    );
     assert_eq!(giro.balance_cents, 0);
 }
 
@@ -838,7 +844,7 @@ fn opening_balance_applies_to_accounts_linked_to_a_bank_login() {
     let giro = account_by_name(&v, "Girokonto");
     assert!(giro.connection_id.is_some());
     assert!(giro.balance_derived);
-    assert_eq!(giro.opening_balance_cents, Some(10_000));
+    assert_eq!(giro.opening_balance_cents, Some(10_000 - 250_000));
     v.calibrate_account_opening_balance(giro.id, 0).unwrap();
     assert_eq!(account_by_name(&v, "Girokonto").balance_cents, 0);
     // taken over by a sync: the bank's balance counts, not the Startsaldo
@@ -1617,13 +1623,46 @@ fn shown_balance_also_wins_for_checking_accounts() {
     assert_eq!(acc.balance_cents, 123_456);
     // balance date = max(newest booking, balance timestamp)
     assert_eq!(acc.balance_date, "2026-03-08");
-    // #212: the opening balance is calibrated to MoneyMoney's own balance,
-    // its date kept, so later bookings continue from the shown value
-    assert_eq!(acc.opening_balance_date, "2020-01-01");
+    // #212: the opening balance is calibrated to MoneyMoney's own balance
+    // over all bookings (undated), so later bookings continue from it
+    assert_eq!(acc.opening_balance_date, "");
     assert_eq!(
         acc.opening_balance_cents,
-        Some(123_456 + 4567 + 1230 + 10_000)
+        Some(123_456 + 4567 + 1230 + 10_000 - 250_000)
     );
+}
+
+#[test]
+fn opening_balance_ignores_a_balance_history_date_after_the_last_booking() {
+    // #212: a closed card whose newest balance-history row (2025-05-31) lies
+    // after its last booking (2024-02-29). Dated like that, the Startsaldo
+    // hid every booking; MoneyMoney's Startsaldo has no date.
+    let v = vault();
+    let path = fake_db_with(
+        false,
+        "UPDATE accounts SET initial_balance = 19.99, balances = CAST('8:0.000000,3:EUR,' AS BLOB),
+                balance_tsp = 1748692800 WHERE rowid = 2;
+         INSERT INTO balances (account_key, currency, timestamp, initial_balance)
+                VALUES (2, 'EUR', 1748692800, 0.0);",
+    );
+    let p = v
+        .preview_moneymoney_database(path.clone(), PW.into(), None)
+        .unwrap();
+    v.import_moneymoney_database(path, PW.into(), options_from(&p, false, false))
+        .unwrap();
+    let visa = account_by_name(&v, "Visa-Karte");
+    assert_eq!(visa.balance_cents, 0);
+    assert_eq!(
+        (
+            visa.opening_balance_cents,
+            visa.opening_balance_date.as_str()
+        ),
+        (Some(1999), "")
+    );
+    let preview = v
+        .preview_account_opening_balance(visa.id, String::new())
+        .unwrap();
+    assert_eq!((preview.counted, preview.older), (1, 0));
 }
 
 #[test]
