@@ -81,6 +81,10 @@ payment amount in the overview. They are retained as zero-value journal events;
 these rows must not be interpreted as complete cash flows. Cash-account flows
 are imported separately. Transaction IDs include the full structured bank ID,
 including null/empty discriminators, with separate cash/depot/migration namespaces.
+Cash rows that are still only an order (no `transactionId` yet) use their own
+`fnz:order:` namespace and are kept only while the portal reports them, so the
+booked row replaces them instead of duplicating them. Depot events without a
+payment amount must carry `numberSign` `0` (also in migrated history).
 
 The observed fund inventory supplies **no acquisition price**. Its lifetime
 profit/loss includes realized gains/distributions and is not an unrealized
