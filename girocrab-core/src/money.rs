@@ -100,6 +100,34 @@ pub fn json_number_to_cents(v: &serde_json::Value) -> CoreResult<i64> {
     }
 }
 
+/// Like [`json_number_to_cents`], but rounds extra decimals half away from
+/// zero instead of rejecting them ("412.3871" -> 41239). For computed
+/// values such as depot position values; bookings stay strict.
+pub fn json_number_to_cents_rounded(v: &serde_json::Value) -> CoreResult<i64> {
+    let text = match v {
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.trim().to_string(),
+        _ => return json_number_to_cents(v),
+    };
+    let Some((int_part, frac)) = text.split_once('.') else {
+        return parse_cents(&text);
+    };
+    if frac.len() <= 2 || !frac.bytes().all(|c| c.is_ascii_digit()) {
+        return parse_cents(&text);
+    }
+    let neg = int_part.starts_with('-');
+    let cents = parse_cents(&format!("{int_part}.{}", &frac[..2]))?;
+    if frac.as_bytes()[2] < b'5' {
+        return Ok(cents);
+    }
+    let step = if neg { -1 } else { 1 };
+    cents
+        .checked_add(step)
+        .ok_or_else(|| CoreError::InvalidInput {
+            message: trf("Betrag zu groß: „{0}“", &[&text]),
+        })
+}
+
 /// German-style formatting used in logs/tests: "-1.234,56 EUR".
 #[uniffi::export]
 pub fn format_cents(cents: i64, currency: String) -> String {
@@ -127,6 +155,22 @@ pub fn format_cents(cents: i64, currency: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounds_extra_json_decimals() {
+        use serde_json::json;
+        let r = |v| json_number_to_cents_rounded(&v).unwrap();
+        assert_eq!(r(json!("412.3871")), 41239);
+        assert_eq!(r(json!("412.3849")), 41238);
+        assert_eq!(r(json!("-0.005")), -1);
+        assert_eq!(r(json!("-12.344")), -1234);
+        assert_eq!(r(json!(61.3412)), 6134);
+        assert_eq!(r(json!("766.75")), 76675);
+        assert_eq!(r(json!("12")), 1200);
+        assert!(json_number_to_cents_rounded(&json!(null)).is_err());
+        // The strict parser keeps rejecting them.
+        assert!(json_number_to_cents(&json!("412.3871")).is_err());
+    }
 
     #[test]
     fn parses_common_formats() {

@@ -22,7 +22,7 @@ use super::{
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::models::AccountKind;
-use crate::money::json_number_to_cents;
+use crate::money::{json_number_to_cents, json_number_to_cents_rounded};
 use crate::secret::SecretString;
 
 const BASE: &str = "https://api.comdirect.de";
@@ -567,7 +567,9 @@ impl BankConnector for ComdirectConnector {
                     parse_positions(&pos).len()
                 ));
                 let external_ref = format!("depot:{depot_id}");
-                for h in parse_positions(&pos) {
+                let holdings = parse_positions(&pos);
+                let balance_cents = depot_value_cents(&pos, &holdings);
+                for h in holdings {
                     out.holdings.push(super::RemoteHolding {
                         account_ref: external_ref.clone(),
                         holding: h,
@@ -581,10 +583,7 @@ impl BankConnector for ComdirectConnector {
                     account_number: d["depotDisplayId"].as_str().unwrap_or_default().to_string(),
                     currency: "EUR".into(),
                     kind: AccountKind::Brokerage,
-                    balance_cents: json_number_to_cents(
-                        &pos["aggregated"]["currentValue"]["value"],
-                    )
-                    .unwrap_or(0),
+                    balance_cents,
                     balance_date: super::today(),
                 });
             }
@@ -673,9 +672,17 @@ fn map_transaction(t: &Value, account_ref: &str) -> RemoteTransaction {
     }
 }
 
+/// Depot total: `aggregated.currentValue`, else the sum of the position values.
+fn depot_value_cents(pos: &Value, holdings: &[crate::models::Holding]) -> i64 {
+    json_number_to_cents_rounded(&pos["aggregated"]["currentValue"]["value"])
+        .unwrap_or_else(|_| holdings.iter().map(|h| h.value_cents).sum())
+}
+
 /// Parses `/brokerage/v3/depots/{id}/positions` into holdings (amounts in cents).
+/// Prices and computed values carry up to 4+ decimals (fractional savings-plan
+/// shares), so they are rounded rather than rejected.
 pub(crate) fn parse_positions(pos: &Value) -> Vec<crate::models::Holding> {
-    let cents = |v: &Value| json_number_to_cents(&v["value"]).unwrap_or(0);
+    let cents = |v: &Value| json_number_to_cents_rounded(&v["value"]).unwrap_or(0);
     pos["values"]
         .as_array()
         .map(|a| a.as_slice())
@@ -798,6 +805,35 @@ mod tests {
         assert_eq!(h[0].current_price_cents, 6134);
         assert_eq!(h[0].purchase_price_cents, 5510);
         assert_eq!(h[0].value_cents, 76675);
+    }
+
+    #[test]
+    fn rounds_depot_values_with_extra_decimals() {
+        // Issue #339: a fractional savings-plan position (4-decimal value)
+        // used to be read as 0, and with it the aggregated depot total.
+        let j: serde_json::Value = serde_json::from_str(
+            r#"{"values":[
+          {"wkn":"A0RPWH","quantity":{"value":"3.2871","unit":"XXX"},
+           "currentPrice":{"price":{"value":"125.4562","unit":"EUR"}},
+           "purchasePrice":{"value":"98.1234","unit":"EUR"},
+           "currentValue":{"value":"412.3871","unit":"EUR"},
+           "instrument":{"isin":"IE00B4L5Y983","name":"ETF"}},
+          {"wkn":"716460","quantity":{"value":"10","unit":"XXX"},
+           "currentPrice":{"price":{"value":"50.00","unit":"EUR"}},
+           "currentValue":{"value":"500.00","unit":"EUR"},
+           "instrument":{"isin":"DE0007164600","name":"SAP"}}],
+          "aggregated":{"currentValue":{"value":"912.3871","unit":"EUR"}}}"#,
+        )
+        .unwrap();
+        let h = super::parse_positions(&j);
+        assert_eq!(h[0].value_cents, 41239);
+        assert_eq!(h[0].current_price_cents, 12546);
+        assert_eq!(h[0].purchase_price_cents, 9812);
+        assert_eq!(super::depot_value_cents(&j, &h), 91239);
+        // No usable aggregate: sum of the positions.
+        let mut j = j;
+        j["aggregated"] = serde_json::Value::Null;
+        assert_eq!(super::depot_value_cents(&j, &h), 91239);
     }
 
     #[test]
