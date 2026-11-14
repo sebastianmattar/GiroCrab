@@ -65,10 +65,22 @@ pub(crate) fn store_fetch(
         let db = vault.db()?;
         let tx = db.unchecked_transaction()?;
         let generic_bank_name = descriptor(kind).name;
+        // No name from the bank: the connection's display name (the bank picked
+        // when adding it, or renamed later) beats the generic "FinTS-Bank".
+        let display_name: Option<String> = tx
+            .query_row(
+                "SELECT display_name FROM bank_connections WHERE id = ?1",
+                [connection_id],
+                |r| r.get(0),
+            )
+            .optional()?;
         let bank_name = data
             .bank_name
             .clone()
-            .filter(|b| !b.trim().is_empty())
+            .into_iter()
+            .chain(display_name)
+            .map(|b| b.trim().to_string())
+            .find(|b| !b.is_empty())
             .unwrap_or_else(|| generic_bank_name.clone());
         let mut data = data;
         // safety net for every connector: repair UTF-8/Latin-1 mojibake
