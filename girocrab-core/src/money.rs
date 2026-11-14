@@ -14,6 +14,17 @@ pub fn parse_amount_to_cents(text: String) -> Result<i64, CoreError> {
 }
 
 pub fn parse_cents(text: &str) -> CoreResult<i64> {
+    parse_cents_with(text, false)
+}
+
+/// Like [`parse_cents`], but rounds extra decimals half away from zero
+/// instead of rejecting them ("412.3871" -> 41239, "1.234,5678" -> 123457).
+/// For computed values such as depot prices and values; bookings stay strict.
+pub fn parse_cents_rounded(text: &str) -> CoreResult<i64> {
+    parse_cents_with(text, true)
+}
+
+fn parse_cents_with(text: &str, round: bool) -> CoreResult<i64> {
     let t = text.trim();
     if t.is_empty() {
         return Err(CoreError::InvalidInput {
@@ -60,7 +71,9 @@ pub fn parse_cents(text: &str) -> CoreResult<i64> {
             message: trf("Kein gültiger Betrag: „{0}“", &[&text]),
         });
     }
-    if frac_part.len() > 2 {
+    // Third decimal >= 5 rounds the cents up (away from zero, sign applied last).
+    let round_up = round && frac_part.as_bytes().get(2).is_some_and(|&d| d >= b'5');
+    if frac_part.len() > 2 && !round {
         // Allow trailing zeros only ("1.500" from some JSON APIs)
         if frac_part[2..].chars().any(|c| c != '0') {
             return Err(CoreError::InvalidInput {
@@ -82,7 +95,7 @@ pub fn parse_cents(text: &str) -> CoreResult<i64> {
     let frac_val: i64 = frac.parse().unwrap_or(0);
     let cents = int_val
         .checked_mul(100)
-        .and_then(|v| v.checked_add(frac_val))
+        .and_then(|v| v.checked_add(frac_val + i64::from(round_up)))
         .ok_or_else(|| CoreError::InvalidInput {
             message: trf("Betrag zu groß: „{0}“", &[&text]),
         })?;
@@ -100,32 +113,21 @@ pub fn json_number_to_cents(v: &serde_json::Value) -> CoreResult<i64> {
     }
 }
 
-/// Like [`json_number_to_cents`], but rounds extra decimals half away from
-/// zero instead of rejecting them ("412.3871" -> 41239). For computed
-/// values such as depot position values; bookings stay strict.
+/// Like [`json_number_to_cents`], but rounds extra decimals (see
+/// [`parse_cents_rounded`]). JSON floats that print in exponent form
+/// ("4e-7") fall back to `f64` rounding.
 pub fn json_number_to_cents_rounded(v: &serde_json::Value) -> CoreResult<i64> {
-    let text = match v {
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => s.trim().to_string(),
-        _ => return json_number_to_cents(v),
-    };
-    let Some((int_part, frac)) = text.split_once('.') else {
-        return parse_cents(&text);
-    };
-    if frac.len() <= 2 || !frac.bytes().all(|c| c.is_ascii_digit()) {
-        return parse_cents(&text);
+    match v {
+        serde_json::Value::Number(n) => parse_cents_rounded(&n.to_string()).or_else(|e| {
+            n.as_f64()
+                .map(|f| (f * 100.0).round())
+                .filter(|c| c.is_finite() && c.abs() < i64::MAX as f64)
+                .map(|c| c as i64)
+                .ok_or(e)
+        }),
+        serde_json::Value::String(s) => parse_cents_rounded(s),
+        _ => json_number_to_cents(v),
     }
-    let neg = int_part.starts_with('-');
-    let cents = parse_cents(&format!("{int_part}.{}", &frac[..2]))?;
-    if frac.as_bytes()[2] < b'5' {
-        return Ok(cents);
-    }
-    let step = if neg { -1 } else { 1 };
-    cents
-        .checked_add(step)
-        .ok_or_else(|| CoreError::InvalidInput {
-            message: trf("Betrag zu groß: „{0}“", &[&text]),
-        })
 }
 
 /// German-style formatting used in logs/tests: "-1.234,56 EUR".
@@ -166,6 +168,11 @@ mod tests {
         assert_eq!(r(json!("-12.344")), -1234);
         assert_eq!(r(json!(61.3412)), 6134);
         assert_eq!(r(json!("766.75")), 76675);
+        assert_eq!(r(json!("1.234,5678")), 123457);
+        assert_eq!(r(json!("12,3456")), 1235);
+        assert_eq!(r(json!("0.999")), 100);
+        assert_eq!(r(json!(4e-7)), 0);
+        assert_eq!(r(json!(2.5e16)), 2_500_000_000_000_000_000);
         assert_eq!(r(json!("12")), 1200);
         assert!(json_number_to_cents_rounded(&json!(null)).is_err());
         // The strict parser keeps rejecting them.

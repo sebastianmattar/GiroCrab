@@ -28,7 +28,7 @@ use super::{
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::models::{AccountKind, Holding};
-use crate::money::json_number_to_cents;
+use crate::money::{json_number_to_cents, json_number_to_cents_rounded};
 
 const GRAPHQL_URL: &str = "https://de.scalable.capital/api/cli/graphql";
 const ISSUER: &str = "https://secure.scalable.capital";
@@ -421,8 +421,8 @@ pub(crate) fn map_holdings(inventory: &Value) -> Vec<Holding> {
             }
             let pos = &it["inventory"]["position"];
             let quantity = f64_of(&pos["filled"]);
-            let mut price = json_number_to_cents(&it["quoteTick"]["midPrice"]).unwrap_or(0);
-            let value = json_number_to_cents(&it["portfolioIsinPerformance"]["valuation"])
+            let mut price = json_number_to_cents_rounded(&it["quoteTick"]["midPrice"]).unwrap_or(0);
+            let value = json_number_to_cents_rounded(&it["portfolioIsinPerformance"]["valuation"])
                 .unwrap_or_else(|_| ((price as f64) * quantity).round() as i64);
             if price == 0 && quantity > 0.0 {
                 price = ((value as f64) / quantity).round() as i64;
@@ -433,7 +433,7 @@ pub(crate) fn map_holdings(inventory: &Value) -> Vec<Holding> {
                 name: str_of(&it["name"]),
                 quantity,
                 current_price_cents: price,
-                purchase_price_cents: json_number_to_cents(&pos["fifoPrice"]).unwrap_or(0),
+                purchase_price_cents: json_number_to_cents_rounded(&pos["fifoPrice"]).unwrap_or(0),
                 value_cents: value,
             })
         })
@@ -1051,9 +1051,10 @@ impl ScalableConnector {
             )
             .await?;
         let valuation = &overview["account"]["brokerPortfolio"]["valuation"];
-        let securities = json_number_to_cents(&valuation["securitiesValuation"]).unwrap_or(0)
-            + json_number_to_cents(&valuation["cryptoValuation"]).unwrap_or(0);
-        let total = json_number_to_cents(&valuation["valuation"]).unwrap_or(securities);
+        let securities = json_number_to_cents_rounded(&valuation["securitiesValuation"])
+            .unwrap_or(0)
+            + json_number_to_cents_rounded(&valuation["cryptoValuation"]).unwrap_or(0);
+        let total = json_number_to_cents_rounded(&valuation["valuation"]).unwrap_or(securities);
         let limits = self.graphql("BrokerLimits", Q_LIMITS, vars.clone()).await;
         let cash = match &limits {
             Ok(v) => json_number_to_cents(
@@ -1542,6 +1543,15 @@ mod tests {
             "portfolioIsinPerformance": {"valuation": "7982.45"}}]});
         let h = map_holdings(&inv);
         assert_eq!(h[0].current_price_cents, 45_61);
+        // #369: quotes and FIFO prices with more than two decimals are rounded, not 0
+        let inv = json!({"items": [{"isin": "X", "name": "N",
+            "inventory": {"position": {"filled": 3.2871, "fifoPrice": 98.1234}},
+            "portfolioIsinPerformance": {"valuation": 412.3871},
+            "quoteTick": {"midPrice": 125.4562}}]});
+        let h = map_holdings(&inv);
+        assert_eq!(h[0].current_price_cents, 125_46);
+        assert_eq!(h[0].purchase_price_cents, 98_12);
+        assert_eq!(h[0].value_cents, 412_39);
     }
 
     #[test]

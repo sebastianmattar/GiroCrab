@@ -560,15 +560,20 @@ impl BankConnector for ComdirectConnector {
                         e.to_string().chars().take(60).collect::<String>()
                     ));
                 }
-                let pos = pos_res.unwrap_or(Value::Null);
+                // A failed request must not report the depot as 0 (store_fetch
+                // would overwrite the known balance); skip it until next sync.
+                let Ok(pos) = pos_res else { continue };
+                let holdings = parse_positions(&pos);
                 crate::depot_debug::log(&format!(
                     "comdirect REST: positions values={} parsed={}",
                     pos["values"].as_array().map(|a| a.len()).unwrap_or(0),
-                    parse_positions(&pos).len()
+                    holdings.len()
                 ));
+                let Some((balance_cents, currency)) = depot_value(&pos) else {
+                    crate::depot_debug::log("comdirect REST: depot value unknown, depot skipped");
+                    continue;
+                };
                 let external_ref = format!("depot:{depot_id}");
-                let holdings = parse_positions(&pos);
-                let balance_cents = depot_value_cents(&pos, &holdings);
                 for h in holdings {
                     out.holdings.push(super::RemoteHolding {
                         account_ref: external_ref.clone(),
@@ -581,7 +586,7 @@ impl BankConnector for ComdirectConnector {
                     owner: String::new(),
                     iban: String::new(),
                     account_number: d["depotDisplayId"].as_str().unwrap_or_default().to_string(),
-                    currency: "EUR".into(),
+                    currency,
                     kind: AccountKind::Brokerage,
                     balance_cents,
                     balance_date: super::today(),
@@ -672,10 +677,26 @@ fn map_transaction(t: &Value, account_ref: &str) -> RemoteTransaction {
     }
 }
 
-/// Depot total: `aggregated.currentValue`, else the sum of the position values.
-fn depot_value_cents(pos: &Value, holdings: &[crate::models::Holding]) -> i64 {
-    json_number_to_cents_rounded(&pos["aggregated"]["currentValue"]["value"])
-        .unwrap_or_else(|_| holdings.iter().map(|h| h.value_cents).sum())
+/// Depot total and currency: `aggregated.currentValue`, else the sum of the
+/// position values. `None` when neither is complete (an unreadable value or
+/// mixed currencies), so a partial sum never replaces the stored balance.
+fn depot_value(pos: &Value) -> Option<(i64, String)> {
+    let unit = |v: &Value| v["unit"].as_str().unwrap_or("EUR").to_string();
+    let agg = &pos["aggregated"]["currentValue"];
+    if let Ok(c) = json_number_to_cents_rounded(&agg["value"]) {
+        return Some((c, unit(agg)));
+    }
+    let mut total = 0i64;
+    let mut currency: Option<String> = None;
+    for p in pos["values"].as_array()? {
+        let v = &p["currentValue"];
+        let u = unit(v);
+        if currency.get_or_insert_with(|| u.clone()) != &u {
+            return None;
+        }
+        total = total.checked_add(json_number_to_cents_rounded(&v["value"]).ok()?)?;
+    }
+    Some((total, currency.unwrap_or_else(|| "EUR".into())))
 }
 
 /// Parses `/brokerage/v3/depots/{id}/positions` into holdings (amounts in cents).
@@ -829,11 +850,30 @@ mod tests {
         assert_eq!(h[0].value_cents, 41239);
         assert_eq!(h[0].current_price_cents, 12546);
         assert_eq!(h[0].purchase_price_cents, 9812);
-        assert_eq!(super::depot_value_cents(&j, &h), 91239);
+        let eur = |c: i64| Some((c, "EUR".to_string()));
+        assert_eq!(super::depot_value(&j), eur(91239));
         // No usable aggregate: sum of the positions.
         let mut j = j;
         j["aggregated"] = serde_json::Value::Null;
-        assert_eq!(super::depot_value_cents(&j, &h), 91239);
+        assert_eq!(super::depot_value(&j), eur(91239));
+        // An unreadable position value makes the sum unknown, not too low.
+        let mut bad = j.clone();
+        bad["values"][1]["currentValue"]["value"] = "n/a".into();
+        assert_eq!(super::depot_value(&bad), None);
+        // Mixed currencies are not summed.
+        let mut mixed = j.clone();
+        mixed["values"][1]["currentValue"]["unit"] = "USD".into();
+        assert_eq!(super::depot_value(&mixed), None);
+        // Failed request (no body) vs. an empty depot.
+        assert_eq!(super::depot_value(&serde_json::Value::Null), None);
+        assert_eq!(
+            super::depot_value(&serde_json::json!({"values": []})),
+            eur(0)
+        );
+        // The aggregate's currency wins.
+        let usd =
+            serde_json::json!({"aggregated":{"currentValue":{"value":"10.005","unit":"USD"}}});
+        assert_eq!(super::depot_value(&usd), Some((1001, "USD".to_string())));
     }
 
     #[test]
