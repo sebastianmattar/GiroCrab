@@ -36,7 +36,7 @@ hits=$(grep -rnE '\.vault([^A-Za-z0-9_"]|$)' GiroCrabApp/Sources --include='*.sw
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)
 
 if [[ -n "$hits" ]]; then
-    echo "Direkter Vault-Zugriff außerhalb von AppModel (siehe scripts/lint-vault-access.sh):" >&2
+    echo "Direct vault access outside AppModel; use model.vaultOffMain / requireVaultOffMain / pinVault / isUnlocked, see scripts/lint-vault-access.sh:" >&2
     echo "$hits" >&2
     exit 1
 fi
