@@ -23,8 +23,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | **`regex`** | `1.13.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
 | **`reqwest`** | `0.13.5` | `MIT OR Apache-2.0` | [https://github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |
 | **`rsa`** | `0.10.0` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/RSA](https://github.com/RustCrypto/RSA) |
-| **`rusqlite`** | `0.41.1` | `MIT` | [https://github.com/rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
-| **`rusqlite_migration`** | `2.7.0` | `Apache-2.0` | [https://github.com/cljoly/rusqlite_migration](https://github.com/cljoly/rusqlite_migration) |
+| **`rusqlite`** | `0.42.0` | `MIT` | [https://github.com/rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
 | **`serde`** | `1.0.229` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/serde](https://github.com/serde-rs/serde) |
 | **`serde_json`** | `1.0.154` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/json](https://github.com/serde-rs/json) |
 | **`sha2`** | `0.11.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
@@ -54,7 +53,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 
 | Component | License | Notes |
 |---|---|---|
-| **SQLCipher** (via `rusqlite` feature `bundled-sqlcipher-vendored-openssl`, crate `sqlcipher-src`) | BSD-style (Zetetic LLC), SQLite public domain | Encrypted vault storage |
+| **SQLCipher 4.20.0 / SQLite 3.54.1** (via `rusqlite` feature `bundled-sqlcipher-vendored-openssl`, crate `sqlcipher-src`) | BSD-style (Zetetic LLC), SQLite public domain | Encrypted vault storage |
 | **OpenSSL** (crate `openssl-src`) | Apache-2.0 | Crypto backend for SQLCipher |
 | **Simple Icons** (via `simpleicons-rs`) | CC0-1.0 (icon data); brand logos remain trademarks of their owners | Merchant/bank icons |
 | **Bundesbank Bankleitzahlendatei** (`tools/gen-bic-directory`) | Public data of Deutsche Bundesbank | BLZ → BIC table |
@@ -190,7 +189,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `jsonwebtoken` | `12.0.0` | `MIT` | [Repo](https://github.com/Keats/jsonwebtoken) (Vincent Prouillet <hello@vincentprouillet.com>) |
 | `libc` | `0.2.191` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/libc) |
 | `libm` | `0.2.16` | `MIT` | [Repo](https://github.com/rust-lang/compiler-builtins) (Alex Crichton <alex@alexcrichton.com>, Amanieu d'Antras <ama) |
-| `libsqlite3-sys` | `0.39.1` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
+| `libsqlite3-sys` | `0.40.0` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
 | `linux-raw-sys` | `0.12.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [Repo](https://github.com/sunfishcode/linux-raw-sys) (Dan Gohman <dev@sunfishcode.online>) |
 | `litemap` | `0.8.3` | `Unicode-3.0` | [Repo](https://github.com/unicode-org/icu4x) (The ICU4X Project Developers) |
 | `litrs` | `1.0.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/LukasKalbertodt/litrs) (Lukas Kalbertodt <lukas.kalbertodt@gmail.com>) |
@@ -251,8 +250,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `ring` | `0.17.14` | `Apache-2.0 AND ISC` | [Repo](https://github.com/briansmith/ring) |
 | `rsa` | `0.10.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/RSA) (RustCrypto Developers, dignifiedquire <dignifiedquire@gmail.) |
 | `rsqlite-vfs` | `0.2.0` | `MIT` | [Repo](https://github.com/Spxg/sqlite-wasm-rs) |
-| `rusqlite` | `0.41.1` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
-| `rusqlite_migration` | `2.7.0` | `Apache-2.0` | [Repo](https://github.com/cljoly/rusqlite_migration) (Clément Joly <foss@131719.xyz>) |
+| `rusqlite` | `0.42.0` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
 | `rustc-hash` | `2.1.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/rust-lang/rustc-hash) (The Rust Project Developers) |
 | `rustc_version` | `0.4.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/djc/rustc-version-rs) |
 | `rustix` | `1.1.6` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [Repo](https://github.com/bytecodealliance/rustix) (Dan Gohman <dev@sunfishcode.online>, Jakub Konka <kubkon@jak) |
@@ -294,8 +292,8 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `smawk` | `0.3.3` | `MIT` | [Repo](https://github.com/mgeisler/smawk) (Martin Geisler <martin@geisler.net>) |
 | `socket2` | `0.6.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/socket2) (Alex Crichton <alex@alexcrichton.com>, Thomas de Zeeuw <thom) |
 | `spki` | `0.8.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
-| `sqlcipher-src` | `419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2` | `MIT AND BSD-3-Clause AND blessing AND WTFPL` | [Repo](https://github.com/LucaCappelletti94/sqlcipher-src) |
-| `sqlite-wasm-rs` | `0.6.2` | `MIT` | [Repo](https://github.com/Spxg/sqlite-wasm-rs) (Spxg <noz@live.com>) |
+| `sqlcipher-src` | `420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2` | `MIT AND BSD-3-Clause AND blessing AND WTFPL` | [Repo](https://github.com/LucaCappelletti94/sqlcipher-src) |
+| `sqlite-wasm-rs` | `0.6.3` | `MIT` | [Repo](https://github.com/Spxg/sqlite-wasm-rs) (Spxg <noz@live.com>) |
 | `stable_deref_trait` | `1.2.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/storyyeller/stable_deref_trait) (Robert Grosse <n210241048576@gmail.com>) |
 | `static_assertions` | `1.1.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/nvzqz/static-assertions-rs) (Nikolai Vazquez) |
 | `strsim` | `0.11.1` | `MIT` | [Repo](https://github.com/rapidfuzz/strsim-rs) (Danny Guo <danny@dannyguo.com>, maxbachmann <oss@maxbachmann) |

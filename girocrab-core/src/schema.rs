@@ -2,7 +2,7 @@
 //!
 //! `PRAGMA user_version` is the number of steps in [`STEPS`] a vault has run.
 //! Opening a vault runs the missing steps in order, all in one transaction
-//! ([`rusqlite_migration`]); a vault with a higher version than this build
+//! ([`migrate`]); a vault with a higher version than this build
 //! knows is refused with [`CoreError::SchemaTooNew`] and left untouched.
 //!
 //! - 1: the complete schema for a new vault ([`BASELINE`]).
@@ -20,8 +20,7 @@
 //! `cargo run -p girocrab-core --example make_fixture_vault` and commit the
 //! new fixture (see `docs/ARCHITECTURE.md`).
 
-use rusqlite::{Connection, OptionalExtension, Transaction};
-use rusqlite_migration::{HookError, Migrations, M};
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::{CoreError, CoreResult};
 
@@ -98,23 +97,6 @@ fn opening_balances(conn: &Connection) -> CoreResult<()> {
     Ok(())
 }
 
-fn migrations() -> Migrations<'static> {
-    Migrations::new(
-        STEPS
-            .iter()
-            .map(|s| match s {
-                Step::Sql(sql) => M::up(sql),
-                Step::Hook(f) => {
-                    let f = *f;
-                    M::up_with_hook("", move |tx: &Transaction| {
-                        f(tx).map_err(|e| HookError::Hook(e.to_string()))
-                    })
-                }
-            })
-            .collect(),
-    )
-}
-
 /// Refuses a vault written by a newer build, before anything touches the file.
 pub(crate) fn check_not_too_new(conn: &Connection) -> CoreResult<()> {
     let vault_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -130,7 +112,20 @@ pub(crate) fn check_not_too_new(conn: &Connection) -> CoreResult<()> {
 /// Brings the vault to [`SCHEMA_VERSION`]; nothing changes if a step fails.
 pub(crate) fn migrate(conn: &mut Connection) -> CoreResult<()> {
     check_not_too_new(conn)?;
-    migrations().to_latest(conn)?;
+    let tx = conn.transaction()?;
+    // read again inside the transaction: another connection may have migrated meanwhile
+    let done: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if done >= SCHEMA_VERSION {
+        return Ok(());
+    }
+    for step in &STEPS[done as usize..] {
+        match step {
+            Step::Sql(sql) => tx.execute_batch(sql)?,
+            Step::Hook(f) => f(&tx)?,
+        }
+    }
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -489,11 +484,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrations_validate() {
-        migrations().validate().unwrap();
-    }
-
-    #[test]
     fn schema_version_counts_the_steps() {
         let mut conn = Connection::open_in_memory().unwrap();
         migrate(&mut conn).unwrap();
@@ -522,10 +512,17 @@ mod tests {
     }
 
     #[test]
-    fn library_too_far_ahead_maps_to_schema_too_new() {
+    fn failed_step_leaves_the_vault_untouched() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA user_version = 42").unwrap();
-        let err: CoreError = migrations().to_latest(&mut conn).unwrap_err().into();
-        assert!(matches!(err, CoreError::SchemaTooNew { .. }), "{err:?}");
+        migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "PRAGMA user_version = 10; DROP TABLE sync_log; CREATE TABLE sync_log (x);",
+        )
+        .unwrap();
+        assert!(migrate(&mut conn).is_err());
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 10);
     }
 }

@@ -65,27 +65,6 @@ impl From<rusqlite::Error> for CoreError {
     }
 }
 
-impl From<rusqlite_migration::Error> for CoreError {
-    fn from(e: rusqlite_migration::Error) -> Self {
-        use rusqlite_migration::{Error, MigrationDefinitionError};
-        match e {
-            // keeps `WrongKey` (NotADatabase) recognisable
-            Error::RusqliteError { err, .. } => err.into(),
-            Error::MigrationDefinition(MigrationDefinitionError::DatabaseTooFarAhead) => {
-                // `schema::migrate` checks first and knows the real number
-                let app_version = crate::schema::SCHEMA_VERSION;
-                CoreError::SchemaTooNew {
-                    vault_version: app_version + 1,
-                    app_version,
-                }
-            }
-            other => CoreError::Database {
-                message: other.to_string(),
-            },
-        }
-    }
-}
-
 impl From<reqwest::Error> for CoreError {
     fn from(e: reqwest::Error) -> Self {
         CoreError::Network {

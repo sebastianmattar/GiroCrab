@@ -12,8 +12,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [dependencies]
 uniffi = { version = "0.32", features = ["tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
-rusqlite = { version = "0.41", features = ["bundled-sqlcipher-vendored-openssl"] }
-rusqlite_migration = { version = "2.7", default-features = false }
+rusqlite = { version = "0.42", features = ["bundled-sqlcipher-vendored-openssl"] }
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 async-trait = "0.1"
 thiserror = "2"
