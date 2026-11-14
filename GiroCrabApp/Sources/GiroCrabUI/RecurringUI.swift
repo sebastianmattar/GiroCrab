@@ -139,6 +139,7 @@ struct RecurringCard: View {
                 Text(s.source == .manual
                      ? "Manuell markiert · ca. \(Money.format(s.amountCents))"
                      : "Automatisch erkannt aus \(s.occurrences) Buchungen · ca. \(Money.format(s.amountCents))")
+                    .sensitive()
                     .font(.caption)
                     .foregroundStyle(Theme.secondary)
             } else {
@@ -238,6 +239,7 @@ struct RecurringSheet: View {
                         Text("Diesen Monat")
                     } footer: {
                         Text("Noch offen: \(Money.format(-m.openExpenseCents)) Ausgaben, \(Money.format(m.openIncomeCents)) Einnahmen · bereits gebucht: \(Money.format(-m.bookedExpenseCents))")
+                            .sensitive()
                             .font(.caption)
                             .foregroundStyle(Theme.secondary)
                             .leadingFooter()
@@ -289,6 +291,7 @@ struct RecurringSheet: View {
             }
             Spacer()
             Text(Money.format(item.amountCents))
+                .sensitive()
                 .monospacedDigit()
                 .foregroundStyle(item.amountCents < 0 ? Theme.outflow : Theme.inflow)
         }
@@ -319,6 +322,7 @@ struct RecurringSheet: View {
             }
             Spacer()
             Text(Money.format(s.amountCents))
+                .sensitive()
                 .monospacedDigit()
                 .foregroundStyle(s.amountCents < 0 ? Theme.outflow : Theme.inflow)
             Menu {
@@ -361,6 +365,7 @@ struct RecurringSheet: View {
             }
             Spacer()
             Text(Money.format(h.amountCents))
+                .sensitive()
                 .monospacedDigit()
                 .foregroundStyle(Theme.secondary)
             Button("Einblenden") { model.resetRecurring(key: h.seriesKey) }

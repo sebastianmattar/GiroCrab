@@ -162,6 +162,10 @@ public struct GiroCrabScenes: Scene {
                     Divider()
                     Button("Mitteilungen …") { openWindow(id: "announcements") }
                     Divider()
+                    // #301: redacted screenshot + scrubbed diagnostics, then a prefilled issue.
+                    Button("Problem melden …") { openWindow(id: "bug-report") }
+                        .keyboardShortcut("b", modifiers: [.command, .option])
+                    Divider()
                     Link("Webseite & Dokumentation (girocrab.de)", destination: HelpLinks.website)
                     Link("Fehler melden / Issue erstellen (GitHub)", destination: HelpLinks.issues)
                     Link("Community & Diskussionen (GitHub)", destination: HelpLinks.discussions)
@@ -214,6 +218,12 @@ public struct GiroCrabScenes: Scene {
                 .environment(model)
         }
         .defaultSize(width: 900, height: 520)
+
+        Window("Problem melden", id: "bug-report") {
+            BugReportView()
+                .environment(model)
+        }
+        .defaultSize(width: 760, height: 860)
 
         Window("GiroCrab-Hilfe", id: "help") {
             NavigationStack { HelpView() }
@@ -276,6 +286,10 @@ public struct GiroCrabRootView: View {
                     .onAppear { model.bootstrap() }
             case .open:
                 MainSplitView()
+                    // the only window the bug report may capture; inside the
+                    // redaction environment, so it can report what was built
+                    .background(MainWindowTracker())
+                    .environment(\.reportRedaction, model.reportRedaction.union(LaunchOptions.current.redaction))
                     .onAppear { StartupClock.mark("MainSplitView appear") }
                     // Asked only once the vault is open, so it never competes with Touch ID.
                     .modifier(SystemLanguageChangedAlert(newLanguage: Binding(

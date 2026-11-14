@@ -79,6 +79,14 @@ const IBAN_LENGTHS: &[(&str, usize)] = &[
     ("VA", 22),
 ];
 
+/// IBAN length of `country` (two upper-case letters), if known.
+pub fn iban_length(country: &str) -> Option<usize> {
+    IBAN_LENGTHS
+        .iter()
+        .find(|(c, _)| *c == country)
+        .map(|(_, len)| *len)
+}
+
 /// Removes whitespace and upper-cases.
 pub fn normalize_iban(iban: &str) -> String {
     iban.chars()
@@ -101,9 +109,8 @@ pub fn validate_iban(iban: &str) -> bool {
     {
         return false;
     }
-    match IBAN_LENGTHS.iter().find(|(c, _)| *c == &s[..2]) {
-        Some((_, len)) if *len == s.len() => {}
-        _ => return false,
+    if iban_length(&s[..2]) != Some(s.len()) {
+        return false;
     }
     // Move the first four characters to the end, letters -> 10..35.
     let mut rem: u32 = 0;

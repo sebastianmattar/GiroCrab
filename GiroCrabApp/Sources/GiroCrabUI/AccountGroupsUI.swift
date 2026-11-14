@@ -120,7 +120,7 @@ struct UserGroupHeader: View {
                 .foregroundStyle(selected || group.colorHex.isEmpty
                                  ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.readable(hex: group.colorHex)))
                 .frame(width: 20)
-            Text(group.name).lineLimit(1)
+            Text(group.name).lineLimit(1).sensitive(.labels)
             if !group.inTotal {
                 Image(systemName: "eye.slash")
                     .font(.caption)
@@ -130,6 +130,7 @@ struct UserGroupHeader: View {
             }
             Spacer()
             Text(Money.format(group.balanceCents))
+                .sensitive()
                 .font(.callout.weight(.semibold)) // same size as the account balances
                 .monospacedDigit()
                 .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(group.balanceCents < 0 ? Theme.negative : Theme.secondary))

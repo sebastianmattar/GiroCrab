@@ -520,6 +520,9 @@ public final class AppModel {
     var ruleDraft: Rule?
     var showSettings = false
     var showCommandPalette = false
+    /// Set while the bug report takes its screenshot (#301): the main window
+    /// draws `.sensitive()` content as placeholders.
+    var reportRedaction: ReportRedaction = []
     /// The balance chart has keyboard focus (Return there jumps to its day,
     /// instead of editing the selected booking's note).
     @ObservationIgnored var chartHasKeyboardFocus = false

@@ -605,12 +605,15 @@ struct ManualLoanDetails: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Stand \(DateText.medium(loan.setup.anchorDate)): \(Money.format(loan.setup.anchorBalanceCents))")
                 .font(.caption)
+                .sensitive()
             Text(paymentsLine(s))
                 .font(.caption)
+                .sensitive()
                 .foregroundStyle(Theme.secondary)
             if let rate = loan.setup.interestRatePpm {
                 Text("Sollzins \(PercentText.format(rate)) % · Zinsen seit Stichtag \(Money.format(s.interestCents))")
                     .font(.caption)
+                    .sensitive()
                     .foregroundStyle(Theme.secondary)
             }
             if let m = s.monthsLeft, m > 0 {

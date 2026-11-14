@@ -78,6 +78,7 @@ struct PlanGrid: View {
                             .help(e.amountCents > 0 ? "\(DateText.monthLabel(e.month)): \(Money.format(e.amountCents))" : String(localized: "nicht ausgeführt"))
                         }
                         Text(Money.format(plan.monthlyCents))
+                            .sensitive()
                             .font(.callout.monospacedDigit())
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                             .frame(minWidth: compact ? 64 : nil, alignment: .trailing)
@@ -89,7 +90,7 @@ struct PlanGrid: View {
                 GridRow {
                     Text("Summe aktive Pläne").font(.callout.weight(.semibold)).lineLimit(compact ? 2 : 1)
                     ForEach(shownMonths, id: \.self) { _ in Color.clear.frame(width: cell, height: 1) }
-                    Text(Money.format(dashboard.totalMonthlyCents)).font(.callout.weight(.semibold).monospacedDigit()).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing)
+                    Text(Money.format(dashboard.totalMonthlyCents)).sensitive().font(.callout.weight(.semibold).monospacedDigit()).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing)
                 }
                 .padding(.top, 8)
             }
@@ -115,7 +116,7 @@ struct PerksCard: View {
             HStack {
                 Label("Trade Republic Perks", systemImage: "gift").font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("diesen Monat \(Money.format(dashboard.perksThisMonthCents))").font(.caption).foregroundStyle(Theme.secondary)
+                Text("diesen Monat \(Money.format(dashboard.perksThisMonthCents))").sensitive().font(.caption).foregroundStyle(Theme.secondary)
             }
             HStack(alignment: .top, spacing: 12) {
                 perk(title: "1 % Saveback", value: dashboard.savebackEarnedCents, count: dashboard.savebackCount,
@@ -130,7 +131,7 @@ struct PerksCard: View {
     private func perk(title: LocalizedStringKey, value: Int64, count: UInt32, text: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.secondary)
-            Text(Money.format(value)).font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(Theme.invest)
+            Text(Money.format(value)).font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(Theme.invest).sensitive()
             Text("\(count) Ausführungen").font(.caption2).foregroundStyle(Theme.tertiary)
             Text(text).font(.caption2).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
         }
@@ -165,7 +166,14 @@ struct FlowChartCard: View {
                     .position(by: .value("Art", b.kind))
             }
             .chartForegroundStyleScale([consumption: Theme.tertiary, invested: Theme.invest])
-            .chartYAxis { AxisMarks(position: .leading) { AxisGridLine().foregroundStyle(Theme.border) ; AxisValueLabel() } }
+            .chartYAxis {
+                AxisMarks(position: .leading) { v in
+                    AxisGridLine().foregroundStyle(Theme.border)
+                    AxisValueLabel {
+                        if let d = v.as(Double.self) { Text(d, format: .number.precision(.fractionLength(0))).sensitive() }
+                    }
+                }
+            }
             .frame(height: 140)
         }
         .card()

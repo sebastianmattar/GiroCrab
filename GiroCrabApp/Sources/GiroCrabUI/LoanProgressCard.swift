@@ -46,6 +46,7 @@ struct LoanProgressCard: View {
                 } else if editing {
                     TextField("z. B. \(Money.plain(28_000_000))", text: $text)
                         .textFieldStyle(.roundedBorder).frame(width: 130).onSubmit(commit)
+                        .sensitive()
                     Button("Abbrechen") { editing = false }
                         .controlSize(.small).keyboardShortcut(.cancelAction)
                     Button("Speichern", action: commit)
@@ -56,6 +57,7 @@ struct LoanProgressCard: View {
                         editing = true
                     }
                     .buttonStyle(.borderless).font(.caption)
+                    .sensitive(initial == nil ? [] : .personal) // the original loan amount
                     .help("Ursprünglicher Kreditbetrag bearbeiten")
                 }
             }

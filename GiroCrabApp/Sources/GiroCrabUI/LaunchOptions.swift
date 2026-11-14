@@ -36,6 +36,9 @@ import Foundation
 ///                         domain de.girocrab.app.language-simulation (#93)
 ///  --show-tips           (developer) reset TipKit and show tips in the demo
 ///                         vault too (screenshots of contextual tips)
+///  --redact[=labels]      (developer) draw the main window as the bug report
+///                         screenshot does (#301): personal data covered, with
+///                         `=labels` category and group names too
 ///  --demo-menu <title>    (macOS, with --screenshot and GIROCRAB_SCREENSHOT_NATIVE=1)
 ///                         pop up that menu-bar menu over the window and capture it
 ///  --screenshot <file>    (macOS) render the main window, save a PNG, quit.
@@ -69,6 +72,8 @@ public struct LaunchOptions: Sendable {
     public var simulateSystemLanguage: String?
     /// (developer) reset TipKit and show tips in the demo vault too
     public var showTips: Bool
+    /// (developer) `--redact`: main window drawn as in the bug report screenshot
+    public var redaction: ReportRedaction
 
     public init(arguments: [String] = CommandLine.arguments, environment: [String: String] = ProcessInfo.processInfo.environment) {
         var demo = arguments.contains("--demo-seed")
@@ -113,6 +118,7 @@ public struct LaunchOptions: Sendable {
         keepFreshVault = arguments.contains("--keep-fresh-vault")
         freshVault = arguments.contains("--fresh-vault") || keepFreshVault
         developer = arguments.contains("--developer") || environment["GIROCRAB_DEVELOPER"] == "1"
+        redaction = arguments.contains("--redact=labels") ? [.personal, .labels] : arguments.contains("--redact") ? .personal : []
         if let i = arguments.firstIndex(of: "--try-add-bank"), i + 1 < arguments.count {
             tryAddBank = arguments[i + 1].lowercased()
         } else {

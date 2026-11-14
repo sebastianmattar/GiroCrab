@@ -108,8 +108,96 @@ pub struct SyncLogFilter {
     pub limit: u32,
 }
 
-fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
+pub(crate) fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pattern).expect("static pattern"))
+}
+
+/// Country, check digits, then letters and digits, in any case, with up to
+/// two blanks (space, tab, non-breaking or narrow non-breaking space) between
+/// any two of them. Only a candidate: see [`replace_ibans`]. The letter
+/// classes are spelled out instead of `(?i)`: Unicode case folding would let
+/// `[A-Z]` match the 3-byte KELVIN SIGN, and the byte slicing below would panic.
+fn iban_candidates() -> &'static Regex {
+    static IBAN: OnceLock<Regex> = OnceLock::new();
+    re(
+        &IBAN,
+        r"\b[A-Za-z]{2}[0-9]{2}(?:[ \t\u{00A0}\u{202F}]{0,2}[A-Za-z0-9]){11,30}",
+    )
+}
+
+/// Every IBAN carries at least eight digits; "ab12 test case" does not.
+fn is_iban(compact: &str) -> bool {
+    compact.chars().filter(char::is_ascii_digit).count() >= 8
+}
+
+/// Start of the last blank in `text[..end]` and where the word after it begins.
+fn last_blank(text: &str, end: usize) -> Option<(usize, usize)> {
+    text[..end]
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, c)| (i, i + c.len_utf8()))
+}
+
+/// Drops trailing blank-separated words without a digit from `text[..end]`:
+/// an IBAN group always has one ("… 0532 Fehler" ends after "0532").
+fn without_wordy_tail(text: &str, mut end: usize) -> usize {
+    while let Some((blank, word)) = last_blank(text, end) {
+        if text[word..end].chars().any(|c| c.is_ascii_digit()) {
+            break;
+        }
+        end = blank;
+    }
+    end
+}
+
+/// Replaces every IBAN in `s` with `f(compact IBAN)`. A known country's IBAN
+/// ends after its length; a word that runs on past that point, or a trailing
+/// word without a digit, is not part of it ("… 3201 Konto", "… 0532 Fehler",
+/// "… 0044 ungültig"). An unspaced candidate with lower-case letters (hex IDs
+/// look like that) counts only with a valid checksum and nothing glued on.
+pub(crate) fn replace_ibans(s: &str, f: impl Fn(&str) -> String) -> String {
+    use crate::connectors::fints::sepa::{iban_length, validate_iban};
+    // Unicode: "…0044 ungültig" – the candidate (ASCII only) stops at "ü",
+    // but the word goes on.
+    let continues_word = |rest: &str| rest.starts_with(char::is_alphanumeric);
+    let mut out = String::with_capacity(s.len());
+    let (mut last, mut at) = (0, 0);
+    while let Some(m) = iban_candidates().find_at(s, at) {
+        let text = m.as_str();
+        let mut end = text.len();
+        if let Some(length) = iban_length(&text[..2].to_ascii_uppercase()) {
+            let mut count = 0;
+            for (i, c) in text.char_indices().filter(|(_, c)| !c.is_whitespace()) {
+                count += 1;
+                if count == length {
+                    end = i + c.len_utf8();
+                    break;
+                }
+            }
+        }
+        // a cut inside a word: that word is not part of the IBAN
+        let spaced = text[..end].contains(char::is_whitespace);
+        if spaced && continues_word(&s[m.start() + end..]) {
+            end = last_blank(text, end).map_or(end, |(blank, _)| blank);
+        }
+        end = without_wordy_tail(text, end);
+        let iban = text[..end].trim_end();
+        let compact: String = iban.chars().filter(|c| !c.is_whitespace()).collect();
+        let lower_token =
+            !iban.contains(char::is_whitespace) && iban.chars().any(|c| c.is_ascii_lowercase());
+        let glued = continues_word(&s[m.start() + iban.len()..]);
+        if !is_iban(&compact) || (lower_token && (glued || !validate_iban(&compact))) {
+            at = m.start() + 1; // the match starts with an ASCII letter
+            continue;
+        }
+        out.push_str(&s[last..m.start()]);
+        out.push_str(&f(&compact));
+        last = m.start() + iban.len();
+        at = last;
+    }
+    out.push_str(&s[last..]);
+    out
 }
 
 /// Removes what must not end up in the log (#196): the login name, values
@@ -120,7 +208,6 @@ fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
 pub(crate) fn scrub(message: &str, login: &str) -> String {
     static SECRET: OnceLock<Regex> = OnceLock::new();
     static BEARER: OnceLock<Regex> = OnceLock::new();
-    static IBAN: OnceLock<Regex> = OnceLock::new();
     static DIGITS: OnceLock<Regex> = OnceLock::new();
     let mut s = message.trim().to_string();
     let login = login.trim();
@@ -137,17 +224,14 @@ pub(crate) fn scrub(message: &str, login: &str) -> String {
     )
     .replace_all(&s, "$1: •••")
     .into_owned();
-    s = re(&IBAN, r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]){11,30}\b")
-        .replace_all(&s, |c: &regex::Captures| {
-            let compact: String = c[0].chars().filter(|ch| !ch.is_whitespace()).collect();
-            let n = compact.chars().count();
-            format!(
-                "{}…{}",
-                compact.chars().take(4).collect::<String>(),
-                compact.chars().skip(n - 4).collect::<String>()
-            )
-        })
-        .into_owned();
+    s = replace_ibans(&s, |compact| {
+        let n = compact.chars().count();
+        format!(
+            "{}…{}",
+            compact.chars().take(4).collect::<String>(),
+            compact.chars().skip(n - 4).collect::<String>()
+        )
+    });
     s = re(&DIGITS, r"\d{6,}").replace_all(&s, "•••").into_owned();
     if s.chars().count() > MAX_MESSAGE_CHARS {
         s = s.chars().take(MAX_MESSAGE_CHARS).collect::<String>() + "…";

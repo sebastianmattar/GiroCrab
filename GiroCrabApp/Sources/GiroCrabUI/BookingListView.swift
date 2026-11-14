@@ -5,6 +5,9 @@ import GiroCrabCore
 /// inspector, bookings grouped into white day cards
 /// with the daily sum in the card header.
 struct BookingStreamView: View {
+    /// The empty state repeats the search text, which is drawn as a parameter
+    /// `Text` and cannot carry `.sensitive()`.
+    @Environment(\.reportRedaction) private var redaction
 
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
@@ -90,7 +93,7 @@ struct BookingStreamView: View {
                             ContentUnavailableView(
                                 model.searchText.isEmpty ? "Keine Buchungen" : "Keine Treffer",
                                 systemImage: model.searchText.isEmpty ? "tray" : "magnifyingglass",
-                                description: Text(model.searchText.isEmpty ? "Konto abrufen oder anderen Zeitraum wählen." : "Nichts passt zu „\(model.searchText)“.")
+                                description: Text(model.searchText.isEmpty ? "Konto abrufen oder anderen Zeitraum wählen." : "Nichts passt zu „\(redaction.contains(.personal) ? BugReport.searchPlaceholder : model.searchText)“.")
                             )
                             .padding(.top, 40)
                         }
@@ -360,6 +363,7 @@ struct DayHeader: View {
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(Money.signed(day.sum))
+                    .sensitive()
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(day.sum > 0 ? Theme.inflow : Theme.secondary)
             }
@@ -454,6 +458,7 @@ struct BookingRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(booking.merchant.name.isEmpty ? booking.bookingText : booking.merchant.name)
+                        .sensitive()
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
@@ -592,6 +597,7 @@ struct BookingCategoryLabel: View {
             Image(systemName: none ? "questionmark.folder" : (booking.categorySymbol.isEmpty ? "tag.fill" : booking.categorySymbol))
                 .font(.caption)
             Text(none ? String(localized: "Ohne Kategorie") : booking.categoryName)
+                .sensitive(none ? [] : .labels)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
         }
@@ -615,6 +621,7 @@ struct AccountChip: View {
                 .foregroundStyle(color)
             if !compact {
                 Text(label)
+                    .sensitive()
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(color)
                     .lineLimit(1)
@@ -637,12 +644,14 @@ struct AmountLabel: View {
     var body: some View {
         if cents > 0 {
             Text(Money.signed(cents))
+                .sensitive()
                 .font(.body.weight(.semibold).monospacedDigit())
                 .foregroundStyle(Theme.inflow)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(Theme.inflowBadge))
         } else {
             Text(Money.format(cents))
+                .sensitive()
                 .font(.body.weight(.medium).monospacedDigit())
                 .foregroundStyle(Theme.outflow)
         }
@@ -681,9 +690,13 @@ struct LoadMoreBookingsFooter: View {
 /// (macOS 15+). iOS keeps the empty navigation title as before.
 struct WindowTitle: ViewModifier {
     let title: String
+    /// The title bar is drawn by AppKit, so `.sensitive()` cannot cover it:
+    /// any bug report capture shows the app name (the title may be an account).
+    @Environment(\.reportRedaction) private var redaction
 
     func body(content: Content) -> some View {
         #if os(macOS)
+        let title = redaction.isEmpty ? title : "GiroCrab"
         if #available(macOS 15.0, *) {
             content.navigationTitle(title).toolbar(removing: .title)
         } else {

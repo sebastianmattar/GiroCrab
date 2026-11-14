@@ -82,16 +82,19 @@ struct ReceiptCard: View {
                 MerchantSignet(merchant: booking.merchant, categorySymbol: booking.categorySymbol, size: 48)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(booking.merchant.name)
+                        .sensitive()
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Theme.text)
                         .textSelection(.enabled)
                     Text("\(booking.accountName) · \(booking.paymentMethod)")
+                        .sensitive()
                         .font(.caption).foregroundStyle(Theme.secondary)
                     MerchantDomainRow(merchant: booking.merchant)
                 }
                 Spacer()
             }
             Text(Money.signed(booking.amountCents))
+                .sensitive()
                 .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit())
                 .foregroundStyle(Money.ink(booking.amountCents))
             HStack(spacing: 6) {
@@ -104,6 +107,7 @@ struct ReceiptCard: View {
             .foregroundStyle(Theme.secondary)
             if !booking.cleanPurpose.isEmpty {
                 Text(booking.cleanPurpose)
+                    .sensitive()
                     .font(.callout)
                     .foregroundStyle(Theme.text)
                     .textSelection(.enabled)
@@ -131,6 +135,7 @@ struct NoteCard: View {
             TextEditor(text: $draft)
                 .font(.callout)
                 .frame(minHeight: 54, maxHeight: 120)
+                .sensitive()
                 .scrollContentBackground(.hidden)
                 .focused($focused)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
@@ -184,6 +189,7 @@ struct MerchantDomainRow: View {
             HStack(spacing: 4) {
                 TextField("z. B. enbw.com", text: $text)
                     .textFieldStyle(.roundedBorder)
+                    .sensitive()
                     .font(.caption)
                     .frame(maxWidth: 180)
                     .autocorrectionDisabled()
@@ -203,6 +209,8 @@ struct MerchantDomainRow: View {
                 Image(systemName: "globe").font(.caption2)
                 Text(merchant.domain.isEmpty ? (merchant.isPerson ? String(localized: "Privatperson – kein Logo") : String(localized: "Domain festlegen")) : merchant.domain)
                     .font(.caption.monospaced())
+                    // a guessed domain spells out the (redacted) counterparty; dictionary brands show their logo anyway
+                    .sensitive(merchant.domain.isEmpty || merchant.domainSource == "dictionary" ? [] : .personal)
                 if !merchant.domain.isEmpty {
                     Text("· \(sourceLabel)").font(.caption2)
                 }
@@ -304,8 +312,8 @@ struct MerchantHistoryCard: View {
             if let s = model.merchantStats, s.key == booking.merchant.key {
                 HStack(spacing: 10) {
                     stat("Buchungen", "\(s.count)×")
-                    stat("Summe", Money.format(s.totalCents))
-                    stat("Ø Betrag", Money.format(s.averageCents))
+                    stat("Summe", Money.format(s.totalCents), sensitive: true)
+                    stat("Ø Betrag", Money.format(s.averageCents), sensitive: true)
                 }
                 if !s.firstDate.isEmpty {
                     Text("Seit \(DateText.medium(s.firstDate)) · zuletzt \(DateText.medium(s.lastDate))")
@@ -325,10 +333,11 @@ struct MerchantHistoryCard: View {
         .card()
     }
 
-    private func stat(_ title: LocalizedStringKey, _ value: String) -> some View {
+    private func stat(_ title: LocalizedStringKey, _ value: String, sensitive: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption2).foregroundStyle(Theme.secondary)
             Text(value).font(.callout.weight(.semibold).monospacedDigit()).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
+                .sensitive(sensitive ? .personal : [])
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -435,7 +444,7 @@ struct CategoryChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: category.sfSymbol).font(.subheadline)
-                Text(title ?? category.name).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+                Text(title ?? category.name).font(.caption).lineLimit(1).minimumScaleFactor(0.8).sensitive(.labels)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -490,11 +499,11 @@ struct RawDataCard: View {
                     if let e = sepa("EREF") { row("EREF (Ende-zu-Ende-Referenz)", e) }
                     if let m = sepa("MREF") { row("MREF (Mandatsreferenz)", m) }
                     if let c = sepa("CRED") { row("Gläubiger-ID", c) }
-                    if !booking.purposeCode.isEmpty { row("Purpose-Code", booking.purposeCode) }
-                    if !booking.gvc.isEmpty { row("Geschäftsvorfallcode", booking.gvc) }
+                    if !booking.purposeCode.isEmpty { row("Purpose-Code", booking.purposeCode, hides: []) }
+                    if !booking.gvc.isEmpty { row("Geschäftsvorfallcode", booking.gvc, hides: []) }
                     if !booking.counterpartyIban.isEmpty { row("IBAN Gegenkonto", formatIBAN(booking.counterpartyIban)) }
                     row("Gegenpartei (roh)", booking.counterparty)
-                    if !booking.valueDate.isEmpty { row("Wertstellung", DateText.medium(booking.valueDate)) }
+                    if !booking.valueDate.isEmpty { row("Wertstellung", DateText.medium(booking.valueDate), hides: []) }
                     row("Konto", booking.accountName)
                 }
                 .padding(.top, 8)
@@ -503,11 +512,13 @@ struct RawDataCard: View {
         .card()
     }
 
-    private func row(_ title: LocalizedStringKey, _ value: String) -> some View {
+    /// `hides`: what the bug report screenshot covers (#301); raw data is personal.
+    private func row(_ title: LocalizedStringKey, _ value: String, hides: ReportRedaction = .personal) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.caption2).foregroundStyle(Theme.secondary)
             Text(value).font(.caption.monospaced()).foregroundStyle(Theme.text).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+                .sensitive(hides)
         }
     }
 }
@@ -524,9 +535,9 @@ struct MultiSelectionCard: View {
             Label("\(many.count) Buchungen ausgewählt", systemImage: "checkmark.circle")
                 .font(.headline)
             VStack(alignment: .leading, spacing: 4) {
-                LabeledContent("Summe", value: Money.format(income + expense))
-                if income != 0 { LabeledContent("Einnahmen", value: Money.format(income)) }
-                if expense != 0 { LabeledContent("Ausgaben", value: Money.format(expense)) }
+                LabeledContent("Summe") { Text(Money.format(income + expense)).sensitive() }
+                if income != 0 { LabeledContent("Einnahmen") { Text(Money.format(income)).sensitive() } }
+                if expense != 0 { LabeledContent("Ausgaben") { Text(Money.format(expense)).sensitive() } }
             }
             .font(.callout.monospacedDigit())
             Button {

@@ -55,6 +55,99 @@ fn scrub_masks_ibans_and_long_numbers_only() {
 }
 
 #[test]
+fn scrub_iban_stops_at_the_next_word_and_ignores_case() {
+    let s = scrub("Konto DE89 3704 0044 0532 0130 00 HTTP 403", "");
+    assert_eq!(s, "Konto DE89…3000 HTTP 403");
+    let s = scrub("konto de89 3704 0044 0532 0130 00 gesperrt", "");
+    assert_eq!(s, "konto de89…3000 gesperrt");
+    // letters and digits in groups, but no IBAN
+    assert_eq!(scrub("ab12 test case", ""), "ab12 test case");
+    // AT/BE end on a full group of four: the next word must stay
+    assert_eq!(
+        scrub("Konto AT61 1904 3002 3457 3201 Konto gesperrt", ""),
+        "Konto AT61…3201 Konto gesperrt"
+    );
+    assert_eq!(
+        scrub("BE68 5390 0754 7034 Code 9050", ""),
+        "BE68…7034 Code 9050"
+    );
+    // irregular spacing
+    assert_eq!(
+        scrub("an DE8937 0400 4405 3201 3000 ok", ""),
+        "an DE89…3000 ok"
+    );
+    // two IBANs in a row
+    assert_eq!(
+        scrub("von DE89370400440532013000 AT611904300234573201", ""),
+        "von DE89…3000 AT61…3201"
+    );
+}
+
+#[test]
+fn scrub_ends_a_short_iban_at_its_last_group_and_keeps_hex_ids() {
+    assert_eq!(
+        scrub("Konto DE89 3704 0044 0532 Konto gesperrt", ""),
+        "Konto DE89…0532 Konto gesperrt"
+    );
+    // lower-case, unspaced: only with a valid checksum
+    let id = "consent de12a3b4c5d6e7f8a9b0c1d2 ok";
+    assert_eq!(scrub(id, ""), id);
+    assert_eq!(
+        scrub("iban de89370400440532013000 ok", ""),
+        "iban de89…3000 ok"
+    );
+    // upper-case and glued: still an IBAN (compact form pasted into text)
+    assert_eq!(scrub("DE89370400440532013000abc", ""), "DE89…3000abc");
+}
+
+#[test]
+fn scrub_keeps_the_words_after_a_short_iban_and_umlaut_words() {
+    assert_eq!(
+        scrub("Konto DE12 3456 7890 fehlt", ""),
+        "Konto DE12…7890 fehlt"
+    );
+    assert_eq!(
+        scrub("IBAN DE89 3704 0044 ungültig", ""),
+        "IBAN DE89…0044 ungültig"
+    );
+    assert_eq!(
+        scrub("IBAN DE89 3704 0044 0532 0130 00 ungültig", ""),
+        "IBAN DE89…3000 ungültig"
+    );
+}
+
+#[test]
+fn scrub_handles_other_blanks_and_a_word_at_the_cut() {
+    assert_eq!(
+        scrub("Konto DE89 3704 0044 0532 Fehler 401", ""),
+        "Konto DE89…0532 Fehler 401"
+    );
+    assert_eq!(
+        scrub(
+            "Konto DE89\u{a0}3704\u{a0}0044\u{a0}0532\u{a0}0130\u{a0}00 gesperrt",
+            ""
+        ),
+        "Konto DE89…3000 gesperrt"
+    );
+    assert_eq!(
+        scrub("Konto DE89  3704  0044  0532  0130  00 gesperrt", ""),
+        "Konto DE89…3000 gesperrt"
+    );
+    assert_eq!(
+        scrub("Konto DE89\t3704 0044 0532 0130 00", ""),
+        "Konto DE89…3000"
+    );
+}
+
+#[test]
+fn scrub_survives_unicode_that_case_folds_to_ascii() {
+    // U+212A KELVIN SIGN folds to "k": must neither match nor split a char
+    let m = "Konto \u{212A}E89 3704 0044 0532 0130 00 und \u{212A}\u{212A}12 3456 7890 1234";
+    let s = scrub(m, "");
+    assert!(s.starts_with("Konto \u{212A}E89"), "{s}");
+}
+
+#[test]
 fn scrub_keeps_plain_words_about_tans() {
     // no `key=value`: nothing to hide, so the text stays diagnosable
     let m = "TAN erforderlich, aber das Verfahren wird nicht unterstützt";

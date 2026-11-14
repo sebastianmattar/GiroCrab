@@ -518,6 +518,22 @@ impl Vault {
         Ok(rows.next().transpose()?)
     }
 
+    /// Distinct counterparty names of all bookings, most recent first, at most
+    /// `limit` (bug report #301: a log line naming a payee is scrubbed of it,
+    /// whatever the list currently shows).
+    pub fn counterparty_names(&self, limit: u32) -> Result<Vec<String>, CoreError> {
+        let db = self.db()?;
+        let mut stmt = db.prepare(
+            "SELECT counterparty FROM transactions
+              WHERE deleted_ms IS NULL AND counterparty <> ''
+              GROUP BY counterparty ORDER BY MAX(booking_date) DESC LIMIT ?1",
+        )?;
+        let names = stmt
+            .query_map([limit], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(names)
+    }
+
     pub fn set_transaction_checked(
         &self,
         transaction_id: i64,
@@ -640,6 +656,34 @@ mod paging_tests {
         let v = Vault::open(p.to_string_lossy().to_string(), vec![7u8; 32]).unwrap();
         v.seed_demo_data().unwrap();
         (v, p)
+    }
+
+    #[test]
+    fn counterparty_names_are_distinct_newest_first_and_limited() {
+        let (v, p) = demo();
+        let all = v
+            .list_transactions(BookingFilter::default())
+            .unwrap()
+            .transactions;
+        let names = v.counterparty_names(1000).unwrap();
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "distinct");
+        assert!(!names.iter().any(String::is_empty));
+        for b in all.iter().filter(|b| !b.counterparty.is_empty()) {
+            assert!(
+                names.contains(&b.counterparty),
+                "{} missing",
+                b.counterparty
+            );
+        }
+        let newest = all.iter().find(|b| !b.counterparty.is_empty()).unwrap();
+        let newest_date = &newest.booking_date;
+        let first = all.iter().find(|b| b.counterparty == names[0]).unwrap();
+        assert_eq!(&first.booking_date, newest_date);
+        assert_eq!(v.counterparty_names(3).unwrap().len(), 3);
+        let _ = std::fs::remove_file(p);
     }
 
     #[test]

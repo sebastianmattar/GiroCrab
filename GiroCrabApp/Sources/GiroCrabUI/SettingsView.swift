@@ -66,6 +66,7 @@ struct GeneralSettings: View {
                 Button { showHelp = true } label: {
                     Label("Hilfe & FAQ", systemImage: "questionmark.circle")
                 }
+                BugReportButton()
             }
             #endif
             LanguageSettingsSection()

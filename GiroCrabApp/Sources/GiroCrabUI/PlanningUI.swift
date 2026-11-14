@@ -114,9 +114,10 @@ struct BudgetProgressCard: View {
                 Button { editing = IDBox(id: s.categoryId) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(s.name).font(.callout).foregroundStyle(Theme.text)
+                            Text(s.name).font(.callout).foregroundStyle(Theme.text).sensitive(.labels)
                             Spacer()
                             Text("\(Money.format(s.spentCents)) / \(Money.format(s.budgetCents))")
+                                .sensitive()
                                 .font(.caption.monospacedDigit()).foregroundStyle(BudgetTone.color(s.percent))
                         }
                         BudgetBar(percent: s.percent)
@@ -270,10 +271,12 @@ struct CashflowCard: View {
             .chartForegroundStyleScale([income: palette.incomeGradient, expense: palette.expenseGradient])
             .chartLegend(.hidden)
             .chartYAxis {
-                AxisMarks(position: .leading) {
+                AxisMarks(position: .leading) { v in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
                         .foregroundStyle(Theme.border)
-                    AxisValueLabel()
+                    AxisValueLabel {
+                        if let d = v.as(Double.self) { Text(d, format: .number.precision(.fractionLength(0))).sensitive() }
+                    }
                 }
             }
             .frame(height: 160)

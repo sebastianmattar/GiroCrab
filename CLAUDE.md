@@ -18,6 +18,8 @@ Rust core (`girocrab-core`, UniFFI) + SwiftUI app (`GiroCrabApp`). Root = this d
 - `girocrab-core/src/merchants.rs` – merchant matching
 - `girocrab-core/src/documents.rs` – booking documents / PDF text extraction
 - `girocrab-core/src/text.rs` – text helpers (mojibake repair etc.)
+- `girocrab-core/src/report_sanitizer.rs` – scrubs log/diagnostics text for public bug reports (`sanitize_report_text`)
+- `GiroCrabApp/Sources/GiroCrabUI/PrivacyRedaction.swift` – `.sensitive()` modifier; `BugReport.swift` / `BugReportUI.swift` – Hilfe › Problem melden
 - `GiroCrabApp/Sources/GiroCrabUI/AppModel.swift` – app state / core bridge
 - `GiroCrabApp/Sources/GiroCrabUI/RootView.swift` – top-level UI
 - `GiroCrabApp/Sources/GiroCrabUI/BookingListView.swift` – booking list
@@ -61,6 +63,25 @@ Other UI files live in the same `GiroCrabUI/` dir. Ignore `cashcrab-core/` and `
   (never edit an existing entry). Bump = run `cargo run -q -p girocrab-core --example make_fixture_vault`
   and commit the new fixture (+ the `schema-v{N}.sql` the fixture test writes).
   Counts filter `deleted_ms IS NULL`: indexes they use must cover that column.
+
+## Sensitive UI (bug report screenshots, #301)
+"Problem melden" captures the main window (macOS: the window showing `MainSplitView`; iOS: the root view, without
+presented sheets) with personal data covered, so every new or changed view inside it must mark what it shows. Sheets,
+popovers, other windows and print output are never captured:
+- `.sensitive()` on anything personal or financial: amounts, balances, chart axis values and readouts, IBANs, account
+  names and numbers, owners, counterparties, merchant names/initials/guessed domains, purposes, references, notes,
+  documents and their previews, loan figures. `.sensitive(.labels)` for category, group, budget and security names
+  (hidden only on request). Dates, bank/connector names, logos of known brands and error texts stay visible.
+- The modifier hides the content and draws an opaque box, so it also covers AppKit/UIKit-backed views (TextEditor,
+  PDFView). Never use `.redacted(reason:)` or a plain overlay for this.
+- Text that is a parameter (`navigationTitle`, `ContentUnavailableView(description:)`, `.help`, title bars) cannot
+  carry the modifier: read `@Environment(\.reportRedaction)` and substitute (see `WindowTitle`, the empty state in
+  `BookingStreamView`). AppKit/UIKit-drawn search fields are handled in `BugReport` – new platform text controls
+  outside SwiftUI need the same.
+- Check a view: `swift run GiroCrabMac --demo-seed --redact --screenshot /tmp/r.png` (`--redact=labels` for labels).
+- Text that goes into a public issue (log lines, messages) only via `sanitize_report_text` with the vault's known
+  terms; never paste raw log or bank text. New log/diagnostic fields get a test in `report_sanitizer.rs` or
+  `BugReportTests`.
 
 ## Workflow
 - Branch from `upstream/main`, push to `origin` (fork), PR against `GiroCrab/GiroCrab`. PR title

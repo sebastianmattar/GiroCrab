@@ -29,6 +29,7 @@ struct MerchantSignet: View {
                 Text(merchant.monogram)
                     .font(.system(size: size * 0.36, weight: .semibold, design: .rounded))
                     .foregroundStyle(Theme.personText)
+                    .sensitive() // a person's initials
             } else if let img = sharpLogo {
                 // downloaded favicon (Google s2, 128 px) – real brand logo
                 shape.fill(Color.white)
@@ -54,6 +55,7 @@ struct MerchantSignet: View {
                     .font(.system(size: size * (merchant.monogram.count > 2 ? 0.30 : 0.40), weight: .bold, design: .rounded))
                     .foregroundStyle(Color.readable(hex: merchant.colorHex))
                     .minimumScaleFactor(0.6)
+                    .sensitive(merchant.known ? [] : .personal) // initials of an unknown counterparty
             }
             if !merchant.isPerson {
                 shape.strokeBorder(sharpLogo == nil ? brand.opacity(0.16) : Theme.border, lineWidth: 1)

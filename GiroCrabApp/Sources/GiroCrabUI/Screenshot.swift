@@ -68,15 +68,24 @@ public enum WindowScreenshot {
         render(target, to: path)
     }
 
+    /// Draws `window` (title bar, toolbar and content) in-process. Also used by
+    /// the bug report (#301), so nothing else on screen ends up in the picture.
     @MainActor
-    private static func render(_ target: NSWindow, to path: String) {
-        guard let targetContent = target.contentView else { exit(2) }
-        let view = targetContent.superview ?? targetContent // frame view = title bar + toolbar + content
+    static func bitmap(of window: NSWindow) -> NSBitmapImageRep? {
+        guard let content = window.contentView else { return nil }
+        let view = content.superview ?? content // frame view = title bar + toolbar + content
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
         let bounds = view.bounds
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { exit(3) }
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
         view.cacheDisplay(in: bounds, to: rep)
+        return rep
+    }
+
+    @MainActor
+    private static func render(_ target: NSWindow, to path: String) {
+        guard target.contentView != nil else { exit(2) }
+        guard let rep = bitmap(of: target) else { exit(3) }
         guard let png = rep.representation(using: .png, properties: [:]) else { exit(4) }
         let url = URL(fileURLWithPath: path)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

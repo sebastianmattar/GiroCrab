@@ -73,13 +73,17 @@ struct DocumentPreview: View {
     let data: Data
 
     var body: some View {
-        if doc.mimeType == "application/pdf" {
-            PDFPreview(data: data)
-        } else if let img = AppModel.image(from: data) {
-            img.resizable().scaledToFit()
-        } else {
-            ContentUnavailableView("Keine Vorschau", systemImage: "doc")
+        Group {
+            if doc.mimeType == "application/pdf" {
+                PDFPreview(data: data)
+            } else if let img = AppModel.image(from: data) {
+                img.resizable().scaledToFit()
+            } else {
+                ContentUnavailableView("Keine Vorschau", systemImage: "doc")
+            }
         }
+        // statements and receipts are full of names, IBANs and amounts (#301)
+        .sensitive()
     }
 }
 
@@ -119,7 +123,7 @@ struct DocumentsCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: docSymbol(d)).foregroundStyle(Theme.accent).frame(width: 18)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(d.title).font(.callout).lineLimit(1)
+                        Text(d.title).font(.callout).lineLimit(1).sensitive()
                         Text("\(DateText.medium(d.docDate)) · \(ByteCountFormatter.string(fromByteCount: Int64(d.sizeBytes), countStyle: .file))")
                             .font(.caption2).foregroundStyle(Theme.secondary)
                     }
@@ -220,6 +224,7 @@ struct DocumentsView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .sensitive(model.documentsAccountFilter == nil ? [] : .personal) // the selected account's name
                         .labelsHidden()
                         .frame(minWidth: 150, maxWidth: 240)
                         .help("Belege eines Kontos anzeigen")
@@ -234,9 +239,10 @@ struct DocumentsView: View {
                         HStack(spacing: 10) {
                             Image(systemName: docSymbol(d)).foregroundStyle(Theme.accent).frame(width: 22)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(d.title).fontWeight(.medium).lineLimit(2)
+                                Text(d.title).fontWeight(.medium).lineLimit(2).sensitive()
                                 Text(d.bookingLabel.isEmpty ? "PostBox · \(d.accountName)" : d.bookingLabel)
                                     .font(.caption).foregroundStyle(d.bookingLabel.isEmpty ? Theme.warning : Theme.secondary).lineLimit(1)
+                                    .sensitive()
                             }
                             Spacer()
                             Text(DateText.medium(d.docDate)).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
@@ -268,6 +274,7 @@ struct DocumentsView: View {
                         // filtered to one account (#172): say so, offer the way back
                         ContentUnavailableView {
                             Label("Keine Belege für „\(account.name)“", systemImage: "doc.on.doc")
+                                .sensitive()
                         } actions: {
                             Button("Alle Konten anzeigen") { model.documentsAccountFilter = nil }
                         }

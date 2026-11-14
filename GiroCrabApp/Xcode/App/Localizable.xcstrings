@@ -1503,6 +1503,17 @@
         }
       }
     },
+    "<!-- Beschreibe kurz das Problem: Was hast du getan, was hast du erwartet, was ist stattdessen passiert? Bitte keine echten IBANs, Namen oder Buchungsdaten. -->" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<!-- Briefly describe the problem: what did you do, what did you expect, what happened instead? Please no real IBANs, names or booking data. -->"
+          }
+        }
+      }
+    },
     "API-Schlüssel (wird nicht gespeichert)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1631,6 +1642,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fetch Log"
+          }
+        }
+      }
+    },
+    "Abruf-Protokoll (neueste zuerst):" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fetch log (newest first):"
+          }
+        }
+      }
+    },
+    "Abruf-Protokoll anhängen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach fetch log"
           }
         }
       }
@@ -1932,6 +1965,17 @@
         }
       }
     },
+    "Alle Markierungen entfernen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove All Marks"
+          }
+        }
+      }
+    },
     "Alle Regeln anwenden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2064,6 +2108,17 @@
         }
       }
     },
+    "Als PNG sichern …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save as PNG …"
+          }
+        }
+      }
+    },
     "Als Vorlage speichern …" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2192,6 +2247,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Analytics"
+          }
+        }
+      }
+    },
+    "Anbindungen: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connections: %@"
           }
         }
       }
@@ -3594,6 +3660,17 @@
         }
       }
     },
+    "Beim Öffnen des Issues liegt der geschwärzte Screenshot in der Zwischenablage. Es wird nichts automatisch gesendet: Der Browser zeigt ein vorausgefülltes Issue, das du vor dem Absenden noch bearbeiten kannst." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When the issue opens, the redacted screenshot is on your clipboard. Nothing is sent automatically: your browser shows a prefilled issue that you can still edit before submitting."
+          }
+        }
+      }
+    },
     "Beispiel: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3814,6 +3891,28 @@
         }
       }
     },
+    "Bereiche schwärzen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Black Out Areas"
+          }
+        }
+      }
+    },
+    "Bereiche schwärzen …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Black Out Areas …"
+          }
+        }
+      }
+    },
     "Bereits vorhanden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3953,6 +4052,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter Amount"
+          }
+        }
+      }
+    },
+    "Beträge, IBANs, Namen, Kontonamen, Verwendungszwecke und Belege werden abgedeckt; „Kategorien ausblenden“ deckt auch Kategorien, Gruppen und Wertpapiernamen ab. Im Demo-Tresor sind alle Daten erfunden, deshalb lässt sich die Schwärzung hier abschalten." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amounts, IBANs, names, account names, payment references and documents are covered; “Hide Categories” also covers categories, groups and security names. All data in the demo vault is fictitious, so redaction can be turned off here."
+          }
+        }
+      }
+    },
+    "Beträge, IBANs, Namen, Kontonamen, Verwendungszwecke und Belege werden abgedeckt; „Kategorien ausblenden“ deckt auch Kategorien, Gruppen und Wertpapiernamen ab. Prüfe das Bild trotzdem, bevor du es teilst." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amounts, IBANs, names, account names, payment references and documents are covered; “Hide Categories” also covers categories, groups and security names. Still check the picture before you share it."
           }
         }
       }
@@ -4584,6 +4705,17 @@
         }
       }
     },
+    "Das Abruf-Protokoll wird nicht angehängt: Es konnte nicht vollständig geladen und bereinigt werden." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The fetch log is not attached: it could not be fully loaded and sanitized."
+          }
+        }
+      }
+    },
     "Das FinTS-Produkt von GiroCrab ist eingebaut. Eigene API-Anwendungen (zum Beispiel für comdirect oder PayPal) registrieren Sie selbst; die Werte liegen nur in Ihrem verschlüsselten Tresor." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5130,6 +5262,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Details"
+          }
+        }
+      }
+    },
+    "Diagnose" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
+          }
+        }
+      }
+    },
+    "Diagnose (automatisch bereinigt)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics (automatically sanitized)"
+          }
+        }
+      }
+    },
+    "Diagnose wird bereinigt …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sanitizing diagnostics …"
           }
         }
       }
@@ -6070,6 +6235,17 @@
         }
       }
     },
+    "Eine neue Aufnahme verwirft die Markierungen, weil sich der Inhalt verschoben haben kann." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A new capture discards the marks, since the content may have moved."
+          }
+        }
+      }
+    },
     "Eingegeben" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6539,6 +6715,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No accounts or transactions are deleted."
+          }
+        }
+      }
+    },
+    "Es wird nichts automatisch gesendet: Der Browser öffnet ein vorausgefülltes Issue, das du vor dem Absenden noch bearbeiten kannst." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is sent automatically: your browser opens a prefilled issue that you can still edit before submitting."
           }
         }
       }
@@ -7775,6 +7962,17 @@
         }
       }
     },
+    "GiroCrab-Fehlerbericht" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GiroCrab Bug Report"
+          }
+        }
+      }
+    },
     "GiroCrab-Hilfe" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8897,6 +9095,28 @@
         }
       }
     },
+    "Issue auf GitHub öffnen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Issue on GitHub"
+          }
+        }
+      }
+    },
+    "Issue öffnen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Issue"
+          }
+        }
+      }
+    },
     "Ja" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9183,6 +9403,17 @@
         }
       }
     },
+    "Kategorien ausblenden" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Categories"
+          }
+        }
+      }
+    },
     "Kategorien und Regeln (%lld)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9300,6 +9531,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No Logo"
+          }
+        }
+      }
+    },
+    "Kein Screenshot: Das Hauptfenster ist geschlossen, minimiert, gesperrt oder wurde nicht rechtzeitig geschwärzt. „Neu aufnehmen“ versucht es erneut; sonst wird das Issue ohne Screenshot erstellt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No screenshot: the main window is closed, minimized, locked or was not redacted in time. “Retake” tries again; otherwise the issue is created without a screenshot."
           }
         }
       }
@@ -10652,6 +10894,28 @@
         }
       }
     },
+    "Markierung hinzufügen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Mark"
+          }
+        }
+      }
+    },
+    "Markierungen entfernen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Marks"
+          }
+        }
+      }
+    },
     "Medikamente" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11557,6 +11821,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "New"
+          }
+        }
+      }
+    },
+    "Neu aufnehmen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retake"
           }
         }
       }
@@ -12969,6 +13244,50 @@
         }
       }
     },
+    "Persönliche Daten schwärzen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redact Personal Data"
+          }
+        }
+      }
+    },
+    "Persönliche Daten sind abgedeckt, dazu %lld eigene Markierungen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personal data is covered, plus %lld marks of your own."
+          }
+        }
+      }
+    },
+    "Persönliche Daten sind abgedeckt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personal data is covered."
+          }
+        }
+      }
+    },
+    "Persönliche Daten werden geschwärzt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personal data is redacted"
+          }
+        }
+      }
+    },
     "Petrol" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13141,6 +13460,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Private person – no logo"
+          }
+        }
+      }
+    },
+    "Problem melden" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a Problem"
+          }
+        }
+      }
+    },
+    "Problem melden …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a Problem …"
           }
         }
       }
@@ -13729,6 +14070,17 @@
         }
       }
     },
+    "Rückgängig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        }
+      }
+    },
     "SEPA & Bank-Rohdaten" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14006,6 +14358,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Protection"
+          }
+        }
+      }
+    },
+    "Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screenshot"
+          }
+        }
+      }
+    },
+    "Screenshot wird erstellt …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Taking screenshot …"
           }
         }
       }
@@ -14441,6 +14815,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose Language"
+          }
+        }
+      }
+    },
+    "Sprache: %@ · Demo-Modus: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language: %1$@ · Demo mode: %2$@"
           }
         }
       }
@@ -16321,6 +16706,17 @@
         }
       }
     },
+    "Vorschau des Screenshots" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screenshot preview"
+          }
+        }
+      }
+    },
     "Vorschau erscheint, sobald Restschuld und Stichtag ausgefüllt sind." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16405,6 +16801,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "What else GiroCrab imports and how it fetches transactions from now on."
+          }
+        }
+      }
+    },
+    "Was ist passiert?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What happened?"
           }
         }
       }
@@ -16915,6 +17322,28 @@
         }
       }
     },
+    "Ziehe Rechtecke über Stellen, die zusätzlich schwarz übermalt werden sollen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag rectangles over areas that should also be painted black."
+          }
+        }
+      }
+    },
+    "Ziehe mit der Maus Rechtecke über Stellen, die zusätzlich schwarz übermalt werden sollen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag rectangles with the mouse over areas that should also be painted black."
+          }
+        }
+      }
+    },
     "Ziel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17268,6 +17697,17 @@
         }
       }
     },
+    "ja" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "yes"
+          }
+        }
+      }
+    },
     "kein Gerätecode eingerichtet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17308,6 +17748,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "manual"
+          }
+        }
+      }
+    },
+    "nein" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no"
           }
         }
       }
@@ -18139,6 +18590,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "⌘A (select all transactions)"
+          }
+        }
+      }
+    },
+    "📋 Der geschwärzte Screenshot liegt in deiner Zwischenablage – klicke hier ins Textfeld und drücke **⌘V**, um ihn einzufügen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📋 The redacted screenshot is on your clipboard – click into the text field here and press **⌘V** to paste it."
+          }
+        }
+      }
+    },
+    "📋 Der geschwärzte Screenshot liegt in deiner Zwischenablage – tippe hier lange ins Textfeld und wähle **Einsetzen**." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📋 The redacted screenshot is on your clipboard – long-press the text field here and choose **Paste**."
           }
         }
       }

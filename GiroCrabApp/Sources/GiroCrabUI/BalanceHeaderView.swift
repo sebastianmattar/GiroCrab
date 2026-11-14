@@ -17,15 +17,17 @@ struct HoldingsCard: View {
                 let h = holdings[i]
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(h.name.isEmpty ? (h.isin.isEmpty ? h.wkn : h.isin) : h.name).lineLimit(1)
+                        Text(h.name.isEmpty ? (h.isin.isEmpty ? h.wkn : h.isin) : h.name).lineLimit(1).sensitive(.labels)
                         Text("\(h.quantity.formatted(.number.precision(.fractionLength(0...4)))) × \(Money.format(h.currentPriceCents)) · \(h.isin.isEmpty ? h.wkn : h.isin)")
+                            .sensitive()
                             .font(.caption2).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(Money.format(h.valueCents)).monospacedDigit()
+                        Text(Money.format(h.valueCents)).monospacedDigit().sensitive()
                         if let gain = Self.calculatedGain(h) {
                             Text("GuV (berechnet): \(Money.format(gain.cents)) (\(gain.percent.formatted(.number.precision(.fractionLength(2)))) %)")
+                                .sensitive()
                                 .font(.caption2).monospacedDigit()
                                 .foregroundStyle(gain.cents < 0 ? Color.red : Color.green)
                         }
@@ -129,10 +131,11 @@ struct StreamHeaderCard: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(model.title).sensitive(account == nil ? .labels : .personal).font(.title2.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
                     Group {
                         if let a = account {
                             Text([a.bankName, a.iban.isEmpty ? "" : formatIBAN(a.iban)].filter { !$0.isEmpty }.joined(separator: " · "))
+                                .sensitive()
                         } else {
                             Text(model.lastSyncText)
                         }
@@ -156,6 +159,7 @@ struct StreamHeaderCard: View {
                 if let hb = model.headerBalance {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(Money.format(hb.cents))
+                            .sensitive()
                             .font(.largeTitle.weight(.semibold).monospacedDigit())
                             .foregroundStyle(account?.kind == .loan ? Theme.loan : Theme.text)
                             .lineLimit(1)
@@ -193,8 +197,8 @@ struct StreamHeaderCard: View {
 
                 #if os(iOS)
                 HStack(spacing: 10) {
-                    Text("Konsum \(kpiValue(-model.consumptionThisMonth))").foregroundStyle(Theme.outflow)
-                    Text("Einnahmen \(kpiValue(model.incomeThisMonth))").foregroundStyle(Theme.inflow)
+                    Text("Konsum \(kpiValue(-model.consumptionThisMonth))").foregroundStyle(Theme.outflow).sensitive()
+                    Text("Einnahmen \(kpiValue(model.incomeThisMonth))").foregroundStyle(Theme.inflow).sensitive()
                     Spacer(minLength: 0)
                 }
                 .font(.caption.weight(.medium).monospacedDigit())
@@ -396,6 +400,7 @@ struct KPI: View {
             }
             Text(value).font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(tint)
                 .lineLimit(1).minimumScaleFactor(0.75)
+                .sensitive()
             Spacer(minLength: 2)
             Text(subtitle).font(.caption2).foregroundStyle(Theme.tertiary)
                 .lineLimit(2)
@@ -744,6 +749,7 @@ struct BalanceChart: View {
                 if let d = v.as(Double.self) {
                     // fixed minimum width: changing values never shift the plot sideways
                     Text(verbatim: Self.compactEuros(d))
+                        .sensitive()
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(Theme.tertiary)
                         .frame(minWidth: axisLabelWidth, alignment: .leading)
@@ -814,6 +820,7 @@ struct BalanceChart: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.secondary)
             Text(verbatim: prefix + Money.format(cents))
+                .sensitive()
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(cents < 0 ? Theme.outflow : Theme.text)
         }

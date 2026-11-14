@@ -262,6 +262,7 @@ struct HelpView: View {
             }
             if query.isEmpty {
                 Section("Support") {
+                    BugReportButton()
                     Link(destination: HelpLinks.website) {
                         Label("Webseite & Dokumentation (girocrab.de)", systemImage: "globe")
                     }
