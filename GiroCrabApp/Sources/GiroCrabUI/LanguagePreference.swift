@@ -219,7 +219,7 @@ struct LanguagePromptView: View {
                     .foregroundStyle(Theme.accent)
                     .accessibilityHidden(true)
                 Text("Sprache wählen")
-                    .font(.title.bold())
+                    .appFont(.title, weight: .bold)
                 Text("GiroCrab ist in Ihrer Systemsprache noch nicht verfügbar. In welcher Sprache soll GiroCrab angezeigt werden?")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(Theme.secondary)
@@ -237,7 +237,7 @@ struct LanguagePromptView: View {
                 Text(needsRestart
                      ? "GiroCrab startet dazu kurz neu. Sie können die Sprache später in den Einstellungen ändern."
                      : "Sie können die Sprache später in den Einstellungen ändern.")
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(Theme.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
@@ -309,7 +309,7 @@ struct LanguageSettingsSection: View {
             }
         } footer: {
             Text("Diese Einstellung entspricht der Sprache für GiroCrab in den Systemeinstellungen unter „Allgemein › Sprache & Region › Programme“.")
-                .font(.footnote)
+                .appFont(.footnote)
                 .foregroundStyle(.secondary)
                 .leadingFooter()
         }

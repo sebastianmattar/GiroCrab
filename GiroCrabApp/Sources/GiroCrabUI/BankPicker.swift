@@ -65,7 +65,7 @@ struct KindAddForm: View {
                         .disabled(!canAdd)
                 }
             } header: {
-                Text("Zugang")
+                Text("Zugang").appSectionHeader()
             } footer: {
                 let missing = d.requiredSettings.filter { key in !(model.settings.first { $0.key == key }?.hasValue ?? false) }
                 AddFormFooter(lines: [d.note] + (missing.isEmpty || submit != nil ? [] :
@@ -93,7 +93,7 @@ struct AddFormFooter: View {
             }
             Text("Gibt es den Zugang schon (gleiche Bank, gleiche Kennung), wird er aktualisiert statt doppelt angelegt.")
         }
-        .font(.caption).foregroundStyle(.secondary)
+        .appFont(.caption).foregroundStyle(.secondary)
         .leadingFooter()
     }
 }
@@ -131,7 +131,7 @@ struct Psd2AddForm: View {
                     .keyboardShortcut(.defaultAction)
             }
         } header: {
-            Text("Zugang")
+            Text("Zugang").appSectionHeader()
         } footer: {
             AddFormFooter(lines: [
                 bank.tested,

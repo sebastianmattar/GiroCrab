@@ -30,18 +30,18 @@ struct LoanProgressCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                if !compact { Label("Tilgung", systemImage: "house").font(.headline) }
+                if !compact { Label("Tilgung", systemImage: "house").appFont(.headline) }
                 if let repaid {
-                    Text("\(repaid.formatted(.percent.precision(.fractionLength(0)))) getilgt").font(.callout.weight(.semibold)).foregroundStyle(Theme.loan)
+                    Text("\(repaid.formatted(.percent.precision(.fractionLength(0)))) getilgt").appFont(.callout, weight: .semibold).foregroundStyle(Theme.loan)
                 } else {
-                    Text("Ursprünglicher Kreditbetrag fehlt").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Ursprünglicher Kreditbetrag fehlt").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 if manual != nil {
                     // manual loans: amount, Stand and rate live in the loan editor
                     if compact {
                         Button("Stand neu setzen …") { model.openLoanEditor(.anchor, accountId: account.id) }
-                            .buttonStyle(.borderless).font(.caption)
+                            .buttonStyle(.borderless).appFont(.caption)
                     }
                 } else if editing {
                     TextField("z. B. \(Money.plain(28_000_000))", text: $text)
@@ -55,7 +55,7 @@ struct LoanProgressCard: View {
                         text = initial.map { Money.plain($0) } ?? ""
                         editing = true
                     }
-                    .buttonStyle(.borderless).font(.caption)
+                    .buttonStyle(.borderless).appFont(.caption)
                     .help("Ursprünglicher Kreditbetrag bearbeiten")
                 }
             }

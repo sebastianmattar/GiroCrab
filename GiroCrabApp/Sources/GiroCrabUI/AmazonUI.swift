@@ -207,8 +207,8 @@ struct AmazonWebSheet: View {
             HStack(spacing: 10) {
                 SymbolTile(symbol: "shippingbox.fill", tint: connection.connector.tint, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(connection.displayName) – Amazon-Konto").font(.headline)
-                    Text(info).font(.caption).foregroundStyle(Theme.secondary)
+                    Text("\(connection.displayName) – Amazon-Konto").appFont(.headline)
+                    Text(info).appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 if running || browser.loading { ProgressView().controlSize(.small) }

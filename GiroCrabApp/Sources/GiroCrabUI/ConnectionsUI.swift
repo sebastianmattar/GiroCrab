@@ -23,15 +23,15 @@ struct PinSheet: View {
             HStack(spacing: 10) {
                 SymbolTile(symbol: connection.sfSymbol, tint: connection.connector.tint, size: 34)
                 VStack(alignment: .leading) {
-                    Text("Anmeldung bei \(connection.displayName)").font(.headline)
-                    Text(d?.protocol ?? "").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Anmeldung bei \(connection.displayName)").appFont(.headline)
+                    Text(d?.protocol ?? "").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 SyncBatchProgressLabel()
             }
             if model.demoActive || connection.bankCode == "99999999" { DemoHintBanner(style: .credentials) { login = "demo"; secret = "12345" } }
             VStack(alignment: .leading, spacing: 4) {
-                Text(d?.loginLabel ?? String(localized: "Anmeldung")).font(.caption).foregroundStyle(Theme.secondary)
+                Text(d?.loginLabel ?? String(localized: "Anmeldung")).appFont(.caption).foregroundStyle(Theme.secondary)
                 TextField(d?.loginLabel ?? String(localized: "Anmeldung"), text: $login)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
@@ -41,26 +41,26 @@ struct PinSheet: View {
                 if isTR && !login.isEmpty {
                     let n = normalizePhoneNumber(input: login)
                     Text(n == login ? "Format korrekt (E.164)" : "Wird gesendet als \(n)")
-                        .font(.caption2).foregroundStyle(Theme.secondary)
+                        .appFont(.caption2).foregroundStyle(Theme.secondary)
                 }
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(d?.secretLabel ?? String(localized: "PIN")).font(.caption).foregroundStyle(Theme.secondary)
+                Text(d?.secretLabel ?? String(localized: "PIN")).appFont(.caption).foregroundStyle(Theme.secondary)
                 SecureField(d?.secretLabel ?? String(localized: "PIN"), text: $secret)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(start)
                 Toggle("PIN im Tresor speichern", isOn: $savePin)
-                    .font(.caption)
+                    .appFont(.caption)
                     .help("Verschlüsselt in der SQLCipher-Datenbank; beim nächsten Abruf wird nicht mehr gefragt.")
             }
             Text(savePin ? "Die PIN wird verschlüsselt im Tresor gespeichert." : "Die PIN wird nur für diesen Abruf verwendet und nie gespeichert.")
-                .font(.caption).foregroundStyle(Theme.secondary)
+                .appFont(.caption).foregroundStyle(Theme.secondary)
             if isTR {
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Anmeldung blockiert (HTTP 403/426)?").font(.caption.weight(.semibold))
+                    Text("Anmeldung blockiert (HTTP 403/426)?").appFont(.caption, weight: .semibold)
                     Text("Melden Sie sich im eingebauten Browser-Fenster an. GiroCrab übernimmt danach die Sitzung (tr_session) für den Abruf.")
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .appFont(.caption).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button {
                         saveLoginIfChanged()
@@ -187,7 +187,7 @@ struct ConnectionEditSheet: View {
                         EmptyView()
                     }
                 }
-                .font(.callout)
+                .appFont(.callout)
             } else {
                 Text("keine Zustimmung gespeichert").foregroundStyle(Theme.secondary)
             }
@@ -206,7 +206,7 @@ struct ConnectionEditSheet: View {
         } label: { Label("Neu verbinden …", systemImage: "arrow.triangle.2.circlepath") }
             .help("Neue Zustimmung bei der Bank erteilen (z. B. vor Ablauf oder um Konten hinzuzufügen oder zu entfernen).")
         Text("Konten in Enable Banking verknüpft oder entfernt? Das wirkt erst nach „Neu verbinden“.")
-            .font(.caption).foregroundStyle(Theme.secondary)
+            .appFont(.caption).foregroundStyle(Theme.secondary)
     }
 
     private var isPortal: Bool { connection.connector == .americanExpress || connection.connector == .amazonVisa }
@@ -221,15 +221,15 @@ struct ConnectionEditSheet: View {
             HStack(spacing: 10) {
                 SymbolTile(symbol: connection.sfSymbol, tint: connection.connector.tint, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(connection.displayName).font(.headline)
-                    Text(descriptor?.protocol ?? "").font(.caption).foregroundStyle(Theme.secondary)
+                    Text(connection.displayName).appFont(.headline)
+                    Text(descriptor?.protocol ?? "").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
             }
             .padding(20)
             Divider()
             Form {
-                Section("Zugang") {
+                Section {
                     TextField("Anzeigename", text: $name)
                     TextField(descriptor?.loginLabel ?? String(localized: "Benutzerkennung"), text: $login)
                         .autocorrectionDisabled()
@@ -246,16 +246,16 @@ struct ConnectionEditSheet: View {
                             SecureField(status?.hasPin == true ? "Gespeicherte PIN (leer = unverändert)" : (connection.connector == .ibkr ? "Flex-Query-ID" : "PIN"), text: $pin)
                         }
                     }
-                }
+                } header: { Text("Zugang").appSectionHeader() }
                 if !keys.isEmpty {
-                    Section(sectionTitle) {
+                    Section {
                         ForEach(keys, id: \.self) { key in field(key) }
-                    }
+                    } header: { Text(sectionTitle).appSectionHeader() }
                 }
                 if isPortal {
-                    Section("Direkt-Login (Web-Session)") {
+                    Section {
                         Text("Melden Sie sich im Browser-Fenster mit Ihrem normalen Benutzernamen, Passwort und 2FA an. GiroCrab liest die Umsätze direkt aus dem Portal – es sind keine API-Schlüssel nötig. Die Sitzung bleibt für spätere Abrufe erhalten.")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Button {
                             save()
@@ -272,16 +272,16 @@ struct ConnectionEditSheet: View {
                                 }
                             }
                         Button("Web-Sitzung (Cookies) löschen …", role: .destructive) { confirmClear = .portal }
-                    }
+                    } header: { Text("Direkt-Login (Web-Session)").appSectionHeader() }
                     Section {
                         DisclosureGroup("Erweitert: Eigene PSD2/Enable-Banking API (Optional)", isExpanded: $showAdvanced) {
                             Text("Nur für Power-User: Mit eigener Application-ID und PEM-Schlüssel nutzt GiroCrab statt des Web-Logins die PSD2-Schnittstelle von Enable Banking.")
-                                .font(.caption).foregroundStyle(Theme.secondary)
+                                .appFont(.caption).foregroundStyle(Theme.secondary)
                             ForEach(advancedKeys, id: \.self) { key in field(key) }
                         }
                     }
                 }
-                Section("Status") {
+                Section {
                     if let st = status {
                         LabeledContent("Konten", value: "\(st.accountCount)")
                         LabeledContent("Buchungen", value: "\(st.bookingCount)")
@@ -305,7 +305,7 @@ struct ConnectionEditSheet: View {
                             model.webLoginConnection = model.connections.first { $0.id == connection.id } ?? connection
                         } label: { Label("Im Browser-Fenster anmelden …", systemImage: "safari") }
                     }
-                }
+                } header: { Text("Status").appSectionHeader() }
             }
             .formStyle(.grouped)
             Divider()
@@ -386,7 +386,7 @@ struct ConnectionEditSheet: View {
                 }
                 if revealed.contains(key) {
                     TextEditor(text: binding(key))
-                        .font(.caption.monospaced())
+                        .appFont(.caption, design: .monospaced)
                         .frame(height: 90)
                 } else {
                     Text(entry?.hasValue == true ? "•••••• (gespeichert)" : "nicht gesetzt").foregroundStyle(Theme.secondary)
@@ -407,7 +407,7 @@ struct ConnectionEditSheet: View {
                     .autocorrectionDisabled()
             }
             if let help = entry?.help {
-                Text(help).font(.caption2).foregroundStyle(Theme.secondary)
+                Text(help).appFont(.caption2).foregroundStyle(Theme.secondary)
             }
         }
     }
@@ -509,13 +509,13 @@ struct WebLoginSheet: View {
             HStack(spacing: 10) {
                 SymbolTile(symbol: "safari", tint: connection.connector.tint, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Trade Republic – Anmeldung im Browser-Fenster").font(.headline)
-                    Text(info).font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Trade Republic – Anmeldung im Browser-Fenster").appFont(.headline)
+                    Text(info).appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 SyncBatchProgressLabel()
                 if found != nil {
-                    Label("Sitzung gefunden", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.inflow).font(.caption)
+                    Label("Sitzung gefunden", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.inflow).appFont(.caption)
                 } else {
                     ProgressView().controlSize(.small)
                 }

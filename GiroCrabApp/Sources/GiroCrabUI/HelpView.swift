@@ -238,7 +238,7 @@ struct HelpView: View {
                         .padding(.vertical, 4)
                 } header: {
                     Label(topic.title(language), systemImage: topic.icon)
-                        .font(.headline)
+                        .appFont(.headline)
                         .textCase(nil)
                 }
             }
@@ -246,7 +246,7 @@ struct HelpView: View {
                 Section {
                     ForEach(HelpCatalog.shortcuts, id: \.keys) { s in
                         LabeledContent {
-                            Text(verbatim: s.keys).font(.body.monospaced())
+                            Text(verbatim: s.keys).appFont(.body, design: .monospaced)
                         } label: {
                             Text(verbatim: language == "en" ? s.en : s.de)
                         }
@@ -254,14 +254,14 @@ struct HelpView: View {
                 } header: {
                     Label(language == "en" ? "Keyboard shortcuts (macOS)" : "Tastaturkürzel (macOS)",
                           systemImage: "keyboard")
-                        .font(.headline).textCase(nil)
+                        .appFont(.headline).textCase(nil)
                 }
             }
             if topics.isEmpty && !showShortcuts {
                 ContentUnavailableView.search(text: query)
             }
             if query.isEmpty {
-                Section("Support") {
+                Section {
                     Link(destination: HelpLinks.website) {
                         Label("Webseite & Dokumentation (girocrab.de)", systemImage: "globe")
                     }
@@ -271,7 +271,7 @@ struct HelpView: View {
                     Link(destination: HelpLinks.discussions) {
                         Label("Community & Diskussionen (GitHub)", systemImage: "bubble.left.and.bubble.right")
                     }
-                }
+                } header: { Text("Support").appSectionHeader() }
             }
         }
         .searchable(text: $query, prompt: "In der Hilfe suchen")

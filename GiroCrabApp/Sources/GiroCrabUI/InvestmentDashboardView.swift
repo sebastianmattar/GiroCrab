@@ -20,7 +20,7 @@ struct InvestmentDashboardView: View {
                 PlanGrid(dashboard: d)
                 PerksCard(dashboard: d)
                 FlowChartCard(dashboard: d)
-                Text("Investment-Buchungen").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.secondary).padding(.top, 4)
+                Text("Investment-Buchungen").appFont(.subheadline, weight: .semibold).foregroundStyle(Theme.secondary).padding(.top, 4)
             }
         }
     }
@@ -38,10 +38,10 @@ struct PlanGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Monatliche Sparpläne").font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text("Monatliche Sparpläne").appFont(.subheadline, weight: .semibold).lineLimit(1)
                 Spacer()
                 if !compact {
-                    Text("Ausführungen der letzten \(dashboard.months.count) Monate").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Ausführungen der letzten \(dashboard.months.count) Monate").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
             }
             .padding(.bottom, 10)
@@ -53,7 +53,7 @@ struct PlanGrid: View {
                     }
                     Text("pro Monat").lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing).gridColumnAlignment(.trailing)
                 }
-                .font(.caption2)
+                .appFont(.caption2)
                 .foregroundStyle(Theme.tertiary)
                 .padding(.bottom, 6)
                 ForEach(dashboard.plans) { plan in
@@ -62,8 +62,8 @@ struct PlanGrid: View {
                         HStack(spacing: 8) {
                             MerchantSignet(merchant: plan.merchant, size: 28)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(plan.merchant.name).font((compact ? Font.footnote : Font.callout).weight(.medium)).lineLimit(compact ? 2 : 1).minimumScaleFactor(0.85)
-                                Text(planSubtitle(plan)).font(.caption2.monospaced()).foregroundStyle(Theme.secondary).lineLimit(1)
+                                Text(plan.merchant.name).appFont(compact ? .footnote : .callout, weight: .medium).lineLimit(compact ? 2 : 1).minimumScaleFactor(0.85)
+                                Text(planSubtitle(plan)).appFont(.caption2, design: .monospaced).foregroundStyle(Theme.secondary).lineLimit(1)
                             }
                         }
                         ForEach(plan.executions.filter { shownMonths.contains($0.month) }, id: \.month) { e in
@@ -78,7 +78,7 @@ struct PlanGrid: View {
                             .help(e.amountCents > 0 ? "\(DateText.monthLabel(e.month)): \(Money.format(e.amountCents))" : String(localized: "nicht ausgeführt"))
                         }
                         Text(Money.format(plan.monthlyCents))
-                            .font(.callout.monospacedDigit())
+                            .appFont(.callout, monospacedDigit: true)
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                             .frame(minWidth: compact ? 64 : nil, alignment: .trailing)
                             .foregroundStyle(plan.active ? Theme.text : Theme.tertiary)
@@ -87,9 +87,9 @@ struct PlanGrid: View {
                 }
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    Text("Summe aktive Pläne").font(.callout.weight(.semibold)).lineLimit(compact ? 2 : 1)
+                    Text("Summe aktive Pläne").appFont(.callout, weight: .semibold).lineLimit(compact ? 2 : 1)
                     ForEach(shownMonths, id: \.self) { _ in Color.clear.frame(width: cell, height: 1) }
-                    Text(Money.format(dashboard.totalMonthlyCents)).font(.callout.weight(.semibold).monospacedDigit()).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing)
+                    Text(Money.format(dashboard.totalMonthlyCents)).appFont(.callout, weight: .semibold, monospacedDigit: true).lineLimit(1).fixedSize(horizontal: true, vertical: false).frame(minWidth: compact ? 64 : nil, alignment: .trailing)
                 }
                 .padding(.top, 8)
             }
@@ -113,9 +113,9 @@ struct PerksCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Trade Republic Perks", systemImage: "gift").font(.subheadline.weight(.semibold))
+                Label("Trade Republic Perks", systemImage: "gift").appFont(.subheadline, weight: .semibold)
                 Spacer()
-                Text("diesen Monat \(Money.format(dashboard.perksThisMonthCents))").font(.caption).foregroundStyle(Theme.secondary)
+                Text("diesen Monat \(Money.format(dashboard.perksThisMonthCents))").appFont(.caption).foregroundStyle(Theme.secondary)
             }
             HStack(alignment: .top, spacing: 12) {
                 perk(title: "1 % Saveback", value: dashboard.savebackEarnedCents, count: dashboard.savebackCount,
@@ -129,10 +129,10 @@ struct PerksCard: View {
 
     private func perk(title: LocalizedStringKey, value: Int64, count: UInt32, text: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.secondary)
-            Text(Money.format(value)).font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(Theme.invest)
-            Text("\(count) Ausführungen").font(.caption2).foregroundStyle(Theme.tertiary)
-            Text(text).font(.caption2).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(title).appFont(.caption, weight: .medium).foregroundStyle(Theme.secondary)
+            Text(Money.format(value)).appFont(.title3, weight: .semibold, monospacedDigit: true).foregroundStyle(Theme.invest)
+            Text("\(count) Ausführungen").appFont(.caption2).foregroundStyle(Theme.tertiary)
+            Text(text).appFont(.caption2).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -158,14 +158,25 @@ struct FlowChartCard: View {
              Bar(month: DateText.monthLabel(m.month), kind: invested, euros: Double(m.investmentCents) / 100)]
         }
         VStack(alignment: .leading, spacing: 8) {
-            Text("Konsum vs. Investition").font(.subheadline.weight(.semibold))
+            Text("Konsum vs. Investition").appFont(.subheadline, weight: .semibold)
             Chart(bars) { b in
                 BarMark(x: .value("Monat", b.month), y: .value("€", b.euros))
                     .foregroundStyle(by: .value("Art", b.kind))
                     .position(by: .value("Art", b.kind))
             }
             .chartForegroundStyleScale([consumption: Theme.tertiary, invested: Theme.invest])
-            .chartYAxis { AxisMarks(position: .leading) { AxisGridLine().foregroundStyle(Theme.border) ; AxisValueLabel() } }
+            .chartYAxis {
+                AxisMarks(position: .leading) { v in
+                    AxisGridLine().foregroundStyle(Theme.border)
+                    AxisValueLabel { Text(verbatim: v.as(Double.self)?.formatted() ?? "").appFont(.caption2).fixedSize() }
+                }
+            }
+            .chartXAxis {
+                AxisMarks { v in
+                    AxisGridLine().foregroundStyle(Theme.border)
+                    AxisValueLabel { Text(verbatim: v.as(String.self) ?? "").appFont(.caption2).fixedSize() }
+                }
+            }
             .frame(height: 140)
         }
         .card()

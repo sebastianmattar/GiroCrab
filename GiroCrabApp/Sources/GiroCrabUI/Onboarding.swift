@@ -15,14 +15,14 @@ struct DemoBanner: View {
         .controlSize(.small)
         let content = HStack(alignment: .top, spacing: 12) {
             Image(systemName: "theatermasks.fill")
-                .font(.title3)
+                .appFont(.title3)
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Demo-Daten").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                Text("Demo-Daten").appFont(.subheadline, weight: .semibold).foregroundStyle(Theme.text)
                 Text(model.hasOwnVault
                      ? "Ihr eigener Tresor ist noch leer. Hier sehen Sie erfundene Buchungen aller 7 Banken."
                      : "Erfundene Buchungen aller 7 Banken – keine echte Bank verbunden. Sobald echte Daten da sind, schützt Face ID bzw. Ihr Gerätecode den Tresor automatisch; hier können Sie den Sperrbildschirm testen.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -58,7 +58,7 @@ struct DemoHintBanner: View {
                 Text(style == .credentials
                      ? "Test- & Demo-Zugang (ohne echtes Bankkonto): Kennung demo · PIN 12345"
                      : "Demo-Modus: PIN 12345 · TAN 123456")
-                    .font(.callout.weight(.semibold))
+                    .appFont(.callout, weight: .semibold)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: "play.circle.fill").foregroundStyle(Theme.accent)
@@ -83,10 +83,10 @@ struct EmptyVaultCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 AnimatedCrabLogoView(size: 56, phase: .idle)
-                Text("Willkommen bei GiroCrab").font(.title3.weight(.semibold))
+                Text("Willkommen bei GiroCrab").appFont(.title3, weight: .semibold)
             }
             Text("Ihr Tresor ist eingerichtet, enthält aber noch keine Konten. So geht es weiter:")
-                .font(.callout).foregroundStyle(Theme.secondary)
+                .appFont(.callout).foregroundStyle(Theme.secondary)
             step(1, "Bank wählen und Anmeldenamen eingeben")
             step(2, "Fehlende Angaben ergänzen (z. B. FinTS-Produkt-ID, API-Schlüssel) – das Formular öffnet sich automatisch")
             step(3, "PIN eingeben und in der Banking-App freigeben")
@@ -110,7 +110,7 @@ struct EmptyVaultCard: View {
             #endif
             Divider()
             HStack {
-                Text("Erst einmal ansehen?").font(.caption).foregroundStyle(Theme.secondary)
+                Text("Erst einmal ansehen?").appFont(.caption).foregroundStyle(Theme.secondary)
                 Button("Demo-Daten & Demo-Banken laden (Kennung: demo / PIN: 12345)") { model.loadDemoData() }
                     .buttonStyle(.borderless)
             }
@@ -125,11 +125,11 @@ struct EmptyVaultCard: View {
     private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text(verbatim: "\(n)")
-                .font(.caption.weight(.bold))
+                .appFont(.caption, weight: .bold)
                 .foregroundStyle(Theme.accent)
                 .frame(width: 20, height: 20)
                 .background(Circle().fill(Theme.selection))
-            Text(text).font(.callout).foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true)
+            Text(text).appFont(.callout).foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -155,10 +155,10 @@ struct BankSetupSheet: View {
                 HStack(spacing: 10) {
                     SymbolTile(symbol: request.connection.sfSymbol, tint: request.connection.connector.tint, size: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(request.connection.displayName) einrichten").font(.headline)
+                        Text("\(request.connection.displayName) einrichten").appFont(.headline)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("Diese Angaben fehlen noch, bevor Buchungen abgerufen werden können.")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
@@ -171,10 +171,10 @@ struct BankSetupSheet: View {
             ForEach(request.keys.filter { !Self.enableBankingKeys.contains($0) }, id: \.self) { key in
                 let entry = model.settingEntry(key)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(entry?.label ?? settingLabels[key] ?? key).font(.callout.weight(.medium))
+                    Text(entry?.label ?? settingLabels[key] ?? key).appFont(.callout, weight: .medium)
                     if key.contains("private_key") {
                         TextEditor(text: binding(key))
-                            .font(.caption.monospaced())
+                            .appFont(.caption, design: .monospaced)
                             .frame(height: 80)
                             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                     } else if entry?.isSecret ?? key.contains("secret") {
@@ -187,13 +187,13 @@ struct BankSetupSheet: View {
                             .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
                     }
-                    if let help = entry?.help { Text(help).font(.caption).foregroundStyle(Theme.secondary) }
+                    if let help = entry?.help { Text(help).appFont(.caption).foregroundStyle(Theme.secondary) }
                     if key == "fints.product_id" {
                         Link("Kostenlose FinTS-Produktregistrierung (Deutsche Kreditwirtschaft) öffnen",
                              destination: URL(string: "https://www.fints.org/de/hersteller/produktregistrierung")!)
-                            .font(.caption)
+                            .appFont(.caption)
                         Text("Die Registrierung dauert meist einige Tage. Bis dahin können Sie GiroCrab mit den Demo-Daten ausprobieren.")
-                            .font(.caption2).foregroundStyle(Theme.tertiary)
+                            .appFont(.caption2).foregroundStyle(Theme.tertiary)
                     }
                 }
             }

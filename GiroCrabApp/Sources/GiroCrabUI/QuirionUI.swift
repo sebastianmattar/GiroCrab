@@ -151,10 +151,10 @@ struct QuirionWebSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(connection.displayName) – quirion").font(.headline)
-                    if running { Text(progress).font(.caption) }
-                    else if let notice { Text(notice).font(.caption).foregroundStyle(.orange) }
-                    else { Text(ready ? String(localized: "Angemeldet – Depot, Konten und Historie können abgerufen werden.") : String(localized: "Melden Sie sich bei quirion an und bestätigen Sie gegebenenfalls die Anmeldung.")).font(.caption) }
+                    Text("\(connection.displayName) – quirion").appFont(.headline)
+                    if running { Text(progress).appFont(.caption) }
+                    else if let notice { Text(notice).appFont(.caption).foregroundStyle(.orange) }
+                    else { Text(ready ? String(localized: "Angemeldet – Depot, Konten und Historie können abgerufen werden.") : String(localized: "Melden Sie sich bei quirion an und bestätigen Sie gegebenenfalls die Anmeldung.")).appFont(.caption) }
                 }
                 Spacer()
                 if running || browser.loading { ProgressView().controlSize(.small) }

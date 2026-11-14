@@ -10,6 +10,7 @@ import AppKit
 struct TransferSheetView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.textScale) private var textScale
     @State private var confirming = false
     @State private var suggestions: [KnownRecipient] = []
     @FocusState private var nameFocused: Bool
@@ -60,14 +61,14 @@ struct TransferSheetView: View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Image(systemName: "paperplane.circle.fill").font(.title).foregroundStyle(Theme.accent)
-                Text(confirming ? (canSend ? "Überweisung prüfen" : "GiroCode scannen") : "Neue Überweisung").font(.title2.bold())
+                Image(systemName: "paperplane.circle.fill").appFont(.title).foregroundStyle(Theme.accent)
+                Text(confirming ? (canSend ? "Überweisung prüfen" : "GiroCode scannen") : "Neue Überweisung").appFont(.title2, weight: .bold)
                 Spacer()
             }
             if confirming { confirmation } else { form(draft: $model.transferDraft) }
             if let e = model.transferError {
                 Label(e, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red).font(.callout)
+                    .foregroundStyle(.red).appFont(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let reason = model.transferInstantDeclined {
@@ -120,7 +121,7 @@ struct TransferSheetView: View {
                     .keyboardShortcut("v", modifiers: [.command, .shift])
                     .help("Erkennt IBAN, Betrag, Empfänger und Zweck (⇧⌘V; ⌘V außerhalb von Textfeldern). Rechnung (PDF, ZUGFeRD, GiroCode) hierher ziehen.")
                 Text(importNote ?? String(localized: "Oder Rechnung hierher ziehen"))
-                    .font(.caption).foregroundStyle(Theme.tertiary).lineLimit(1)
+                    .appFont(.caption).foregroundStyle(Theme.tertiary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             HStack { Spacer(); TransferTemplatesMenu() }
@@ -136,18 +137,18 @@ struct TransferSheetView: View {
                 if model.bankingGate(forAccount: account?.id) != nil {
                     // Security lock: no direct transfer, the GiroCode needs no bank contact.
                     Label("Die Sicherheitssperre verhindert direkte Überweisungen von diesem Konto. Am Ende erhalten Sie einen GiroCode zum Scannen in der App Ihrer Bank.", systemImage: "exclamationmark.shield")
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .appFont(.caption).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 152)
                 } else if account?.connector == .comdirect {
                     // The comdirect REST API has no payment endpoint; FinTS has.
                     Label("Die comdirect-Schnittstelle (REST) kann keine Überweisungen ausführen. Verbinden Sie das Konto zusätzlich per FinTS, um direkt zu überweisen. Sonst erhalten Sie am Ende einen GiroCode zum Scannen in der comdirect-App.", systemImage: "qrcode")
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .appFont(.caption).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 152)
                 } else {
                     Label("Von diesem Konto kann GiroCrab nicht direkt überweisen. Am Ende erhalten Sie einen GiroCode zum Scannen in der App Ihrer Bank.", systemImage: "qrcode")
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .appFont(.caption).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 152)
                 }
@@ -167,8 +168,8 @@ struct TransferSheetView: View {
                                         suggestions = []
                                     } label: {
                                         VStack(alignment: .leading, spacing: 0) {
-                                            Text(r.name).font(.callout).lineLimit(1)
-                                            Text(formatIBAN(r.iban)).font(.caption2.monospaced()).foregroundStyle(Theme.secondary)
+                                            Text(r.name).appFont(.callout).lineLimit(1)
+                                            Text(formatIBAN(r.iban)).appFont(.caption2, design: .monospaced).foregroundStyle(Theme.secondary)
                                         }
                                         .padding(.horizontal, 8).padding(.vertical, 4)
                                         .background(RoundedRectangle(cornerRadius: 7).fill(Theme.selection))
@@ -184,7 +185,7 @@ struct TransferSheetView: View {
                 HStack(spacing: 8) {
                     TextField("DE00 0000 0000 0000 0000 00", text: draft.iban)
                         .textFieldStyle(.roundedBorder)
-                        .font(.body.monospaced())
+                        .appFont(.body, design: .monospaced)
                         .autocorrectionDisabled()
                     if !draft.wrappedValue.iban.isEmpty {
                         Image(systemName: ibanValid ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -197,7 +198,7 @@ struct TransferSheetView: View {
                 HStack(spacing: 8) {
                     TextField("z. B. GENODEF1KS2", text: draft.bic)
                         .textFieldStyle(.roundedBorder)
-                        .font(.body.monospaced())
+                        .appFont(.body, design: .monospaced)
                         .autocorrectionDisabled()
                     if !bicText.isEmpty {
                         Image(systemName: bicValid ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -210,11 +211,11 @@ struct TransferSheetView: View {
                     TextField(Money.plain(0), text: draft.amountText)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
-                        .font(.body.monospacedDigit())
+                        .appFont(.body, monospacedDigit: true)
                         .frame(maxWidth: 160)
                     Text("€").foregroundStyle(Theme.secondary)
                     if !draft.wrappedValue.amountText.isEmpty && cents == nil {
-                        Text("Betrag > 0 eingeben").font(.caption).foregroundStyle(.red)
+                        Text("Betrag > 0 eingeben").appFont(.caption).foregroundStyle(.red)
                     }
                 }
             }
@@ -224,7 +225,7 @@ struct TransferSheetView: View {
                         .lineLimit(2...3)
                         .textFieldStyle(.roundedBorder)
                     Text("\(draft.wrappedValue.purpose.count)/\(maxPurpose)")
-                        .font(.caption.monospacedDigit())
+                        .appFont(.caption, monospacedDigit: true)
                         .foregroundStyle(draft.wrappedValue.purpose.count >= maxPurpose ? Color.red : Theme.tertiary)
                 }
             }
@@ -239,11 +240,11 @@ struct TransferSheetView: View {
                                 if on { model.transferDraft.scheduled = false }
                             }
                         Text("Kommt in Sekunden an und ist nicht rückholbar. Bietet die Bank sie nicht an, wird nichts gesendet; Sie können sie dann als normale Überweisung senden.")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         if draft.wrappedValue.instant, let c = cents, c >= 10_000_000 {
                             Label("Viele Banken begrenzen Echtzeitüberweisungen (oft auf 100.000 € oder ein eigenes Limit). Die Bank kann den Auftrag dann ablehnen.", systemImage: "exclamationmark.triangle")
-                                .font(.caption).foregroundStyle(.orange)
+                                .appFont(.caption).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Toggle("Terminüberweisung", isOn: draft.scheduled)
@@ -273,7 +274,7 @@ struct TransferSheetView: View {
 
     private func field<C: View>(_ label: LocalizedStringKey, @ViewBuilder content: () -> C) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).foregroundStyle(Theme.secondary).frame(width: 140, alignment: .trailing)
+            Text(label).foregroundStyle(Theme.secondary).frame(width: 140 * textScale, alignment: .trailing)
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -302,7 +303,7 @@ struct TransferSheetView: View {
                 .frame(width: 200, height: 200)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(Money.format(-(cents ?? 0)).replacingOccurrences(of: "-", with: ""))
-                        .font(.largeTitle.weight(.semibold).monospacedDigit())
+                        .appFont(.largeTitle, weight: .semibold, monospacedDigit: true)
                     summaryRow("An", d.name)
                     summaryRow("IBAN", d.iban)
                     if !bicText.isEmpty { summaryRow("BIC", bicText.uppercased()) }
@@ -315,7 +316,7 @@ struct TransferSheetView: View {
             .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
             Label("In der App Ihrer Bank „Fotoüberweisung“ bzw. „QR-Code scannen“ wählen, den Code scannen und dort mit TAN freigeben. GiroCrab sendet nichts.", systemImage: "camera.viewfinder")
-                .font(.callout).foregroundStyle(Theme.secondary)
+                .appFont(.callout).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -325,7 +326,7 @@ struct TransferSheetView: View {
         return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(Money.format(-(cents ?? 0)).replacingOccurrences(of: "-", with: ""))
-                    .font(.largeTitle.weight(.semibold).monospacedDigit())
+                    .appFont(.largeTitle, weight: .semibold, monospacedDigit: true)
                 summaryRow("An", d.name)
                 summaryRow("IBAN", d.iban)
                 if !bicText.isEmpty { summaryRow("BIC", bicText.uppercased()) }
@@ -342,14 +343,14 @@ struct TransferSheetView: View {
             .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
             Label("Bitte Empfänger und IBAN genau prüfen. Eine freigegebene Überweisung lässt sich meist nicht mehr zurückholen.", systemImage: "exclamationmark.shield")
-                .font(.callout).foregroundStyle(Theme.secondary)
+                .appFont(.callout).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func summaryRow(_ k: LocalizedStringKey, _ v: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(k).foregroundStyle(Theme.secondary).frame(width: 90, alignment: .leading)
+            Text(k).foregroundStyle(Theme.secondary).frame(width: 90 * textScale, alignment: .leading)
             Text(v).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -360,13 +361,13 @@ struct TransferSheetView: View {
     private func instantDeclined(_ reason: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Echtzeitüberweisung nicht ausgeführt", systemImage: "bolt.slash.fill")
-                .font(.callout.bold())
+                .appFont(.callout, weight: .bold)
             Text(String(format: String(localized: "Es wurde kein Geld gesendet. Grund der Bank: %@"), reason))
-                .font(.callout).fixedSize(horizontal: false, vertical: true)
+                .appFont(.callout).fixedSize(horizontal: false, vertical: true)
             Button("Als normale Überweisung senden") { model.sendAsRegularTransfer() }
                 .disabled(model.transferBusy)
             Text("Kommt in der Regel am nächsten Bankarbeitstag an. Sie geben sie erneut frei.")
-                .font(.caption).foregroundStyle(Theme.secondary)
+                .appFont(.caption).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)

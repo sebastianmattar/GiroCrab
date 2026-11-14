@@ -24,8 +24,8 @@ struct TwoFactorSheet: View {
                 HStack(spacing: 10) {
                     SymbolTile(symbol: active.connection.sfSymbol, tint: active.connection.connector.tint, size: 30)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(active.connection.displayName).font(.headline)
-                        Text(c.methodName).font(.caption).foregroundStyle(.secondary)
+                        Text(active.connection.displayName).appFont(.headline)
+                        Text(c.methodName).appFont(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     SyncBatchProgressLabel()
@@ -44,7 +44,7 @@ struct TwoFactorSheet: View {
                         .foregroundStyle(.tint)
                         .symbolEffect(.variableColor.iterative, options: .repeating, isActive: true)
                         .padding(.top, 6)
-                    Text(c.title).font(.title3.bold())
+                    Text(c.title).appFont(.title3, weight: .bold)
                     Text(c.message).multilineTextAlignment(.center).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if let s = c.redirectUrl, let url = URL(string: s) {
                         Button { openURL(url) } label: { Label("Im Browser anmelden", systemImage: "safari") }
@@ -53,13 +53,13 @@ struct TwoFactorSheet: View {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text(active.waiting ? "Warte auf Freigabe …" : "Push-Nachricht gesendet")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .appFont(.callout).foregroundStyle(.secondary)
                     }
                 case .code, .imageCode:
                     Image(systemName: c.kind == .imageCode ? "qrcode.viewfinder" : "lock.rotation")
                         .font(.system(size: 44, weight: .light))
                         .foregroundStyle(.tint)
-                    Text(c.title).font(.title3.bold())
+                    Text(c.title).appFont(.title3, weight: .bold)
                     if let data = c.image, let img = platformImage(data) {
                         img.resizable().interpolation(.none).scaledToFit().frame(maxWidth: 220, maxHeight: 220)
                             .background(.white)
@@ -67,7 +67,7 @@ struct TwoFactorSheet: View {
                     }
                     Text(c.message).multilineTextAlignment(.center).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     TextField("TAN / Code", text: $code)
-                        .font(.title2.monospaced())
+                        .appFont(.title2, design: .monospaced)
                         .multilineTextAlignment(.center)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
@@ -85,7 +85,7 @@ struct TwoFactorSheet: View {
                             #else
                             .buttonStyle(.plain)
                             #endif
-                            .font(.callout)
+                            .appFont(.callout)
                             .help("Kein Code in der App? Code per SMS anfordern.")
                     }
                 case .redirect:
@@ -98,12 +98,12 @@ struct TwoFactorSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
                         Text("Bei der Bank anmelden und den Zugriff erlauben – das Fenster schließt sich danach von selbst.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .appFont(.callout).foregroundStyle(.secondary)
                     } else {
                         Image(systemName: "building.columns")
                             .font(.system(size: 44, weight: .light))
                             .foregroundStyle(.tint)
-                        Text(c.title).font(.title3.bold())
+                        Text(c.title).appFont(.title3, weight: .bold)
                         Text("Sie melden sich direkt bei Ihrer Bank an und erlauben den Zugriff. GiroCrab übernimmt das Ergebnis automatisch.")
                             .multilineTextAlignment(.center).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         if let s = c.redirectUrl, let url = URL(string: s) {
@@ -115,7 +115,7 @@ struct TwoFactorSheet: View {
                     // Fallback for banks that block embedded browsers.
                     DisclosureGroup("Stattdessen im eigenen Browser anmelden", isExpanded: $showManualRedirect) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(c.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(c.message).appFont(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             if let s = c.redirectUrl, let url = URL(string: s) {
                                 Button { openURL(url) } label: { Label("Zustimmungsseite öffnen", systemImage: "arrow.up.right.square") }
                                     .buttonStyle(.bordered)
@@ -127,22 +127,22 @@ struct TwoFactorSheet: View {
                         }
                         .padding(.top, 4)
                     }
-                    .font(.callout)
+                    .appFont(.callout)
                 }
 
                 if active.busy && c.kind == .redirect {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Freigabe wird übernommen …").font(.callout).foregroundStyle(.secondary)
+                        Text("Freigabe wird übernommen …").appFont(.callout).foregroundStyle(.secondary)
                     }
                 }
                 if let e = active.error {
-                    Text(e).foregroundStyle(.red).font(.callout)
+                    Text(e).foregroundStyle(.red).appFont(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 if let s = c.expiresInSeconds {
-                    Text("Gültig noch etwa \(s / 60) Min.").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gültig noch etwa \(s / 60) Min.").appFont(.caption).foregroundStyle(.tertiary)
                 }
 
                 SyncPromptButtons(cancel: model.skipCurrentSync) {
@@ -208,7 +208,7 @@ struct SyncBatchProgressLabel: View {
     var body: some View {
         if let p = model.syncBatchProgress {
             Text("Bankzugang \(p.current) von \(p.total)")
-                .font(.caption)
+                .appFont(.caption)
                 .monospacedDigit()
                 .foregroundStyle(Theme.secondary)
         }

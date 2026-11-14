@@ -108,13 +108,13 @@ struct BankingPolicyBanner: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "exclamationmark.shield.fill")
                 .foregroundStyle(.red)
-                .font(.title3)
+                .appFont(.title3)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 Text(gate.title)
-                    .font(.headline)
+                    .appFont(.headline)
                 Text(gate.detail)
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
@@ -172,7 +172,7 @@ struct BankingPolicySection: View {
         let policy = BankingPolicy.shared
         Section {
             Text("GiroCrab prüft regelmäßig, ob diese Version noch sicher mit Banken kommunizieren darf. Enthält sie eine Sicherheitslücke oder einen schweren Fehler im Bankzugang, sind Abrufe und Überweisungen bis zum Update gesperrt. Ihre Daten bleiben lesbar und exportierbar. Dafür lädt GiroCrab höchstens alle 15 Minuten eine signierte Datei von GitHub; dabei werden keine persönlichen Daten übertragen.")
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             LabeledContent("Status") {
@@ -197,7 +197,7 @@ struct BankingPolicySection: View {
             }
             if BankingPolicy.usesDebugOverrides {
                 Label("Debug-Build: Adresse, Schlüssel, Version oder Build-Datum sind per Umgebungsvariable überschrieben.", systemImage: "hammer")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.orange)
             }
             HStack {
@@ -208,7 +208,7 @@ struct BankingPolicySection: View {
                 Link("Mehr erfahren", destination: docsURL)
             }
         } header: {
-            Text("Sicherheitssperre für Bankverbindungen")
+            Text("Sicherheitssperre für Bankverbindungen").appSectionHeader()
         }
     }
 

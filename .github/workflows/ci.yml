@@ -19,9 +19,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # `rust` und `swift` laufen bewusst parallel und unabhängig: ein roter
-  # fmt-/Clippy-/Rust-Test-Lauf darf den Swift-Build nicht verdecken und umgekehrt.
-  # Die Jobnamen bleiben unverändert, damit bestehende Required Checks weiter greifen.
+  # `rust` and `swift` deliberately run in parallel and independently: a red
+  # fmt/Clippy/Rust test run must not hide the Swift build, and vice versa.
+  # The job names stay unchanged so existing required checks keep matching.
   rust:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -37,15 +37,17 @@ jobs:
         with:
           node-version: '24'
       - run: cargo fmt --all -- --check
-      - name: Keine FinTS-Produkt-ID im Repo
+      - name: No FinTS product ID in the repo
         run: scripts/fints-registrierung.sh scan
-      - name: THIRD_PARTY_NOTICES.md deckt alle direkten Abhängigkeiten ab
+      - name: THIRD_PARTY_NOTICES.md covers all direct dependencies
         run: scripts/check-third-party-notices.sh
-      - name: Kein Vault-Zugriff aus Views (nur über AppModel)
+      - name: No vault access from views (only via AppModel)
         run: scripts/lint-vault-access.sh
-      - name: AppModel-Interna nur in AppModel*.swift
+      - name: AppModel internals only in AppModel*.swift
         run: scripts/lint-appmodel-internals.sh
-      - name: String Catalogs sortiert (scripts/xcstrings.py format)
+      - name: Text styles via .appFont (scale with the text size)
+        run: scripts/lint-fonts.sh
+      - name: String catalogs sorted (scripts/xcstrings.py format)
         run: scripts/xcstrings.py check
       - name: Test String-Catalog-Merge-Driver
         run: python3 -m unittest scripts/test_xcstrings.py scripts/test_sync_docs.py

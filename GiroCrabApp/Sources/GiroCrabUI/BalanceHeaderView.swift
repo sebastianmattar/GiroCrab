@@ -11,7 +11,7 @@ struct HoldingsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !holdings.isEmpty {
-                Text("Positionen").font(.caption.weight(.semibold)).foregroundStyle(Theme.secondary)
+                Text("Positionen").appFont(.caption, weight: .semibold).foregroundStyle(Theme.secondary)
             }
             ForEach(holdings.indices, id: \.self) { i in
                 let h = holdings[i]
@@ -19,19 +19,19 @@ struct HoldingsCard: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(h.name.isEmpty ? (h.isin.isEmpty ? h.wkn : h.isin) : h.name).lineLimit(1)
                         Text("\(h.quantity.formatted(.number.precision(.fractionLength(0...4)))) × \(Money.format(h.currentPriceCents)) · \(h.isin.isEmpty ? h.wkn : h.isin)")
-                            .font(.caption2).foregroundStyle(Theme.secondary).lineLimit(1)
+                            .appFont(.caption2).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
                         Text(Money.format(h.valueCents)).monospacedDigit()
                         if let gain = Self.calculatedGain(h) {
                             Text("GuV (berechnet): \(Money.format(gain.cents)) (\(gain.percent.formatted(.number.precision(.fractionLength(2)))) %)")
-                                .font(.caption2).monospacedDigit()
+                                .appFont(.caption2).monospacedDigit()
                                 .foregroundStyle(gain.cents < 0 ? Color.red : Color.green)
                         }
                     }
                 }
-                .font(.callout)
+                .appFont(.callout)
                 .contextMenu {
                     Button("Position kopieren", systemImage: "doc.on.doc") { copyToPasteboard(Self.line(h)) }
                     Button("Alle Positionen kopieren", systemImage: "doc.on.doc.fill") {
@@ -129,7 +129,7 @@ struct StreamHeaderCard: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(model.title).appFont(.title2, weight: .semibold).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
                     Group {
                         if let a = account {
                             Text([a.bankName, a.iban.isEmpty ? "" : formatIBAN(a.iban)].filter { !$0.isEmpty }.joined(separator: " · "))
@@ -137,7 +137,7 @@ struct StreamHeaderCard: View {
                             Text(model.lastSyncText)
                         }
                     }
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(Theme.secondary)
                 }
                 .contextMenu {
@@ -147,7 +147,7 @@ struct StreamHeaderCard: View {
                 // long-press is invisible on iPhone/iPad: show an explicit entry too
                 if let a = account {
                     Menu { AccountCopyMenu(account: a) } label: {
-                        Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(Theme.secondary)
+                        Image(systemName: "doc.on.doc").appFont(.caption).foregroundStyle(Theme.secondary)
                     }
                     .accessibilityLabel("In Zwischenablage kopieren")
                 }
@@ -156,11 +156,11 @@ struct StreamHeaderCard: View {
                 if let hb = model.headerBalance {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(Money.format(hb.cents))
-                            .font(.largeTitle.weight(.semibold).monospacedDigit())
+                            .appFont(.largeTitle, weight: .semibold, monospacedDigit: true)
                             .foregroundStyle(account?.kind == .loan ? Theme.loan : Theme.text)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                        Text(hb.label).font(.caption).foregroundStyle(Theme.secondary)
+                        Text(hb.label).appFont(.caption).foregroundStyle(Theme.secondary)
                     }
                     .contextMenu {
                         Button("\(hb.label) kopieren", systemImage: "doc.on.doc") { copyToPasteboard(Money.clipboard(hb.cents)) }
@@ -197,7 +197,7 @@ struct StreamHeaderCard: View {
                     Text("Einnahmen \(kpiValue(model.incomeThisMonth))").foregroundStyle(Theme.inflow)
                     Spacer(minLength: 0)
                 }
-                .font(.caption.weight(.medium).monospacedDigit())
+                .appFont(.caption, weight: .medium, monospacedDigit: true)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 #else
@@ -227,7 +227,7 @@ struct StreamHeaderCard: View {
             Text("Depot: Positionen statt Buchungen")
                 .lineLimit(1)
         }
-        .font(.caption)
+        .appFont(.caption)
         .foregroundStyle(Theme.secondary)
     }
 
@@ -354,20 +354,20 @@ struct StreamHeaderCard: View {
                 #if os(iOS)
                 if sizeClass != .compact {
                     Text("\(model.bookingCountLabel) Buchungen")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(Theme.secondary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 #else
                 Text("\(model.bookingCountLabel) Buchungen")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 #endif
             }
-        .font(.caption)
+        .appFont(.caption)
         .foregroundStyle(Theme.secondary)
     }
 }
@@ -385,19 +385,19 @@ struct KPI: View {
         // amounts of all tiles line up (HIG: align elements, consistent spacing).
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 3) {
-                Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.secondary)
+                Text(title).appFont(.caption, weight: .medium).foregroundStyle(Theme.secondary)
                     .lineLimit(1).minimumScaleFactor(0.85)
                 if disclosure {
                     Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.bold)).imageScale(.small)
+                        .appFont(.caption2, weight: .bold).imageScale(.small)
                         .foregroundStyle(Theme.tertiary)
                         .accessibilityHidden(true)
                 }
             }
-            Text(value).font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(tint)
+            Text(value).appFont(.title3, weight: .semibold, monospacedDigit: true).foregroundStyle(tint)
                 .lineLimit(1).minimumScaleFactor(0.75)
             Spacer(minLength: 2)
-            Text(subtitle).font(.caption2).foregroundStyle(Theme.tertiary)
+            Text(subtitle).appFont(.caption2).foregroundStyle(Theme.tertiary)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -744,16 +744,18 @@ struct BalanceChart: View {
                 if let d = v.as(Double.self) {
                     // fixed minimum width: changing values never shift the plot sideways
                     Text(verbatim: Self.compactEuros(d))
-                        .font(.caption2.monospacedDigit())
+                        .appFont(.caption2, monospacedDigit: true)
                         .foregroundStyle(Theme.tertiary)
-                        .frame(minWidth: axisLabelWidth, alignment: .leading)
+                        .frame(minWidth: axisLabelWidth * textScale, alignment: .leading)
                 }
             }
         }
     }
 
     /// Fits "-88.800 €" in Caption 2; longer labels (millions) widen it only then.
+    /// ScaledMetric follows Dynamic Type (iOS), textScale the app setting (macOS).
     @ScaledMetric(relativeTo: .caption2) private var axisLabelWidth: CGFloat = 50
+    @Environment(\.textScale) private var textScale
 
     /// Zero first (the reference), then max and min, each only if it keeps its distance.
     static func axisValues(min lo: Double, max hi: Double, domain: ClosedRange<Double>) -> [Double] {
@@ -786,35 +788,40 @@ struct BalanceChart: View {
     @AxisContentBuilder private func xAxis(span: Double, centered: Bool = false) -> some AxisContent {
         if span > 400 {
             // long periods: years, every 1/2/5/10 so the labels never crowd
-            let years = Self.axisStride(units: span / 365.25, width: chartWidth, labelWidth: 64, steps: [1, 2, 5, 10, 20])
-            AxisMarks(values: .stride(by: .year, count: years)) { _ in
+            let years = Self.axisStride(units: span / 365.25, width: chartWidth, labelWidth: 64 * textScale, steps: [1, 2, 5, 10, 20])
+            AxisMarks(values: .stride(by: .year, count: years)) { v in
                 // centred = midway to the next label: only right if that is the next year
-                AxisValueLabel(format: .dateTime.year(), centered: centered && years == 1)
+                AxisValueLabel(centered: centered && years == 1) { Self.axisDate(v, .dateTime.year()) }
                     .foregroundStyle(Theme.tertiary)
             }
         } else if span < 62 {
             // short periods (this/last month): weekly day labels
-            let days = Self.axisStride(units: span, width: chartWidth, labelWidth: 64, steps: [7, 14, 28])
-            AxisMarks(values: .stride(by: .day, count: days)) { _ in
-                AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+            let days = Self.axisStride(units: span, width: chartWidth, labelWidth: 64 * textScale, steps: [7, 14, 28])
+            AxisMarks(values: .stride(by: .day, count: days)) { v in
+                AxisValueLabel { Self.axisDate(v, .dateTime.day().month(.abbreviated)) }
                     .foregroundStyle(Theme.tertiary)
             }
         } else {
-            let months = Self.axisStride(units: span / 30.44, width: chartWidth, labelWidth: 44, steps: [1, 2, 3, 6])
-            AxisMarks(values: .stride(by: .month, count: months)) { _ in
-                AxisValueLabel(format: .dateTime.month(.abbreviated), centered: centered && months == 1)
+            let months = Self.axisStride(units: span / 30.44, width: chartWidth, labelWidth: 44 * textScale, steps: [1, 2, 3, 6])
+            AxisMarks(values: .stride(by: .month, count: months)) { v in
+                AxisValueLabel(centered: centered && months == 1) { Self.axisDate(v, .dateTime.month(.abbreviated)) }
                     .foregroundStyle(Theme.tertiary)
             }
         }
     }
 
+    /// `AxisValueLabel(format:)` keeps the system size; this follows the text size setting.
+    private static func axisDate(_ value: AxisValue, _ format: Date.FormatStyle) -> some View {
+        Text(verbatim: value.as(Date.self)?.formatted(format) ?? "").appFont(.caption2).fixedSize()
+    }
+
     private func readout(_ title: String, prefix: String = "", cents: Int64) -> some View {
         VStack(spacing: 1) {
             Text(title)
-                .font(.caption2)
+                .appFont(.caption2)
                 .foregroundStyle(Theme.secondary)
             Text(verbatim: prefix + Money.format(cents))
-                .font(.caption.weight(.semibold).monospacedDigit())
+                .appFont(.caption, weight: .semibold, monospacedDigit: true)
                 .foregroundStyle(cents < 0 ? Theme.outflow : Theme.text)
         }
         .padding(.horizontal, 7)

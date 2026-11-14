@@ -99,11 +99,11 @@ struct OpeningBalanceSheet: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Startsaldo")
-                    .font(.headline)
+                    .appFont(.headline)
                     .accessibilityAddTraits(.isHeader)
                 if let account {
                     Text(account.name)
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(Theme.secondary)
                 }
             }
@@ -153,7 +153,7 @@ struct OpeningBalanceSheet: View {
                     DatePicker("Stichtag", selection: $date, in: ...Date(), displayedComponents: .date)
                 }
             } header: {
-                Text("Startsaldo")
+                Text("Startsaldo").appSectionHeader()
             } footer: {
                 FormFooter("Der Kontostand zu Beginn des Stichtags, z. B. aus dem ältesten vorhandenen Kontoauszug. Umsätze ab dem Stichtag werden addiert, ältere nicht. Ohne Stichtag zählen alle Umsätze.")
             }
@@ -164,11 +164,11 @@ struct OpeningBalanceSheet: View {
                 Button("Kalibrieren", systemImage: "scope", action: calibrate)
                     .disabled(!canCalibrate)
             } header: {
-                Text("Kalibrieren")
+                Text("Kalibrieren").appSectionHeader()
             } footer: {
                 FormFooter("Trägt den Startsaldo ein, mit dem der Kontostand diesem Betrag entspricht, z. B. dem Saldo auf dem letzten Kontoauszug. Gespeichert wird erst mit „Speichern“.")
             }
-            Section("Vorschau") { previewRows }
+            Section { previewRows } header: { Text("Vorschau").appSectionHeader() }
         }
         .formStyle(.grouped)
     }
@@ -188,7 +188,7 @@ struct OpeningBalanceSheet: View {
         }
         if let preview, let amount {
             LabeledContent("Kontostand danach", value: Money.format(amount + preview.sumCents, currency: currency))
-                .font(.headline)
+                .appFont(.headline)
             LabeledContent("Umsätze ab Stichtag", value: "\(preview.counted) · \(Money.format(preview.sumCents, currency: currency))")
             if preview.older > 0 {
                 LabeledContent("Ältere Umsätze (im Startsaldo enthalten)", value: "\(preview.older)")
@@ -202,7 +202,7 @@ struct OpeningBalanceSheet: View {
     private var statusLine: some View {
         if let error {
             Label(error, systemImage: "exclamationmark.triangle.fill")
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(Theme.warning)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isStaticText)

@@ -305,11 +305,11 @@ struct LoanEditorSheet: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.headline)
+                    .appFont(.headline)
                     .accessibilityAddTraits(.isHeader)
                 if request.mode == .create {
                     Text("Für Kredite ohne eigenes Konto bei der Bank, z. B. einen Autokredit, den Sie vom Girokonto abbezahlen.")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(Theme.secondary)
                 }
             }
@@ -360,7 +360,7 @@ struct LoanEditorSheet: View {
                 TextField("Restschuld am Stichtag", text: $balanceText, prompt: Text("z. B. \(Money.plain(8_400_00))"))
                     .focused($focus, equals: .balance)
             } header: {
-                Text("Stand")
+                Text("Stand").appSectionHeader()
             } footer: {
                 FormFooter("Die Restschuld am Ende des Stichtags, z. B. aus dem Jahreskontoauszug. Raten ab dem Folgetag werden abgezogen. Fehlt etwas oder stimmt etwas nicht, setzen Sie einfach einen neuen Stand.")
             }
@@ -368,7 +368,7 @@ struct LoanEditorSheet: View {
                 Section {
                     TextField("Sollzins p. a. in %", text: $rateText, prompt: Text("z. B. 4,99"))
                 } header: {
-                    Text("Zinsen")
+                    Text("Zinsen").appSectionHeader()
                 } footer: {
                     FormFooter("Mit Sollzins zählt von jeder Rate nur der Tilgungsanteil (Zinsen taggenau). Ohne Sollzins senkt die ganze Rate die Restschuld.")
                 }
@@ -376,12 +376,12 @@ struct LoanEditorSheet: View {
                     TextField("Suchregel", text: $rule, prompt: Text("z. B. Autobank"))
                     matchList
                 } header: {
-                    Text("Raten automatisch zuordnen")
+                    Text("Raten automatisch zuordnen").appSectionHeader()
                 } footer: {
                     FormFooter("Gleiche Schreibweise wie bei Regeln: Wörter, „Phrasen“, name:, purpose:, AND, OR, NOT. Einzelne Buchungen ordnen Sie im Kontextmenü zu oder heben die Zuordnung dort auf.")
                 }
             }
-            Section("Vorschau") { previewRows }
+            Section { previewRows } header: { Text("Vorschau").appSectionHeader() }
         }
         .formStyle(.grouped)
     }
@@ -391,7 +391,7 @@ struct LoanEditorSheet: View {
     private var statusLine: some View {
         if let msg = saveError ?? (touched ? problem : nil) {
             Label(msg, systemImage: "exclamationmark.triangle.fill")
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(Theme.warning)
                 .lineLimit(2)
                 .accessibilityAddTraits(.isStaticText)
@@ -428,11 +428,11 @@ struct LoanEditorSheet: View {
                         Spacer()
                         Text(Money.format(b.amountCents)).monospacedDigit()
                     }
-                    .font(.callout)
+                    .appFont(.callout)
                     .accessibilityElement(children: .combine)
                 }
                 if p.matchCount > UInt32(p.matches.count) {
-                    Text("und \(Int(p.matchCount) - p.matches.count) weitere").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("und \(Int(p.matchCount) - p.matches.count) weitere").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -445,7 +445,7 @@ struct LoanEditorSheet: View {
                 LabeledContent("Restschuld bisher", value: Money.format(-old.remainingCents))
             }
             LabeledContent("Restschuld", value: Money.format(-s.remainingCents))
-                .font(.headline)
+                .appFont(.headline)
             LabeledContent("Stand vom", value: DateText.medium(s.asOfDate))
             LabeledContent("Raten seit Stichtag", value: "\(s.paymentCount) · \(Money.format(s.paidCents))")
             if s.interestCents > 0 {
@@ -604,18 +604,18 @@ struct ManualLoanDetails: View {
         let s = loan.status
         VStack(alignment: .leading, spacing: 6) {
             Text("Stand \(DateText.medium(loan.setup.anchorDate)): \(Money.format(loan.setup.anchorBalanceCents))")
-                .font(.caption)
+                .appFont(.caption)
             Text(paymentsLine(s))
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(Theme.secondary)
             if let rate = loan.setup.interestRatePpm {
                 Text("Sollzins \(PercentText.format(rate)) % · Zinsen seit Stichtag \(Money.format(s.interestCents))")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(Theme.secondary)
             }
             if let m = s.monthsLeft, m > 0 {
                 Text("Voraussichtlich noch \(Int(m)) Monatsraten")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(Theme.secondary)
             }
             HStack {

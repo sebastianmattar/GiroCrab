@@ -23,11 +23,11 @@ struct RuleEditorView: View {
                             .foregroundStyle(rule.enabled ? Color.readable(hex: color(of: rule)) : .secondary)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(rule.name).lineLimit(1)
-                            Text("→ " + categoryName(rule.categoryId)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text("→ " + categoryName(rule.categoryId)).appFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
                         Text("\(rule.matchCount)")
-                            .font(.caption.monospacedDigit())
+                            .appFont(.caption, monospacedDigit: true)
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(Capsule().fill(.quaternary))
                     }
@@ -123,7 +123,7 @@ struct RuleForm: View {
         let preview = model.preview(rule)
         VStack(spacing: 0) {
             Form {
-                Section("Regel") {
+                Section {
                     TextField("Name", text: $rule.name)
                     Picker("Kategorie", selection: $rule.categoryId) {
                         ForEach(model.categories) { c in
@@ -132,8 +132,8 @@ struct RuleForm: View {
                     }
                     Toggle("Aktiv", isOn: $rule.enabled)
                     Stepper("Priorität \(rule.priority)", value: $rule.priority, in: 0...10_000, step: 10)
-                }
-                Section("Treffer") {
+                } header: { Text("Regel").appSectionHeader() }
+                Section {
                     // A search expression names its fields itself and ignores case.
                     if rule.matchKind != .expression {
                         Picker("Suchen in", selection: $rule.field) {
@@ -153,7 +153,7 @@ struct RuleForm: View {
                     if rule.matchKind != .expression {
                         Toggle("Groß-/Kleinschreibung beachten", isOn: $rule.caseSensitive)
                     }
-                }
+                } header: { Text("Treffer").appSectionHeader() }
                 // The pattern gets its own full-width, multi-line field so long
                 // patterns wrap instead of scrolling sideways; the example is
                 // the footer, apart from the input (#179). A vertical
@@ -164,14 +164,14 @@ struct RuleForm: View {
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.leading)
                         .lineLimit(3...10)
-                        .font(.body.monospaced())
+                        .appFont(.body, design: .monospaced)
                         .autocorrectionDisabled()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } header: {
-                    Text("Muster")
+                    Text("Muster").appSectionHeader()
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Beispiel: \(Text(verbatim: placeholder).font(.caption.monospaced()))")
+                        Text("Beispiel: \(Text(verbatim: placeholder).appFont(.caption, design: .monospaced))")
                             .textSelection(.enabled)
                         if rule.matchKind == .expression {
                             Text("Mit AND, OR, NOT, Klammern, „Wortgruppen“, * und ?, /Regex/, Feldern wie name: oder purpose: und Beträgen wie amount<0.")
@@ -183,11 +183,11 @@ struct RuleForm: View {
                             #endif
                         }
                     }
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.secondary)
                     .leadingFooter()
                 }
-                Section("Betrag") {
+                Section {
                     Picker("Richtung", selection: $direction) {
                         Text("Alle").tag(0)
                         Text("Nur Ausgaben").tag(1)
@@ -200,13 +200,13 @@ struct RuleForm: View {
                             Text("\(a.bankName) – \(a.name)").tag(Int64?.some(a.id))
                         }
                     }
-                }
+                } header: { Text("Betrag").appSectionHeader() }
                 Section {
                     if let err = preview.error {
                         Label(err, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     } else {
                         Text("\(preview.matches.count >= 200 ? "200+" : String(preview.matches.count)) passende Buchungen")
-                            .font(.headline)
+                            .appFont(.headline)
                         ForEach(preview.matches.prefix(40)) { b in
                             HStack {
                                 Text(DateText.medium(b.bookingDate)).foregroundStyle(.secondary).monospacedDigit()
@@ -217,11 +217,11 @@ struct RuleForm: View {
                                 }
                                 Text(Money.format(b.amountCents)).monospacedDigit().foregroundStyle(Money.ink(b.amountCents))
                             }
-                            .font(.callout)
+                            .appFont(.callout)
                         }
                     }
                 } header: {
-                    Text("Live-Vorschau")
+                    Text("Live-Vorschau").appSectionHeader()
                 }
             }
             .formStyle(.grouped)

@@ -68,6 +68,23 @@ Other UI files live in the same `GiroCrabUI/` dir. Ignore `cashcrab-core/` and `
   and commit the new fixture (+ the `schema-v{N}.sql` the fixture test writes).
   Counts filter `deleted_ms IS NULL`: indexes they use must cover that column.
 
+## Text size (#343, `GiroCrabUI/TextSize.swift`)
+macOS has no Dynamic Type; the app scales text itself (Einstellungen › Allgemein › Schriftgröße, ×1/1.15/1.3).
+- Text styles: `.appFont(.caption, weight: .semibold, design:, monospacedDigit: true)`, never `.font(.caption…)`
+  (`scripts/lint-fonts.sh`, CI). `.font(.system(size:))` only for icons/signets, which must not scale.
+- Text inside a macOS sidebar `List` row needs `.appDefaultFont()` on the `Text` itself (the List overrides the scene font).
+- Form section headers (macOS grouped `Form`): `Section { … } header: { Text("…").appSectionHeader() }`,
+  not `Section("…")` – the scaled scene font drops the header's bold. Not in `List`s or menus (own style).
+- Fixed widths/heights that hold text: multiply by `@Environment(\.textScale)` (see sidebar `macColumnWidth`,
+  chart axis label widths). Don't add `minimumScaleFactor` to make text fit (it shrinks only some labels):
+  allow a second line, or `.fixedSize()` on what must never truncate (amounts) so the name truncates instead.
+- Swift Charts: `AxisValueLabel()` / `AxisValueLabel(format:)` keep the system size; use
+  `AxisValueLabel { Text(…).appFont(.caption2).fixedSize() }` (without `fixedSize` the label is cut off).
+- Stay at system size (acceptable, like Mail/Finder): segmented pickers, toolbar items, menus, alerts, picker values.
+- Check visually: `swift build -q` in `GiroCrabApp/`, then
+  `.build/debug/GiroCrabMac --screenshot <png> --text-size larger [--demo-sheet …|--demo-settings …]`
+  next to `--text-size standard` (`--screenshot` alone always renders standard).
+
 ## Workflow
 - Branch from `upstream/main`, push to `origin` (fork), PR against `GiroCrab/GiroCrab`. PR title
   and description in German, conventional-commit prefix (`feat:`, `fix:`, `perf:`, `ci:`, `docs:`).

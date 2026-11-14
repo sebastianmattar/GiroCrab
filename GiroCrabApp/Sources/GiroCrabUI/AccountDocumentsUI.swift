@@ -25,8 +25,8 @@ struct AccountDocumentsSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Dokumente / Kontoauszüge").font(.title3.weight(.semibold))
-                    Text(account.name).font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Dokumente / Kontoauszüge").appFont(.title3, weight: .semibold)
+                    Text(account.name).appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 if model.canFetchStatements(account) {
@@ -63,10 +63,10 @@ struct AccountDocumentsSheet: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(d.title).lineLimit(1)
                                 Text("\(DateText.medium(d.docDate)) · \(ByteCountFormatter.string(fromByteCount: Int64(d.sizeBytes), countStyle: .file))")
-                                    .font(.caption2).foregroundStyle(Theme.secondary)
+                                    .appFont(.caption2).foregroundStyle(Theme.secondary)
                             }
                             Spacer()
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.secondary)
+                            Image(systemName: "chevron.right").appFont(.caption).foregroundStyle(Theme.secondary)
                         }
                         .contentShape(Rectangle())
                     }
@@ -92,7 +92,7 @@ struct AutoStatementsToggle: View {
             Toggle("Kontoauszüge automatisch beim Sync abrufen", isOn: $on)
                 .onChange(of: on) { _, new in model.setAutoStatements(account, new) }
             Text("Höchstens einmal pro Woche. Je nach Bank ist dafür eine zusätzliche TAN nötig. Ist ein Dokumentenordner eingestellt, landen die PDFs auch dort.")
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -112,7 +112,7 @@ struct DocumentPreviewSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(doc.title).font(.headline).lineLimit(1)
+                Text(doc.title).appFont(.headline).lineLimit(1)
                 Spacer()
                 Button { exporting = true } label: { Label("Sichern …", systemImage: "square.and.arrow.down") }
                     .disabled(data == nil)

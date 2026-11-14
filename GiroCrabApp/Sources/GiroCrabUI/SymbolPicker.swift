@@ -166,7 +166,7 @@ struct SymbolPicker: View {
                             ForEach(sections) { section in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(section.title)
-                                        .font(.subheadline.weight(.semibold))
+                                        .appFont(.subheadline, weight: .semibold)
                                         .foregroundStyle(.secondary)
                                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 36), spacing: 6)], spacing: 6) {
                                         ForEach(section.items, id: \.symbol) { item in
@@ -208,7 +208,7 @@ struct SymbolPicker: View {
             onPick()
         } label: {
             Image(systemName: item.symbol)
-                .font(.title3)
+                .appFont(.title3)
                 .frame(width: 36, height: 36)
                 .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? tint.opacity(0.18) : Color.clear))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? tint : Color.clear))
@@ -293,7 +293,7 @@ struct SymbolPickerButton: View {
             Button { open = true } label: {
                 // row height like a text field, so the label stays centred
                 Image(systemName: SymbolCatalog.exists(selection) ? selection : "questionmark")
-                    .font(.body)
+                    .appFont(.body)
                     .foregroundStyle(tint)
                     .frame(width: 24, height: 22)
                     .background(RoundedRectangle(cornerRadius: 6).fill(tint.opacity(0.15)))

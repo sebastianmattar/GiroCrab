@@ -187,14 +187,14 @@ struct FnzWebSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(connection.displayName) – FNZ Bank").font(.headline)
-                    if running { Text(progress).font(.caption) }
-                    else if let notice { Text(notice).font(.caption).foregroundStyle(.orange) }
+                    Text("\(connection.displayName) – FNZ Bank").appFont(.headline)
+                    if running { Text(progress).appFont(.caption) }
+                    else if let notice { Text(notice).appFont(.caption).foregroundStyle(.orange) }
                     else if let blocked = browser.blockedHost {
-                        Text("Unsichere Seite blockiert (\(blocked)) – nur HTTPS-Seiten werden geöffnet.").font(.caption).foregroundStyle(.orange)
+                        Text("Unsichere Seite blockiert (\(blocked)) – nur HTTPS-Seiten werden geöffnet.").appFont(.caption).foregroundStyle(.orange)
                     }
-                    else if ready { Text("Angemeldet – Konten, Fondspositionen, Umsätze und Postkorb können abgerufen werden.").font(.caption) }
-                    else { Text("Melden Sie sich bei FNZ an und bestätigen Sie in FNZsecure.").font(.caption) }
+                    else if ready { Text("Angemeldet – Konten, Fondspositionen, Umsätze und Postkorb können abgerufen werden.").appFont(.caption) }
+                    else { Text("Melden Sie sich bei FNZ an und bestätigen Sie in FNZsecure.").appFont(.caption) }
                 }
                 Spacer()
                 if running || browser.loading { ProgressView().controlSize(.small) }

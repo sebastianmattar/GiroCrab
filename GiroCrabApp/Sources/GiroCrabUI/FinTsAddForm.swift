@@ -78,7 +78,7 @@ struct FinTsAddForm: View {
                 urlField
             }
         } header: {
-            Text("Bank")
+            Text("Bank").appSectionHeader()
         } footer: {
             if !known { bankFooter }
         }
@@ -98,7 +98,7 @@ struct FinTsAddForm: View {
                     .disabled(!canAdd)
             }
         } header: {
-            Text("Anmeldung")
+            Text("Anmeldung").appSectionHeader()
         } footer: {
             AddFormFooter(lines: [
                 isPostbank ? String(localized: "Postbank: Als Anmeldename die Postbank ID verwenden, nicht die Kontonummer.") : "",
@@ -117,7 +117,7 @@ struct FinTsAddForm: View {
                     Text("Aus dem Bankverzeichnis der Deutschen Kreditwirtschaft. Nur ändern, wenn Ihre Bank eine andere angibt.")
                 }
             } header: {
-                Text("Erweitert")
+                Text("Erweitert").appSectionHeader()
             }
         }
     }
@@ -135,7 +135,7 @@ struct FinTsAddForm: View {
                 Text(n).foregroundStyle(.secondary)
             }
         }
-        .font(.caption)
+        .appFont(.caption)
         .leadingFooter()
     }
 

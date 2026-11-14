@@ -109,19 +109,19 @@ struct DocumentsCard: View {
         let docs = model.documents(for: booking)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Belege & Abrechnungen", systemImage: "paperclip").font(.subheadline.weight(.semibold))
+                Label("Belege & Abrechnungen", systemImage: "paperclip").appFont(.subheadline, weight: .semibold)
                 Spacer()
                 if !docs.isEmpty {
-                    Text("\(docs.count)").font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                    Text("\(docs.count)").appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                 }
             }
             ForEach(docs) { d in
                 HStack(spacing: 8) {
                     Image(systemName: docSymbol(d)).foregroundStyle(Theme.accent).frame(width: 18)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(d.title).font(.callout).lineLimit(1)
+                        Text(d.title).appFont(.callout).lineLimit(1)
                         Text("\(DateText.medium(d.docDate)) · \(ByteCountFormatter.string(fromByteCount: Int64(d.sizeBytes), countStyle: .file))")
-                            .font(.caption2).foregroundStyle(Theme.secondary)
+                            .appFont(.caption2).foregroundStyle(Theme.secondary)
                     }
                     Spacer()
                     Button { model.quickLook(d) } label: { Image(systemName: "eye") }
@@ -147,8 +147,8 @@ struct DocumentsCard: View {
             }
             // Drop zone
             VStack(spacing: 4) {
-                Image(systemName: "arrow.down.doc").font(.title3)
-                Text("PDF-Rechnung oder Kassenbon hierher ziehen").font(.caption)
+                Image(systemName: "arrow.down.doc").appFont(.title3)
+                Text("PDF-Rechnung oder Kassenbon hierher ziehen").appFont(.caption)
             }
             .foregroundStyle(targeted ? Theme.accent : Theme.secondary)
             .frame(maxWidth: .infinity)
@@ -205,9 +205,9 @@ struct DocumentsView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Belege & PostBox").font(.title2.weight(.semibold))
+                    Text("Belege & PostBox").appFont(.title2, weight: .semibold)
                     Text("Wertpapierabrechnungen, Kontoauszüge, Kassenbons – verschlüsselt im Tresor. PDF oder Foto hierher ziehen: GiroCrab ordnet es dem passenden Umsatz zu.")
-                        .font(.caption).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                        .appFont(.caption).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
@@ -236,10 +236,10 @@ struct DocumentsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(d.title).fontWeight(.medium).lineLimit(2)
                                 Text(d.bookingLabel.isEmpty ? "PostBox · \(d.accountName)" : d.bookingLabel)
-                                    .font(.caption).foregroundStyle(d.bookingLabel.isEmpty ? Theme.warning : Theme.secondary).lineLimit(1)
+                                    .appFont(.caption).foregroundStyle(d.bookingLabel.isEmpty ? Theme.warning : Theme.secondary).lineLimit(1)
                             }
                             Spacer()
-                            Text(DateText.medium(d.docDate)).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                            Text(DateText.medium(d.docDate)).appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                         }
                         .tag(d.id)
                         .contentShape(Rectangle())

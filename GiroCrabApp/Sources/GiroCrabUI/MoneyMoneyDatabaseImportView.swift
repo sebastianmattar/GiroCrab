@@ -85,7 +85,7 @@ struct MoneyMoneyDatabaseImportView: View {
             .frame(maxWidth: .infinity, minHeight: contentHeight, maxHeight: contentHeight, alignment: .top)
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(Theme.warning)
+                    .appFont(.callout).foregroundStyle(Theme.warning)
                     .fixedSize(horizontal: false, vertical: true) // wrap, never truncate
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
@@ -256,7 +256,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 ImportFileRow(title: "MoneyMoney-Daten", url: fileURL, name: fileURL?.lastPathComponent ?? "") { pickFile() }
                 SecureField("Datenbank-Passwort", text: $password, prompt: Text("Erforderlich"))
             } header: {
-                Text("Datenbank")
+                Text("Datenbank").appSectionHeader()
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     footerText("Wählen Sie den MoneyMoney-Ordner, damit auch die Kontoauszüge übernommen werden. Eine einzelne Datei (MoneyMoney.sqlite), etwa aus einem Backup, geht auch.")
@@ -278,7 +278,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 HStack {
                     let selected = choices.values.filter(\.selected).count
                     Text("\(selected) von \(p.accounts.count) Konten ausgewählt")
-                        .font(.callout).foregroundStyle(Theme.secondary)
+                        .appFont(.callout).foregroundStyle(Theme.secondary)
                     Spacer()
                     Button(selected == p.accounts.count ? "Alle abwählen" : "Alle auswählen") {
                         let all = selected != p.accounts.count
@@ -330,7 +330,7 @@ struct MoneyMoneyDatabaseImportView: View {
     private func nameCell(_ a: MoneyMoneyDbAccount) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(a.name).lineLimit(1)
-            Text(accountSubtitle(a)).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+            Text(accountSubtitle(a)).appFont(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
         }
         .opacity(binding(a).wrappedValue.selected ? 1 : 0.5)
     }
@@ -381,7 +381,7 @@ struct MoneyMoneyDatabaseImportView: View {
             }
             if p.statementCount > 0 { statementOptions(p) }
         } header: {
-            Text("Daten")
+            Text("Daten").appSectionHeader()
         } footer: {
             if p.replacesStarterCategories && importCategories {
                 footerText("Die Kategorien ersetzen die GiroCrab-Startkategorien – Ihr Tresor enthält noch keine Buchungen.")
@@ -401,7 +401,7 @@ struct MoneyMoneyDatabaseImportView: View {
                     Text(p.statementsDir == nil
                          ? String(localized: "\(p.statementCount) PDFs liegen nicht bei dieser Datenbank. Wählen Sie den Ordner, falls Sie sie gesichert haben.")
                          : String(localized: "\(p.statementsFound) von \(p.statementCount) PDFs gefunden, die übrigen werden ausgelassen."))
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .appFont(.caption).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -422,7 +422,7 @@ struct MoneyMoneyDatabaseImportView: View {
             Section {
                 Toggle("Bankzugänge anlegen", isOn: $createConnections)
             } header: {
-                Text("Bankzugänge")
+                Text("Bankzugänge").appSectionHeader()
             } footer: {
                 footerText("Die Konten erscheinen unter ihrem Bankzugang. Der erste Abruf übernimmt sie, ohne Duplikate anzulegen.")
             }
@@ -451,7 +451,7 @@ struct MoneyMoneyDatabaseImportView: View {
     /// Section footer of a grouped form, aligned with the section (leading).
     private func footerText(_ text: LocalizedStringKey) -> some View {
         Text(text)
-            .font(.caption).foregroundStyle(Theme.secondary)
+            .appFont(.caption).foregroundStyle(Theme.secondary)
             .leadingFooter()
     }
 
@@ -477,7 +477,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 Text(b.name.isEmpty ? (b.connector?.displayName ?? String(localized: "Bank")) : b.name)
                 let detail = bankDetail(b)
                 if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(Theme.secondary)
+                    Text(detail).appFont(.caption).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -522,15 +522,15 @@ struct MoneyMoneyDatabaseImportView: View {
                 .progressViewStyle(.linear)
                 .desktopFrame(width: 380)
             VStack(spacing: 4) {
-                Text(progressStatus(p)).font(.callout).lineLimit(1).truncationMode(.middle)
+                Text(progressStatus(p)).appFont(.callout).lineLimit(1).truncationMode(.middle)
                 if p.bookingsTotal > 0 || p.documentsTotal > 0 {
-                    Text(progressCounts(p)).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                    Text(progressCounts(p)).appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                 }
             }
             Text(cancelling
                  ? "Der Import wird abgebrochen …"
                  : "„Import abbrechen“ verwirft alles – es wird dann nichts übernommen.")
-                .font(.caption).foregroundStyle(Theme.secondary)
+                .appFont(.caption).foregroundStyle(Theme.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -583,14 +583,14 @@ struct MoneyMoneyDatabaseImportView: View {
                 }
             }
         } header: {
-            Text("Bankfreigaben")
+            Text("Bankfreigaben").appSectionHeader()
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 footerText(enableBankingReady
                            ? "Konten, die noch nicht mit Ihrer Enable-Banking-Anwendung verknüpft sind, verknüpfen Sie auf enablebanking.com."
                            : "Die Enable-Banking-Anwendung wird bei der ersten Freigabe eingerichtet. Verknüpfen Sie dabei alle Konten dieser Banken auf einmal.")
                 Link("Anwendungen auf enablebanking.com öffnen", destination: URL(string: "https://enablebanking.com/cp/applications")!)
-                    .font(.caption)
+                    .appFont(.caption)
             }
             .leadingFooter()
         }
@@ -605,7 +605,7 @@ struct MoneyMoneyDatabaseImportView: View {
 
     /// The counts of what arrived in GiroCrab; zero rows are left out.
     private func importedSection(_ r: MoneyMoneyDbImportResult) -> some View {
-        Section("Übernommen") {
+        Section {
             let accounts = r.accountsCreated + r.accountsMerged
             countRow("Konten", accounts,
                      detail: r.accountsMerged > 0 ? String(localized: "\(r.accountsMerged) bestehende ergänzt") : nil)
@@ -621,7 +621,7 @@ struct MoneyMoneyDatabaseImportView: View {
             countRow("Bankzugänge", r.connectionsCreated,
                      detail: r.connectionsExisting > 0 ? String(localized: "\(r.connectionsExisting) bereits vorhanden") : nil)
             countRow("PINs im Tresor", r.pinsStored)
-        }
+        } header: { Text("Übernommen").appSectionHeader() }
     }
 
     @ViewBuilder
@@ -668,7 +668,7 @@ struct MoneyMoneyDatabaseImportView: View {
                     }
                 }
             } header: {
-                Text("Nicht übernommen")
+                Text("Nicht übernommen").appSectionHeader()
             } footer: {
                 if !r.banksSkippedNames.isEmpty {
                     footerText("Für diese Banken hat GiroCrab noch keinen Zugang. Ihre Konten und Buchungen sind übernommen, werden aber nicht automatisch aktualisiert.")
@@ -690,7 +690,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 checkTable(problems + checks.filter(\.ok))
             }
         } header: {
-            Text("Abgleich mit MoneyMoney")
+            Text("Abgleich mit MoneyMoney").appSectionHeader()
         } footer: {
             if !problems.isEmpty {
                 footerText("Bitte prüfen Sie die markierten Konten. Ein erneuter Import ergänzt fehlende Buchungen, ohne Duplikate anzulegen.")
@@ -707,7 +707,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 Text("Saldo MoneyMoney").gridColumnAlignment(.trailing)
                 Text("Saldo GiroCrab").gridColumnAlignment(.trailing)
             }
-            .font(.caption).foregroundStyle(Theme.secondary)
+            .appFont(.caption).foregroundStyle(Theme.secondary)
             ForEach(checks, id: \.mmId) { c in
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow(alignment: .firstTextBaseline) {
@@ -715,7 +715,7 @@ struct MoneyMoneyDatabaseImportView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(c.name).lineLimit(1)
                             if let note = checkNote(c) {
-                                Text(note).font(.caption).foregroundStyle(Theme.secondary)
+                                Text(note).appFont(.caption).foregroundStyle(Theme.secondary)
                             }
                         }
                     } icon: {

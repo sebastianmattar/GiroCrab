@@ -455,12 +455,12 @@ struct PortalWebSheet: View {
             HStack(spacing: 10) {
                 SymbolTile(symbol: "safari", tint: connection.connector.tint, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(connection.displayName) – Direkt-Login").font(.headline)
-                    Text(info).font(.caption).foregroundStyle(Theme.secondary)
+                    Text("\(connection.displayName) – Direkt-Login").appFont(.headline)
+                    Text(info).appFont(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 Label("Erkannte Umsätze: \(recognized)", systemImage: recognized > 0 ? "checkmark.circle.fill" : "circle.dashed")
-                    .font(.caption.weight(.medium))
+                    .appFont(.caption, weight: .medium)
                     .foregroundStyle(recognized > 0 ? Theme.inflow : Theme.secondary)
                 if busy || browser.loading { ProgressView().controlSize(.small) }
             }

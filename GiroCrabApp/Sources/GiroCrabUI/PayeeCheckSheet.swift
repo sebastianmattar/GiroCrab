@@ -15,9 +15,9 @@ struct PayeeCheckSheet: View {
                         .font(.system(size: 34))
                         .foregroundStyle(tint(c.result))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(title(c.result)).font(.title3.bold())
+                        Text(title(c.result)).appFont(.title3, weight: .bold)
                         Text("Empfängerüberprüfung · \(pending.connection.displayName)")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                     }
                     Spacer()
                 }
@@ -36,7 +36,7 @@ struct PayeeCheckSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let notice = c.notice {
                     Label(notice, systemImage: "building.columns")
-                        .font(.callout).foregroundStyle(Theme.secondary)
+                        .appFont(.callout).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 

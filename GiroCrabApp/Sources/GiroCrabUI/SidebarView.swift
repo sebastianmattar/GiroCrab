@@ -15,7 +15,7 @@ struct SidebarView: View {
         List(selection: $model.interactiveSidebarSelection) {
             HStack(spacing: 8) {
                 Image(systemName: "square.grid.2x2").foregroundStyle(Theme.secondary).frame(width: 20)
-                Text("Übersicht").fontWeight(.medium)
+                Text("Übersicht").fontWeight(.medium).appDefaultFont()
                 Spacer()
             }
             .badge(model.newCount) // system sidebar badge (hidden at 0)
@@ -26,7 +26,7 @@ struct SidebarView: View {
             }
             HStack(spacing: 8) {
                 Image(systemName: "doc.on.doc").foregroundStyle(Theme.secondary).frame(width: 20)
-                Text("Belege & PostBox").fontWeight(.medium)
+                Text("Belege & PostBox").fontWeight(.medium).appDefaultFont()
                 Spacer()
             }
             .tag(SidebarItem.documents)
@@ -50,9 +50,9 @@ struct SidebarView: View {
                     HStack(spacing: 9) {
                         SymbolTile(symbol: c.sfSymbol, tint: c.connector.tint, size: 24)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(c.displayName).lineLimit(1)
+                            Text(c.displayName).lineLimit(1).appDefaultFont()
                             Text(model.missingSettings(for: c).isEmpty ? "Noch nicht abgerufen" : "Einrichtung fehlt")
-                                .font(.caption2)
+                                .appFont(.caption2)
                                 .foregroundStyle(model.missingSettings(for: c).isEmpty ? Theme.secondary : Theme.warning)
                         }
                         Spacer()
@@ -71,7 +71,7 @@ struct SidebarView: View {
             Section {
                 HStack(spacing: 8) {
                     Image(systemName: "questionmark.folder").foregroundStyle(Theme.warning).frame(width: 20)
-                    Text("Ohne Kategorie")
+                    Text("Ohne Kategorie").appDefaultFont()
                     Spacer()
                 }
                 .badge(model.uncategorizedCount)
@@ -79,7 +79,7 @@ struct SidebarView: View {
                 categoryRows(model.categoryTree)
             } header: {
                 HStack(spacing: 4) {
-                    Text("Kategorien").font(.caption.weight(.semibold))
+                    Text("Kategorien").appFont(.caption, weight: .semibold)
                     Spacer()
                     Button { model.newCategoryRequest = NewCategoryRequest(parent: nil) } label: {
                         Image(systemName: "plus").frame(width: 24, height: 18).contentShape(Rectangle())
@@ -122,7 +122,7 @@ struct SidebarView: View {
                 .accessibilityLabel("Bank hinzufügen")
                 .disabled(!model.isUnlocked)
             }
-            .font(.caption)
+            .appFont(.caption)
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -214,7 +214,7 @@ struct SidebarView: View {
             if open {
                 if group.accounts.isEmpty && !group.isUngrouped && model.userGroupSubtree(group.uuid).count == 1 {
                     Text(emptyHint)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(Theme.tertiary)
                         .padding(.leading, 33 + indent)
                         // an account goes here; a group into the group (header lights up)
@@ -397,7 +397,7 @@ struct SectionHeader: View {
         HStack(spacing: 5) {
             Button(action: toggle) {
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
+                    .appFont(.caption, weight: .bold)
                     .rotationEffect(.degrees(open ? 90 : 0))
                     .frame(width: 12, height: 18)
                     .contentShape(Rectangle())
@@ -409,18 +409,19 @@ struct SectionHeader: View {
             // styled like the "Gruppen" headers (UserGroupHeader), so both
             // views read the same and no header is smaller than its accounts (#171)
             Image(systemName: group.sfSymbol)
-                .font(.body.weight(.semibold))
+                .appFont(.body, weight: .semibold)
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
                 .accessibilityHidden(true)
             Text(group.name)
             Spacer()
             Text(Money.format(group.balanceCents))
-                .font(.callout.weight(.semibold)) // same size as the account balances
+                .appFont(.callout, weight: .semibold) // same size as the account balances
                 .monospacedDigit()
+                .fixedSize()
                 .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(group.balanceCents < 0 && isLoanGroup ? Theme.loan : (group.balanceCents < 0 ? Theme.negative : Theme.secondary)))
         }
-        .font(.body.weight(.semibold)) // as big as the account names
+        .appFont(.body, weight: .semibold) // as big as the account names
         .foregroundStyle(.secondary)
     }
 }
@@ -453,7 +454,7 @@ struct AccountRow: View {
                     Text(account.name).lineLimit(1)
                     if account.accessRevoked {
                         Image(systemName: "lock.slash")
-                            .font(.caption2)
+                            .appFont(.caption2)
                             .foregroundStyle(.orange)
                             .help("Zugriff entzogen: Die Bank liefert dieses Konto nicht mehr. Buchungen bleiben erhalten.")
                     }
@@ -465,7 +466,7 @@ struct AccountRow: View {
                     // in a line as tall as the bank name of other accounts, so
                     // loan rows don't sit higher than their neighbours (#171)
                     ZStack(alignment: .leading) {
-                        Text(verbatim: " ").font(.caption2).hidden()
+                        Text(verbatim: " ").appFont(.caption2).hidden()
                         ProgressView(value: repaid)
                             .progressViewStyle(.linear)
                             .tint(Theme.loan.opacity(0.7))
@@ -475,10 +476,10 @@ struct AccountRow: View {
                     .help("\(repaid.formatted(.percent.precision(.fractionLength(0)))) getilgt")
                 } else if let date = account.archivedDate {
                     Text("Archiviert \(date.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year(.twoDigits)))")
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        .appFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         .help("Archiviert – wird nicht mehr abgerufen")
                 } else {
-                    Text(account.bankName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(account.bankName).appFont(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
@@ -487,10 +488,11 @@ struct AccountRow: View {
             }
             VStack(alignment: .trailing, spacing: 1) {
                 Text(Money.format(account.balanceCents, currency: account.currency))
-                    .font(.callout.monospacedDigit())
+                    .appFont(.callout, monospacedDigit: true)
+                    .fixedSize() // the name truncates, never the balance (#343)
                     .foregroundStyle(onSelection ? AnyShapeStyle(.primary) : AnyShapeStyle(account.kind == .loan ? Theme.loan : (account.balanceCents < 0 ? Theme.negative : Theme.text)))
                 if let repaid {
-                    Text("\(repaid.formatted(.percent.precision(.fractionLength(0)))) getilgt").font(.caption2).foregroundStyle(.secondary)
+                    Text("\(repaid.formatted(.percent.precision(.fractionLength(0)))) getilgt").appFont(.caption2).foregroundStyle(.secondary)
                 }
             }
         }
@@ -507,11 +509,12 @@ struct CategoryRow: View {
             Image(systemName: category.sfSymbol)
                 .foregroundStyle(Color.readable(hex: category.colorHex).opacity(0.85))
                 .frame(width: 20)
-            Text(category.name).lineLimit(1)
+            Text(category.name).lineLimit(1).appDefaultFont()
             Spacer(minLength: 4)
             if category.totalCents != 0 {
                 Text(Money.format(category.totalCents))
-                    .font(.caption.monospacedDigit())
+                    .appFont(.caption, monospacedDigit: true)
+                    .fixedSize()
                     .foregroundStyle(.secondary) // follows selection, Dark Mode, Increase Contrast
             }
         }

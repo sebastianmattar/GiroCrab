@@ -97,7 +97,7 @@ struct BudgetProgressCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Monatsbudgets").font(.subheadline.weight(.semibold))
+                Text("Monatsbudgets").appFont(.subheadline, weight: .semibold)
                 Spacer()
                 Menu {
                     ForEach(model.categories.filter { $0.budgetCents == nil }, id: \.id) { c in
@@ -108,16 +108,16 @@ struct BudgetProgressCard: View {
             }
             if items.isEmpty {
                 Text("Noch keine Budgets. Legen Sie über das Kontextmenü einer Kategorie ein Monatsbudget fest.")
-                    .font(.caption).foregroundStyle(Theme.secondary)
+                    .appFont(.caption).foregroundStyle(Theme.secondary)
             }
             ForEach(items, id: \.categoryId) { s in
                 Button { editing = IDBox(id: s.categoryId) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(s.name).font(.callout).foregroundStyle(Theme.text)
+                            Text(s.name).appFont(.callout).foregroundStyle(Theme.text)
                             Spacer()
                             Text("\(Money.format(s.spentCents)) / \(Money.format(s.budgetCents))")
-                                .font(.caption.monospacedDigit()).foregroundStyle(BudgetTone.color(s.percent))
+                                .appFont(.caption, monospacedDigit: true).foregroundStyle(BudgetTone.color(s.percent))
                         }
                         BudgetBar(percent: s.percent)
                     }
@@ -151,15 +151,15 @@ struct BudgetEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Monatsbudget").font(.title3.bold())
+            Text("Monatsbudget").appFont(.title3, weight: .bold)
             Text(category?.path ?? "").foregroundStyle(Theme.secondary)
             HStack {
                 TextField(Money.plain(0), text: $text)
                     .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
-                    .font(.body.monospacedDigit()).frame(maxWidth: 160)
+                    .appFont(.body, monospacedDigit: true).frame(maxWidth: 160)
                 Text("€ pro Monat").foregroundStyle(Theme.secondary)
             }
-            Text("Ausgaben der Unterkategorien zählen mit.").font(.caption).foregroundStyle(Theme.tertiary)
+            Text("Ausgaben der Unterkategorien zählen mit.").appFont(.caption).foregroundStyle(Theme.tertiary)
             HStack {
                 if category?.budgetCents != nil {
                     Button("Budget entfernen", role: .destructive) { model.setBudget(nil, for: categoryID); dismiss() }
@@ -242,7 +242,7 @@ struct CashflowCard: View {
         }
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Cashflow").font(.subheadline.weight(.semibold))
+                Text("Cashflow").appFont(.subheadline, weight: .semibold)
                 Spacer()
                 Menu {
                     Picker("Farbschema", selection: $paletteRaw) {
@@ -270,10 +270,17 @@ struct CashflowCard: View {
             .chartForegroundStyleScale([income: palette.incomeGradient, expense: palette.expenseGradient])
             .chartLegend(.hidden)
             .chartYAxis {
-                AxisMarks(position: .leading) {
+                AxisMarks(position: .leading) { v in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
                         .foregroundStyle(Theme.border)
-                    AxisValueLabel()
+                    AxisValueLabel { Text(verbatim: v.as(Double.self)?.formatted() ?? "").appFont(.caption2).fixedSize() }
+                }
+            }
+            .chartXAxis {
+                AxisMarks { v in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                        .foregroundStyle(Theme.border)
+                    AxisValueLabel { Text(verbatim: v.as(String.self) ?? "").appFont(.caption2).fixedSize() }
                 }
             }
             .frame(height: 160)
@@ -281,7 +288,7 @@ struct CashflowCard: View {
                 legendDot(palette.incomeDot, income)
                 legendDot(palette.expenseDot, expense)
             }
-            .font(.caption).foregroundStyle(Theme.secondary)
+            .appFont(.caption).foregroundStyle(Theme.secondary)
         }
         .card()
         .task(id: "\(granularity)#\(model.bookings.count)") {
@@ -300,7 +307,7 @@ struct CustomPeriodForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Eigener Zeitraum").font(.headline)
+            Text("Eigener Zeitraum").appFont(.headline)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow {
                     Text("Von")
@@ -362,7 +369,7 @@ struct SplitSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Umsatz aufteilen").font(.title3.bold())
+            Text("Umsatz aufteilen").appFont(.title3, weight: .bold)
             Text("\(booking.merchantName) · \(Money.format(booking.amountCents))").foregroundStyle(Theme.secondary)
             ForEach($parts) { $p in
                 HStack(spacing: 8) {
@@ -373,7 +380,7 @@ struct SplitSheet: View {
                     .labelsHidden().frame(maxWidth: 190)
                     TextField(Money.plain(0), text: $p.amount)
                         .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
-                        .font(.body.monospacedDigit()).frame(width: 90)
+                        .appFont(.body, monospacedDigit: true).frame(width: 90)
                     TextField("Notiz", text: $p.note).textFieldStyle(.roundedBorder)
                     if parts.count > 2 {
                         Button { parts.removeAll { $0.id == p.id } } label: { Label("Aufteilung entfernen", systemImage: "minus.circle") }
@@ -390,10 +397,10 @@ struct SplitSheet: View {
                 .buttonStyle(.borderless)
                 Spacer()
                 Text("Rest: \(Money.format(remaining))")
-                    .font(.callout.monospacedDigit())
+                    .appFont(.callout, monospacedDigit: true)
                     .foregroundStyle(remaining == 0 ? Theme.inflow : Theme.warning)
             }
-            if let error { Text(error).font(.callout).foregroundStyle(Theme.negative) }
+            if let error { Text(error).appFont(.callout).foregroundStyle(Theme.negative) }
             HStack {
                 if hasSplits {
                     Button("Aufteilung aufheben", role: .destructive) {

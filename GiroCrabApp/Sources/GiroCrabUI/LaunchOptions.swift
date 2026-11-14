@@ -30,6 +30,9 @@ import Foundation
 ///                         income or expenses (PR screenshots, #53)
 ///  --dark                 (macOS) force the Dark Aqua appearance (README screenshots)
 ///  --light                (macOS, `swift run`) force the light Aqua appearance
+///  --text-size standard|large|larger
+///                         (macOS) text size for this launch, also with --screenshot
+///                         (which otherwise always uses standard, #343)
 ///  --simulate-system-language <code>
 ///                         (developer) pretend the system language is <code> (e.g. en);
 ///                         the app's language choice is kept in the separate defaults
@@ -44,6 +47,8 @@ public struct LaunchOptions: Sendable {
     public var demoSeed: Bool
     public var screenshotPath: String?
     public var dark: Bool
+    /// raw value of `AppTextSize`, see `--text-size`
+    public var textSize: String?
     public var demoSync: Bool
     /// "alle" (default), "alltag" or "sparplaene"
     public var initialView: String
@@ -128,6 +133,11 @@ public struct LaunchOptions: Sendable {
         self.demoSeed = demo
         self.screenshotPath = shot
         self.dark = arguments.contains("--dark")
+        if let i = arguments.firstIndex(of: "--text-size"), i + 1 < arguments.count {
+            textSize = arguments[i + 1].lowercased()
+        } else {
+            textSize = nil
+        }
         if let i = arguments.firstIndex(of: "--simulate-system-language"), i + 1 < arguments.count {
             simulateSystemLanguage = arguments[i + 1]
         } else {

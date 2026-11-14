@@ -64,7 +64,7 @@ struct BookingStreamView: View {
                                 }
                                 .padding(.top, 8)
                             }
-                            .font(.subheadline.weight(.medium))
+                            .appFont(.subheadline, weight: .medium)
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .frame(maxWidth: .infinity)
                             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.card))
@@ -251,7 +251,7 @@ struct BookingStreamView: View {
                                     withAnimation(Motion.animation(.easeInOut(duration: 0.25))) { showAnalytics.toggle() }
                                 } label: {
                                     Label("Analysen", systemImage: "chart.bar.xaxis")
-                                        .font(.caption.weight(.medium))
+                                        .appFont(.caption, weight: .medium)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 4)
                                         .background(showAnalytics ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12), in: Capsule())
@@ -356,11 +356,11 @@ struct DayHeader: View {
         VStack(spacing: 0) {
             HStack {
                 Text(DateText.dayHeader(day.date))
-                    .font(.subheadline.weight(.semibold))
+                    .appFont(.subheadline, weight: .semibold)
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Text(Money.signed(day.sum))
-                    .font(.subheadline.monospacedDigit())
+                    .appFont(.subheadline, monospacedDigit: true)
                     .foregroundStyle(day.sum > 0 ? Theme.inflow : Theme.secondary)
             }
             .padding(.horizontal, 16)
@@ -454,18 +454,18 @@ struct BookingRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(booking.merchant.name.isEmpty ? booking.bookingText : booking.merchant.name)
-                        .font(.body.weight(.semibold))
+                        .appFont(.body, weight: .semibold)
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
                     if booking.documentCount > 0 {
                         Image(systemName: "doc.text.fill")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(Theme.accent.opacity(0.8))
                             .help("\(booking.documentCount) Beleg(e) – Leertaste für QuickLook")
                     }
                     if model.recurringSeries(for: booking) != nil {
                         Image(systemName: "repeat")
-                            .font(.caption.weight(.semibold))
+                            .appFont(.caption, weight: .semibold)
                             .foregroundStyle(Theme.secondary)
                             .help("Wiederkehrende Buchung")
                             .accessibilityLabel("Wiederkehrend")
@@ -483,7 +483,7 @@ struct BookingRow: View {
                         .layoutPriority(1)
                     if !booking.paymentMethod.isEmpty {
                         Text("· \(booking.paymentMethod)")
-                            .font(.callout)
+                            .appFont(.callout)
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
                             .layoutPriority(-1)
@@ -496,13 +496,13 @@ struct BookingRow: View {
             Spacer(minLength: 8)
             if booking.checked {
                 Image(systemName: "checkmark")
-                    .font(.caption.weight(.semibold))
+                    .appFont(.caption, weight: .semibold)
                     .foregroundStyle(Theme.tertiary)
                     .help("Geprüft")
             }
             if booking.isPending {
                 Image(systemName: "clock")
-                    .font(.caption.weight(.semibold))
+                    .appFont(.caption, weight: .semibold)
                     .foregroundStyle(Theme.tertiary)
                     .help("Vorgemerkt – noch nicht gebucht")
                     .accessibilityLabel("Vorgemerkt")
@@ -590,9 +590,9 @@ struct BookingCategoryLabel: View {
         let color = none ? Theme.warning : Color.readable(hex: booking.categoryColorHex)
         HStack(spacing: 3) {
             Image(systemName: none ? "questionmark.folder" : (booking.categorySymbol.isEmpty ? "tag.fill" : booking.categorySymbol))
-                .font(.caption)
+                .appFont(.caption)
             Text(none ? String(localized: "Ohne Kategorie") : booking.categoryName)
-                .font(.callout.weight(.medium))
+                .appFont(.callout, weight: .medium)
                 .lineLimit(1)
         }
         .foregroundStyle(color)
@@ -611,11 +611,11 @@ struct AccountChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: symbol)
-                .font(.caption.weight(.semibold))
+                .appFont(.caption, weight: .semibold)
                 .foregroundStyle(color)
             if !compact {
                 Text(label)
-                    .font(.subheadline.weight(.medium))
+                    .appFont(.subheadline, weight: .medium)
                     .foregroundStyle(color)
                     .lineLimit(1)
             }
@@ -637,13 +637,13 @@ struct AmountLabel: View {
     var body: some View {
         if cents > 0 {
             Text(Money.signed(cents))
-                .font(.body.weight(.semibold).monospacedDigit())
+                .appFont(.body, weight: .semibold, monospacedDigit: true)
                 .foregroundStyle(Theme.inflow)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(Theme.inflowBadge))
         } else {
             Text(Money.format(cents))
-                .font(.body.weight(.medium).monospacedDigit())
+                .appFont(.body, weight: .medium, monospacedDigit: true)
                 .foregroundStyle(Theme.outflow)
         }
     }
@@ -656,7 +656,7 @@ struct LoadMoreBookingsFooter: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("\(model.bookings.count) von \(model.bookings.count + model.remainingBookingCount) Buchungen geladen – ältere Buchungen sind noch nicht sichtbar.")
-                .font(.caption).foregroundStyle(.secondary)
+                .appFont(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             // always laid out, only faded: the footer keeps its height while a page loads
             ProgressView().controlSize(.small)

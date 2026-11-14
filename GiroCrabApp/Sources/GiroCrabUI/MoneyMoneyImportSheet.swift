@@ -111,14 +111,14 @@ struct ImportSourceSection: View {
             #endif
             .labelsHidden()
         } header: {
-            Text("Quelle")
+            Text("Quelle").appSectionHeader()
         }
     }
 
     private func option(_ title: LocalizedStringKey, _ detail: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-            Text(detail).font(.caption).foregroundStyle(Theme.secondary)
+            Text(detail).appFont(.caption).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 2)
@@ -169,12 +169,12 @@ struct ImportAssistantHeader: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol).font(.title).foregroundStyle(tint)
+            Image(systemName: symbol).appFont(.title).foregroundStyle(tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.title3.weight(.semibold))
+                Text(title).appFont(.title3, weight: .semibold)
                 if !subtitle.isEmpty {
-                    Text(subtitle).font(.callout).foregroundStyle(Theme.secondary)
+                    Text(subtitle).appFont(.callout).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -232,7 +232,7 @@ struct MoneyMoneyExportImportView: View {
             #endif
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(Theme.warning)
+                    .appFont(.callout).foregroundStyle(Theme.warning)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -276,10 +276,10 @@ struct MoneyMoneyExportImportView: View {
                 ImportFileRow(title: "Exportdatei", url: fileURL, name: fileData == nil ? "" : fileName,
                               loading: loading) { picking = true }
             } header: {
-                Text("Datei")
+                Text("Datei").appSectionHeader()
             } footer: {
                 Text("In MoneyMoney ein einzelnes Konto wählen, alle Umsätze markieren (⌘A) und „Umsätze exportieren …“. Nur CSV enthält auch die Kategorien. Sie können die Datei auch hierher ziehen.")
-                    .font(.caption).foregroundStyle(Theme.secondary)
+                    .appFont(.caption).foregroundStyle(Theme.secondary)
                     .leadingFooter()
             }
         }
@@ -332,7 +332,7 @@ struct MoneyMoneyExportImportView: View {
                         }
                     }
                 } header: {
-                    Text("Vorschau")
+                    Text("Vorschau").appSectionHeader()
                 } footer: {
                     if p.duplicatesSkippedOrEnriched > 0 {
                         footerText(String(localized: "Vorhandene Buchungen werden nicht doppelt angelegt, sie erhalten nur Kategorie und Notiz."))
@@ -347,7 +347,7 @@ struct MoneyMoneyExportImportView: View {
 
     private func footerText(_ text: String) -> some View {
         Text(text)
-            .font(.caption).foregroundStyle(Theme.secondary)
+            .appFont(.caption).foregroundStyle(Theme.secondary)
             .leadingFooter()
     }
 

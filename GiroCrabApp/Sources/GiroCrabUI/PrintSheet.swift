@@ -72,7 +72,7 @@ struct PrintSheet: View {
                 selectionHeader
                 ForEach(visibleRows) { row($0) }
             } header: {
-                Text("Buchungen")
+                Text("Buchungen").appSectionHeader()
             }
         }
         #endif
@@ -90,12 +90,12 @@ struct PrintSheet: View {
         #if os(macOS)
         // Paper and orientation are part of the layout (pages are broken before the
         // print panel opens), so they are chosen here – not again in the panel.
-        Section("Papier") {
+        Section {
             LabeledContent("Format", value: paper.label)
             Button("Papierformat …") { PageSetup.run { paper = HTMLPrinter.currentPaper } }
-        }
+        } header: { Text("Papier").appSectionHeader() }
         #endif
-        Section("Auswahl") {
+        Section {
             Picker("Buchungen", selection: $options.direction) {
                 ForEach(PrintDirection.allCases) { Text($0.title).tag($0) }
             }
@@ -104,7 +104,7 @@ struct PrintSheet: View {
                 Text("Älteste zuerst").tag(false)
             }
             LabeledContent("Zeitraum", value: model.periodTitle)
-        }
+        } header: { Text("Auswahl").appSectionHeader() }
         Section {
             Toggle("Kategorie", isOn: $options.showCategory)
             Toggle("Notizen", isOn: $options.showNote)
@@ -119,7 +119,7 @@ struct PrintSheet: View {
                 }
             }
         } header: {
-            Text("Inhalt")
+            Text("Inhalt").appSectionHeader()
         } footer: {
             if options.showDailyBalance {
                 Text("Der Tagessaldo ist der Kontostand am Ende des Tages, unabhängig von der Auswahl.")
@@ -150,9 +150,9 @@ struct PrintSheet: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedRows.count) von \(visibleRows.count) ausgewählt")
-                    .font(.headline)
+                    .appFont(.headline)
                 Text("Einnahmen \(Money.format(totals.incomeCents)) · Ausgaben \(Money.format(totals.expenseCents))")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .appFont(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             Spacer()
             Button("Alle auswählen") { selected.formUnion(visibleRows.map(\.id)) }
@@ -171,7 +171,7 @@ struct PrintSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.counterparty).lineLimit(1)
                     Text("\(DateText.medium(r.date)) · \(r.accountName)")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .appFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Text(Money.format(r.amountCents, currency: r.currency))

@@ -103,7 +103,7 @@ struct CommandPaletteView: View {
                 Image(systemName: "command").foregroundStyle(Theme.secondary)
                 TextField("Befehl, Konto, Kategorie oder Händler …", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.title3)
+                    .appFont(.title3)
                     .focused($focused)
                     .onSubmit { run(list) }
                     .onKeyPress(.downArrow) { index = min(index + 1, max(list.count - 1, 0)); return .handled }
@@ -121,7 +121,7 @@ struct CommandPaletteView: View {
                             Image(systemName: item.symbol).frame(width: 20).foregroundStyle(i == index ? Theme.accent : Theme.secondary)
                             Text(item.title).foregroundStyle(Theme.text)
                             Spacer()
-                            Text(item.subtitle).font(.caption).foregroundStyle(Theme.secondary)
+                            Text(item.subtitle).appFont(.caption).foregroundStyle(Theme.secondary)
                         }
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(RoundedRectangle(cornerRadius: 7).fill(i == index ? Theme.selection : Color.clear))
@@ -207,15 +207,15 @@ struct CategorizerSheet: View {
             if model.isMultiSelection {
                 let many = model.selectedBookings
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(many.count) Buchungen kategorisieren").font(.headline)
-                    Text(Money.format(many.reduce(0) { $0 + $1.amountCents })).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                    Text("\(many.count) Buchungen kategorisieren").appFont(.headline)
+                    Text(Money.format(many.reduce(0) { $0 + $1.amountCents })).appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                 }
             } else if let b = model.selectedBooking {
                 HStack(spacing: 10) {
                     MerchantSignet(merchant: b.merchant, categorySymbol: b.categorySymbol)
                     VStack(alignment: .leading) {
-                        Text(b.merchant.name).font(.headline)
-                        Text(Money.format(b.amountCents)).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                        Text(b.merchant.name).appFont(.headline)
+                        Text(Money.format(b.amountCents)).appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                     }
                     Spacer()
                 }
@@ -230,7 +230,7 @@ struct CategorizerSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             if let root = group.root {
                                 Label(root.name, systemImage: root.sfSymbol)
-                                    .font(.caption.weight(.semibold))
+                                    .appFont(.caption, weight: .semibold)
                                     .foregroundStyle(Theme.secondary)
                                     .accessibilityAddTraits(.isHeader)
                             }

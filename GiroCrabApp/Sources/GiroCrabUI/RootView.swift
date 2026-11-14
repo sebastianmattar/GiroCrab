@@ -10,6 +10,7 @@ public struct GiroCrabScenes: Scene {
     @Environment(\.openWindow) private var openWindow
     @AppStorage(ViewLayout.inspectorKey) private var showInspector = true
     @AppStorage(ViewLayout.statisticsKey) private var showStatistics = true
+    @AppStorage(AppTextSize.defaultsKey) private var textSize: AppTextSize = .standard
     #endif
 
     public init(options: LaunchOptions = .current) {
@@ -41,6 +42,7 @@ public struct GiroCrabScenes: Scene {
                 .environment(model)
                 .modifier(AutoLockOnBackground(model: model))
                 #if os(macOS)
+                .appTextSize(textSize.effective)
                 // Keep the minimum independent of the split columns' ideal heights.
                 .frame(minHeight: 480, maxHeight: .infinity)
                 #endif
@@ -183,6 +185,17 @@ public struct GiroCrabScenes: Scene {
                 Toggle("Auswertungen anzeigen", isOn: $showStatistics)
                     .disabled(!model.isUnlocked)
                 Divider()
+                // Like Mail/Notes: text size of the whole app (#343).
+                Button("Größer") { textSize = textSize.larger ?? textSize }
+                    .keyboardShortcut("+", modifiers: .command)
+                    .disabled(textSize.larger == nil)
+                Button("Kleiner") { textSize = textSize.smaller ?? textSize }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .disabled(textSize.smaller == nil)
+                Button("Originalgröße") { textSize = .standard }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .disabled(textSize == .standard)
+                Divider()
                 Button("Befehlspalette …") { model.showCommandPalette = true }
                     .keyboardShortcut("k", modifiers: .command)
                     .disabled(!model.isUnlocked)
@@ -207,22 +220,26 @@ public struct GiroCrabScenes: Scene {
         #if os(macOS)
         Window("Mitteilungen", id: "announcements") {
             AnnouncementsListView()
+                .appTextSize(textSize.effective)
         }
         .defaultSize(width: 460, height: 360)
         Window("Abruf-Protokoll", id: "sync-log") {
             SyncLogView()
                 .environment(model)
+                .appTextSize(textSize.effective)
         }
         .defaultSize(width: 900, height: 520)
 
         Window("GiroCrab-Hilfe", id: "help") {
             NavigationStack { HelpView() }
+                .appTextSize(textSize.effective)
         }
         .defaultSize(width: 640, height: 720)
         Settings {
             // HIG: the Settings window fits each tab (SettingsView sizes them).
             SettingsView()
                 .environment(model)
+                .appTextSize(textSize.effective)
         }
         #endif
     }
@@ -351,7 +368,7 @@ struct LockView: View {
         VStack(spacing: 18) {
             AnimatedCrabLogoView(size: 120, phase: crabPhase)
             Text("GiroCrab ist gesperrt")
-                .font(.title.bold())
+                .appFont(.title, weight: .bold)
             Text("Ihre Buchungen liegen in einem verschlüsselten Tresor.\nDer Schlüssel verlässt nie den Schlüsselbund dieses Geräts.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.secondary)
@@ -375,14 +392,14 @@ struct LockView: View {
                 }
                 if waitingLong {
                     Label(waitingHint, systemImage: "exclamationmark.bubble")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(Theme.warning)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 460)
                 }
             }
             if let error {
-                Text(error).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center)
+                Text(error).appFont(.callout).foregroundStyle(.red).multilineTextAlignment(.center)
             }
             if model.lockPreview && !AppModel.vaultMayHoldRealData && model.vaultState != .unlocking {
                 Button("Zurück zur Demo") { model.endLockPreview() }
@@ -407,6 +424,7 @@ struct LockView: View {
 struct MainSplitView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(EnableBankingKeySync.noticeSuppressedKey) private var enableBankingNoticeSuppressed = false
+    @Environment(\.textScale) private var textScale
     #if os(macOS)
     @State private var columns: NavigationSplitViewVisibility = .all
     @AppStorage(ViewLayout.inspectorKey) private var showInspector = true
@@ -418,7 +436,8 @@ struct MainSplitView: View {
     private var sidebar: some View {
         SidebarView()
             .frame(minHeight: 0, maxHeight: .infinity)
-            .macColumnWidth(min: 240, ideal: 260, max: 480)
+            // wider with larger text (#343): balances must not be cut off
+            .macColumnWidth(min: 240 * textScale, ideal: 260 * textScale, max: 480 * textScale)
     }
 
     private var bookingColumn: some View {

@@ -72,16 +72,16 @@ struct EnableBankingSetupSection: View {
                 Button { importing = true } label: { Label("Schlüsseldatei (.pem) wählen …", systemImage: "key") }
                 if let keyNote {
                     Label(keyNote.text, systemImage: keyNote.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(keyNote.ok ? Theme.inflow : Theme.negative)
+                        .appFont(.caption).foregroundStyle(keyNote.ok ? Theme.inflow : Theme.negative)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if hasKey {
-                    Text("Schlüssel ist gespeichert").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Schlüssel ist gespeichert").appFont(.caption).foregroundStyle(Theme.secondary)
                 }
             }
             LabeledContent("Application-ID") {
                 TextField("wird aus dem Dateinamen übernommen", text: binding(idKey))
                     .textFieldStyle(.roundedBorder)
-                    .font(.callout.monospaced())
+                    .appFont(.callout, design: .monospaced)
                     .autocorrectionDisabled()
             }
             HStack(spacing: 10) {
@@ -117,10 +117,10 @@ struct EnableBankingSetupSection: View {
 
     private var guide: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("So richten Sie Ihre kostenlose Enable-Banking-Anwendung ein:").font(.callout.weight(.medium))
+            Text("So richten Sie Ihre kostenlose Enable-Banking-Anwendung ein:").appFont(.callout, weight: .medium)
             step(1, "Auf enablebanking.com eine Anwendung registrieren: „Production“ wählen, den Schlüssel im Browser erzeugen lassen und diese Redirect-URL eintragen:")
             HStack(spacing: 6) {
-                Text(redirect).font(.caption.monospaced()).textSelection(.enabled)
+                Text(redirect).appFont(.caption, design: .monospaced).textSelection(.enabled)
                 Button { copy(redirect) } label: { Image(systemName: "doc.on.doc") }
                     .buttonStyle(.borderless)
                     .help("Redirect-URL kopieren")
@@ -130,7 +130,7 @@ struct EnableBankingSetupSection: View {
             if !model.psd2LinkHints.isEmpty { importedAccounts }
             step(3, "Hier die heruntergeladene .pem-Datei wählen. GiroCrab übernimmt Schlüssel und Application-ID und prüft die Anwendung.")
             Link("enablebanking.com/cp/applications öffnen", destination: URL(string: "https://enablebanking.com/cp/applications")!)
-                .font(.caption)
+                .appFont(.caption)
                 .padding(.leading, 22)
         }
     }
@@ -139,13 +139,13 @@ struct EnableBankingSetupSection: View {
     /// connections – the ones to link while activating the application.
     private var importedAccounts: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Aus Ihrem MoneyMoney-Import:").font(.caption.weight(.medium))
+            Text("Aus Ihrem MoneyMoney-Import:").appFont(.caption, weight: .medium)
             ForEach(model.psd2LinkHints, id: \.connectionId) { c in
-                Text(c.bankName).font(.caption.weight(.medium)).padding(.top, 2)
+                Text(c.bankName).appFont(.caption, weight: .medium).padding(.top, 2)
                 ForEach(Array(c.accounts.enumerated()), id: \.offset) { _, a in
                     Text([a.name, a.iban.isEmpty ? (a.accountNumber.isEmpty ? nil : String(localized: "Konto \(a.accountNumber)")) : formatIBAN(a.iban)]
                         .compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption.monospacedDigit()).foregroundStyle(Theme.secondary)
+                        .appFont(.caption, monospacedDigit: true).foregroundStyle(Theme.secondary)
                         .textSelection(.enabled)
                 }
             }
@@ -158,26 +158,26 @@ struct EnableBankingSetupSection: View {
 
     private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("\(n).").font(.caption.monospacedDigit().weight(.semibold)).frame(width: 14, alignment: .trailing)
-            Text(text).font(.caption).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("\(n).").appFont(.caption, weight: .semibold, monospacedDigit: true).frame(width: 14, alignment: .trailing)
+            Text(text).appFont(.caption).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
     @ViewBuilder private var checkResult: some View {
         if let checkError {
             Label(checkError, systemImage: "xmark.octagon.fill")
-                .font(.caption).foregroundStyle(.red)
+                .appFont(.caption).foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
         } else if let check {
             if check.problems.isEmpty {
                 Label("Anwendung „\(check.name)“ ist bereit (Production, aktiv, Redirect-URL eingetragen).", systemImage: "checkmark.seal.fill")
-                    .font(.caption).foregroundStyle(.green)
+                    .appFont(.caption).foregroundStyle(.green)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(check.problems, id: \.self) { p in
                         Label(p, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption).foregroundStyle(.orange)
+                            .appFont(.caption).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }

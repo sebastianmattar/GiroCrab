@@ -56,6 +56,7 @@ struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var showHelp = false
     @AppStorage(ViewLayout.statisticsKey) private var showStatistics = true
+    @AppStorage(AppTextSize.defaultsKey) private var textSize: AppTextSize = .standard
 
     var body: some View {
         @Bindable var model = model
@@ -70,22 +71,30 @@ struct GeneralSettings: View {
             #endif
             LanguageSettingsSection()
             AnnouncementsSettingsSection()
-            Section("Ansicht") {
+            Section {
+                #if os(macOS)
+                // iOS: the system's Dynamic Type setting (Einstellungen › Anzeige & Helligkeit).
+                Picker("Schriftgröße", selection: $textSize) {
+                    ForEach(AppTextSize.allCases) { Text($0.title).tag($0) }
+                }
+                Text("Vergrößert die Schrift in der ganzen App. Auch im Menü Ansicht mit ⌘+ / ⌘− / ⌘0.")
+                    .appFont(.caption).foregroundStyle(.secondary)
+                #endif
                 Toggle("Auswertungen in der Übersicht anzeigen", isOn: $showStatistics)
                 Text("Blendet Saldoverlauf, Cashflow und Budgets über der Buchungsliste aus. Auch im Menü Ansicht umschaltbar.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Buchungen") {
+                    .appFont(.caption).foregroundStyle(.secondary)
+            } header: { Text("Ansicht").appSectionHeader() }
+            Section {
                 Picker("Als geprüft markieren", selection: $model.autoReviewDelay) {
                     ForEach(AutoReviewDelay.allCases) { Text($0.title).tag($0) }
                 }
                 Text("Eine ausgewählte Buchung gilt nach dieser Zeit als geprüft – wie eine gelesene E-Mail. Bei Mehrfachauswahl nie.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                    .appFont(.caption).foregroundStyle(.secondary)
+            } header: { Text("Buchungen").appSectionHeader() }
             BalanceChartSettingsSection()
             MerchantLogoSettingsSection()
             #if os(iOS)
-            Section("Demo") {
+            Section {
                 Button {
                     model.loadDemoData()
                     model.settingsRequested = false
@@ -93,8 +102,8 @@ struct GeneralSettings: View {
                     Label("Demo-Tresor / Demo-Daten laden", systemImage: "play.circle")
                 }
                 Text("Lädt einen Wegwerf-Tresor mit fiktiven Konten bei sieben Banken. „Alle abrufen“, TAN-Dialoge und Überweisungen laufen simuliert, ohne Netzwerk. Ihre eigenen Daten bleiben unberührt.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                    .appFont(.caption).foregroundStyle(.secondary)
+            } header: { Text("Demo").appSectionHeader() }
             #endif
         }
         .formStyle(.grouped)
@@ -110,7 +119,7 @@ struct BalanceChartSettingsSection: View {
     @AppStorage(BalanceBarUnit.defaultsKey) private var barUnit: BalanceBarUnit = .automatic
 
     var body: some View {
-        Section("Saldoverlauf") {
+        Section {
             Picker("Darstellung", selection: $style) {
                 ForEach(BalanceChartStyle.allCases) { Text($0.title).tag($0) }
             }
@@ -120,8 +129,8 @@ struct BalanceChartSettingsSection: View {
                 }
             }
             Text("Balken zeigen den durchschnittlichen Saldo je Monat (bei kurzen Zeiträumen je Tag, ab sechs Jahren je Jahr) und machen Trends und Jahre vergleichbar. Gestrichelte Linien markieren den Jahreswechsel. Auch per Rechtsklick auf den Saldoverlauf umschaltbar.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
+                .appFont(.caption).foregroundStyle(.secondary)
+        } header: { Text("Saldoverlauf").appSectionHeader() }
     }
 }
 
@@ -158,14 +167,14 @@ struct BankConnectionsSettings: View {
                           ? "Sie sehen gerade Demo-Daten. Neue Bankzugänge werden in Ihrem eigenen Tresor angelegt – die App wechselt dabei automatisch dorthin."
                           : "Demo-Modus: Bankzugänge werden hier nur simuliert. Für echte Konten zuerst den eigenen Tresor öffnen.",
                           systemImage: "theatermasks")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(.secondary)
                     if !model.hasOwnVault {
                         Button("Eigenen Tresor öffnen") { model.showOwnVault() }
                     }
                 }
             }
-            Section("Verbundene Banken") {
+            Section {
                 if model.connections.isEmpty {
                     Text("Noch keine Bank hinzugefügt.").foregroundStyle(.secondary)
                 }
@@ -173,17 +182,17 @@ struct BankConnectionsSettings: View {
                     HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(c.connector.tint.opacity(0.12))
-                            .overlay(Text(c.connector.monogram).font(.caption.bold()).foregroundStyle(c.connector.tint))
+                            .overlay(Text(c.connector.monogram).appFont(.caption, weight: .bold).foregroundStyle(c.connector.tint))
                             .frame(width: 30, height: 30)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(c.displayName).fontWeight(.medium)
                             Text(protocolName(c.connector) + (c.loginName.isEmpty ? "" : " · \(c.loginName)"))
-                                .font(.caption).foregroundStyle(.secondary)
+                                .appFont(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if let t = c.lastSyncUnix {
                             Text(Date(timeIntervalSince1970: TimeInterval(t)), style: .relative)
-                                .font(.caption).foregroundStyle(.secondary)
+                                .appFont(.caption).foregroundStyle(.secondary)
                         }
                         Button { editing = c } label: { Image(systemName: "slider.horizontal.3") }
                             .buttonStyle(.borderless)
@@ -200,14 +209,14 @@ struct BankConnectionsSettings: View {
                     .contentShape(Rectangle())
                     .onTapGesture { editing = c }
                 }
-            }
-            Section("Bank hinzufügen") {
+            } header: { Text("Verbundene Banken").appSectionHeader() }
+            Section {
                 Button { showAddBank = true } label: {
                     Label("Bank suchen und hinzufügen …", systemImage: "magnifyingglass")
                 }
                 Text("Suche nach Bankname, BLZ oder IBAN: FinTS-Banken, Banken mit eigener API (bunq, comdirect, Trade Republic, PayPal) und PSD2-Banken (N26, Revolut, C24 …).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                    .appFont(.caption).foregroundStyle(.secondary)
+            } header: { Text("Bank hinzufügen").appSectionHeader() }
             fintsRegistrationSection
         }
         .formStyle(.grouped)
@@ -250,7 +259,7 @@ struct BankConnectionsSettings: View {
                 #endif
             } else if AppUpdateChannel.current != .stable {
                 Label("Dieser Beta-Build enthält die FinTS-Registrierung von GiroCrab nicht. Bitte melden Sie das den Entwicklern.", systemImage: "exclamationmark.triangle")
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(Theme.warning)
             }
             // The own ID is entered right here, only when it is the one in use.
@@ -258,12 +267,12 @@ struct BankConnectionsSettings: View {
                 OwnProductIDField()
             }
         } header: {
-            Text("FinTS-Registrierung")
+            Text("FinTS-Registrierung").appSectionHeader()
         } footer: {
             Text(model.fintsBuiltinAvailable
                  ? "Das FinTS-Produkt von GiroCrab ist eingebaut. Eigene API-Anwendungen (zum Beispiel für comdirect oder PayPal) registrieren Sie selbst; die Werte liegen nur in Ihrem verschlüsselten Tresor."
                  : "Nichts davon wird mit dieser Version ausgeliefert. Registrieren Sie Ihr eigenes FinTS-Produkt und Ihre eigenen API-Anwendungen; die Werte liegen nur in Ihrem verschlüsselten Tresor.")
-                .font(.footnote)
+                .appFont(.footnote)
                 .foregroundStyle(.secondary)
                 .leadingFooter()
         }
@@ -290,10 +299,10 @@ struct MerchantLogoSettingsSection: View {
             }
             Button("Logo-Cache leeren") { model.clearLogoCache() }
         } header: {
-            Text("Händler-Logos")
+            Text("Händler-Logos").appSectionHeader()
         } footer: {
             Text("Ohne Anbieter zeigt GiroCrab mitgelieferte Markenzeichen, sonst Monogramme und Kategorie-Symbole. Mit Anbieter werden Favicons geladen und verschlüsselt im Tresor zwischengespeichert. Übertragen wird nur die Händler-Domain (z. B. lidl.de) – keine Beträge, keine Kontodaten.")
-                .font(.footnote)
+                .appFont(.footnote)
                 .foregroundStyle(.secondary)
                 .leadingFooter()
         }
@@ -310,7 +319,7 @@ struct DocumentFolderSettings: View {
 
     var body: some View {
         Form {
-            Section("Dokumentenordner") {
+            Section {
                 Toggle("Dokumente automatisch in einen Ordner sichern", isOn: Binding(
                     get: { model.documentMirrorPath != nil },
                     set: { on in
@@ -340,14 +349,14 @@ struct DocumentFolderSettings: View {
                     }
                 }
                 Text("Kontoauszüge, Belege und PostBox-Dokumente werden nach jedem Sync als Kopie abgelegt: <Ordner>/<Konto>/<Jahr>/. Vorhandene Dateien werden nie überschrieben. Achtung: Im Ordner liegen die PDFs unverschlüsselt – in iCloud Drive also auch in Ihrer iCloud.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .appFont(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Automatischer Abruf") {
+            } header: { Text("Dokumentenordner").appSectionHeader() }
+            Section {
                 Text("Ob GiroCrab die PDF-Kontoauszüge eines FinTS-Kontos bei jedem Sync mit abruft, stellen Sie pro Konto unter „Dokumente / Kontoauszüge“ ein.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .appFont(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
+            } header: { Text("Automatischer Abruf").appSectionHeader() }
         }
         .formStyle(.grouped)
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
@@ -374,7 +383,7 @@ struct SecuritySettings: View {
 
     var body: some View {
         Form {
-            Section("Tresor") {
+            Section {
                 LabeledContent("Verschlüsselung", value: "SQLCipher 4 (AES-256)")
                 LabeledContent("Hauptschlüssel", value: model.isDemo ? String(localized: "Demo-Schlüssel (Wegwerf)") : String(localized: "Schlüsselbund, geschützt durch \(VaultKeyManager.shared.biometryName)"))
                 #if os(macOS)
@@ -396,13 +405,13 @@ struct SecuritySettings: View {
                     .textSelection(.enabled)
                 LabeledContent("Version", value: AppVersionDisplay.current(core: coreVersion()))
                     .textSelection(.enabled)
-            }
+            } header: { Text("Tresor").appSectionHeader() }
             ICloudSyncSection()
             BankingPolicySection()
-            Section("Datenschutz") {
+            Section {
                 Text("GiroCrab verbindet sich direkt von diesem Gerät mit Ihren Banken. Es gibt keinen GiroCrab-Server und kein Tracking. Nur wenn Sie den iCloud-Sync oben einschalten, liegt der verschlüsselte Tresor in Ihrem iCloud Drive. PINs und TANs liegen nur für einen Abruf im Speicher und werden danach gelöscht.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
+                    .appFont(.callout).foregroundStyle(.secondary)
+            } header: { Text("Datenschutz").appSectionHeader() }
             if model.hasOwnVault && !model.isDemo {
                 Section {
                     Button("Jetzt sperren", systemImage: "lock.fill") { model.lock() }
@@ -526,7 +535,7 @@ struct ICloudSyncSection: View {
     @State private var keyCopied = false
 
     var body: some View {
-        Section("iCloud Sync") {
+        Section {
             Toggle("Tresor über iCloud synchronisieren", isOn: Bindable(sync).isEnabled)
                 .onChange(of: sync.isEnabled) { _, on in
                     guard on else { return }
@@ -557,8 +566,8 @@ struct ICloudSyncSection: View {
                 if let d = sync.lastSync {
                     LabeledContent("Letzter Sync", value: d.formatted(date: .abbreviated, time: .shortened))
                 }
-                if let s = sync.lastStats { Text(s).font(.caption).foregroundStyle(.secondary) }
-                if let e = sync.lastError { Text(e).font(.caption).foregroundStyle(.red) }
+                if let s = sync.lastStats { Text(s).appFont(.caption).foregroundStyle(.secondary) }
+                if let e = sync.lastError { Text(e).appFont(.caption).foregroundStyle(.red) }
                 Toggle("Tresor-Schlüssel über iCloud-Schlüsselbund teilen", isOn: $keychainSync)
                     .onChange(of: keychainSync) { _, on in
                         guard on != VaultKeyManager.shared.syncViaICloudKeychain else { return }
@@ -580,14 +589,14 @@ struct ICloudSyncSection: View {
                 }
                 if sync.keyMismatch {
                     Label("Der iCloud-Tresor nutzt einen anderen Schlüssel. Fügen Sie den Schlüssel von Ihrem anderen Gerät ein.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                        .appFont(.caption).foregroundStyle(.orange)
                 }
             }
             Text(sync.location == .container
                  ? LocalizedStringKey("Synchronisiert Ihren verschlüsselten Tresor über iCloud. Der Schlüssel liegt nie in iCloud Drive: Er wird über den iCloud-Schlüsselbund geteilt oder einmalig auf dem zweiten Gerät eingefügt.")
                  : LocalizedStringKey("Synchronisiert Ihren verschlüsselten Tresor über iCloud Drive (Ordner „GiroCrab“). Der Schlüssel liegt nie im Ordner: Er wird über den iCloud-Schlüsselbund geteilt oder einmalig auf dem zweiten Gerät eingefügt."))
-                .font(.caption).foregroundStyle(.secondary)
-        }
+                .appFont(.caption).foregroundStyle(.secondary)
+        } header: { Text("iCloud Sync").appSectionHeader() }
         .onChange(of: sync.keyMismatch) { _, bad in if bad { showKeySheet = true } }
         .sheet(isPresented: $showKeySheet) {
             KeyPasteSheet().environment(model)
@@ -628,9 +637,9 @@ struct KeyPasteSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tresor-Schlüssel einfügen").font(.headline)
+            Text("Tresor-Schlüssel einfügen").appFont(.headline)
             Text("Kopieren Sie den Schlüssel auf Ihrem anderen Gerät (Einstellungen › iCloud Sync › „Tresor-Schlüssel kopieren“) und fügen Sie ihn hier ein. Er wird im Schlüsselbund gespeichert, nie in iCloud Drive.")
-                .font(.callout).foregroundStyle(.secondary)
+                .appFont(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             SecureField("Schlüssel (Base64 oder Hex)", text: $text)
                 .textFieldStyle(.roundedBorder)
@@ -659,7 +668,8 @@ private extension View {
     @ViewBuilder
     func settingsPane(height: CGFloat) -> some View {
         #if os(macOS)
-        frame(width: 680, height: height)
+        // wider with larger text (#343); the panes scroll, so the height stays
+        modifier(SettingsPaneFrame(height: height))
         #else
         self
         #endif
@@ -667,16 +677,27 @@ private extension View {
 }
 
 
+#if os(macOS)
+private struct SettingsPaneFrame: ViewModifier {
+    @Environment(\.textScale) private var scale
+    let height: CGFloat
+
+    func body(content: Content) -> some View {
+        content.frame(width: 680 * scale, height: height)
+    }
+}
+#endif
+
 /// Einstellungen › Mitteilungen: one switch, on by default (quiet banner only).
 struct AnnouncementsSettingsSection: View {
     @State private var center = AnnouncementCenter.shared
 
     var body: some View {
-        Section("Mitteilungen") {
+        Section {
             Toggle("Mitteilungen des GiroCrab-Projekts anzeigen", isOn: $center.isEnabled)
             Text("Gelegentliche Neuigkeiten, unabhängig von Updates. GiroCrab lädt dazu eine signierte Textdatei von GitHub, ohne Kennung und ohne Tracking. Mitteilungen erscheinen nie als Fenster und lassen sich jederzeit ausblenden. Sicherheitswarnungen sind davon unabhängig.")
-                .font(.callout).foregroundStyle(.secondary)
-        }
+                .appFont(.callout).foregroundStyle(.secondary)
+        } header: { Text("Mitteilungen").appSectionHeader() }
     }
 }
 
@@ -703,10 +724,10 @@ struct OwnProductIDField: View {
                     .onSubmit(commit)
             }
             Text("Nur nötig, wenn Sie Ihre eigene Registrierung statt der von GiroCrab verwenden. Sie bleibt gespeichert, auch wenn Sie die von GiroCrab nutzen.")
-                .font(.caption).foregroundStyle(.secondary)
+                .appFont(.caption).foregroundStyle(.secondary)
             Link("Produktregistrierung bei der Deutschen Kreditwirtschaft beantragen",
                  destination: URL(string: "https://www.fints.org/de/hersteller/produktregistrierung")!)
-                .font(.caption)
+                .appFont(.caption)
         }
         .onAppear(perform: focusIfAsked)
         .onChange(of: model.focusOwnProductID) { _, _ in focusIfAsked() }

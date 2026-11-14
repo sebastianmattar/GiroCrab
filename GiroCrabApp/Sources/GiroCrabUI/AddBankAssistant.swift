@@ -225,7 +225,7 @@ struct AddBankSheet: View {
                         Text("Beliebte Banken")
                     } footer: {
                         Text("Jede Sparkasse und Volksbank ist eine eigene Bank. Suchen Sie sie über ihren Namen (meist mit Ort), die Bankleitzahl oder Ihre IBAN.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .appFont(.caption).foregroundStyle(.secondary)
                             .leadingFooter()
                     }
                 } else if results.isEmpty {
@@ -275,7 +275,7 @@ struct AddBankSheet: View {
             #else
             .buttonStyle(.borderless)
             #endif
-            .font(.callout)
+            .appFont(.callout)
         }
     }
 
@@ -322,7 +322,7 @@ struct AddBankSheet: View {
                 } header: {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(Self.groupTitle(mode))
-                        Text(Self.groupHint(mode)).font(.caption).fontWeight(.regular).foregroundStyle(.secondary)
+                        Text(Self.groupHint(mode)).appFont(.caption).fontWeight(.regular).foregroundStyle(.secondary)
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -347,7 +347,7 @@ struct AddBankSheet: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                 if let detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).appFont(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -370,7 +370,7 @@ struct AddBankSheet: View {
                             ForEach(ways, id: \.id) { w in
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(Self.groupTitle(w.mode))
-                                    Text(Self.groupHint(w.mode)).font(.caption).foregroundStyle(Theme.secondary)
+                                    Text(Self.groupHint(w.mode)).appFont(.caption).foregroundStyle(Theme.secondary)
                                 }
                                 .padding(.vertical, 2)
                                 .tag(w.id)
@@ -383,10 +383,10 @@ struct AddBankSheet: View {
                         #endif
                         .labelsHidden()
                     } header: {
-                        Text("Verbindung")
+                        Text("Verbindung").appSectionHeader()
                     } footer: {
                         Text("GiroCrab empfiehlt FinTS: direkt zur Bank, ohne Anmeldung bei Dritten.")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                             .leadingFooter()
                     }
                 }
@@ -429,7 +429,7 @@ struct AddBankSheet: View {
                 } footer: {
                     if let help {
                         Text(help.note)
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
                             .leadingFooter()
                     }
                 }

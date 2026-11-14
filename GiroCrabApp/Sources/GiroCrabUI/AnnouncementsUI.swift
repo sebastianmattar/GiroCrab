@@ -44,13 +44,13 @@ struct AnnouncementBanner: View {
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: a.severity == .important ? "info.circle.fill" : "info.circle")
                 .foregroundStyle(a.severity == .important ? Color.accentColor : Color.secondary)
-                .font(.title3)
+                .appFont(.title3)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(a.localized(a.title, language: lang)).font(.headline)
+                Text(a.localized(a.title, language: lang)).appFont(.headline)
                 if !summary.isEmpty {
                     Text(markdown(summary))
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -65,7 +65,7 @@ struct AnnouncementBanner: View {
                 center.dismiss(a)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
+                    .appFont(.caption, weight: .semibold)
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
@@ -89,7 +89,7 @@ struct AnnouncementSheet: View {
         let summary = announcement.localized(announcement.summary, language: language)
         VStack(alignment: .leading, spacing: 16) {
             Text(announcement.localized(announcement.title, language: language))
-                .font(.title2.weight(.semibold))
+                .appFont(.title2, weight: .semibold)
             ScrollView {
                 Text(markdown(body.isEmpty ? summary : body))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,7 +133,7 @@ struct AnnouncementsListView: View {
             } else {
                 List(center.all) { a in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(a.localized(a.title, language: lang)).font(.headline)
+                        Text(a.localized(a.title, language: lang)).appFont(.headline)
                         let text = a.localized(a.body, language: lang).isEmpty
                             ? a.localized(a.summary, language: lang)
                             : a.localized(a.body, language: lang)
