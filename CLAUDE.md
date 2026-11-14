@@ -20,7 +20,13 @@ Rust core (`girocrab-core`, UniFFI) + SwiftUI app (`GiroCrabApp`). Root = this d
 - `girocrab-core/src/text.rs` – text helpers (mojibake repair etc.)
 - `girocrab-core/src/report_sanitizer.rs` – scrubs log/diagnostics text for public bug reports (`sanitize_report_text`)
 - `GiroCrabApp/Sources/GiroCrabUI/PrivacyRedaction.swift` – `.sensitive()` modifier; `BugReport.swift` / `BugReportUI.swift` – Hilfe › Problem melden
-- `GiroCrabApp/Sources/GiroCrabUI/AppModel.swift` – app state / core bridge
+- `GiroCrabApp/Sources/GiroCrabUI/AppModel.swift` – app state (all stored instance properties; static members stay in their feature file), init, vault lifecycle,
+  `vaultOffMain`/`pinVault`; features live in `AppModel+<Feature>.swift` extensions: `Loading` (reloads, booking
+  list paging, account markers), `Selection` (sidebar/period/search, pay cycle), `Editing` (categories, rules,
+  notes), `Connections` (bank connections, settings, FinTS product ID), `Sync`, `Transfer`, `Documents`,
+  `Recurring`, `Logos`, `Printing`; helper types in `AppModelTypes.swift`.
+  An `AppModel+*.swift` file holds only `extension AppModel` blocks. Members the feature files share are internal
+  but not for views: `scripts/lint-appmodel-internals.sh` (CI) lists them; add one there when you widen a `private`.
 - `GiroCrabApp/Sources/GiroCrabUI/RootView.swift` – top-level UI
 - `GiroCrabApp/Sources/GiroCrabUI/BookingListView.swift` – booking list
 - `GiroCrabApp/Sources/GiroCrabUI/ConnectionsUI.swift` – bank connections UI

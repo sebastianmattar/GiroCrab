@@ -23,11 +23,12 @@ regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form", "cookies", "query"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto", "use_pem"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto", "use_pem"] }
 base64 = "0.22"
-rsa = { version = "0.9", features = ["sha2", "pem", "getrandom"] }
-p256 = { version = "0.13", features = ["ecdsa"] }
-sha2 = "0.10"
+rsa = { version = "0.10", features = ["encoding", "getrandom", "pkcs1v15"] }
+getrandom = { version = "0.4", features = ["sys_rng"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
+sha2 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rand = "0.9"
 hex = "0.4"

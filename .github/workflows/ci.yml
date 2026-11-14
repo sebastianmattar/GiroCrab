@@ -43,6 +43,8 @@ jobs:
         run: scripts/check-third-party-notices.sh
       - name: Kein Vault-Zugriff aus Views (nur über AppModel)
         run: scripts/lint-vault-access.sh
+      - name: AppModel-Interna nur in AppModel*.swift
+        run: scripts/lint-appmodel-internals.sh
       - name: String Catalogs sortiert (scripts/xcstrings.py format)
         run: scripts/xcstrings.py check
       - name: Test String-Catalog-Merge-Driver

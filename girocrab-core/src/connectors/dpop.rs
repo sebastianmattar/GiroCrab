@@ -44,7 +44,7 @@ impl DpopKey {
 
     /// Public key as a JWK (`{"kty":"EC","crv":"P-256","x":..,"y":..}`).
     pub fn public_jwk(&self) -> Value {
-        let point = self.key.verifying_key().to_encoded_point(false);
+        let point = self.key.verifying_key().to_sec1_point(false);
         let x = point
             .x()
             .map(|v| URL_SAFE_NO_PAD.encode(v))

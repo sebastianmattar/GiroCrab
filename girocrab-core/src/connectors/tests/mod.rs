@@ -1100,6 +1100,7 @@ async fn demo_transfer_flow_adds_pending_booking_and_suggests_recipient() {
     let _ = std::fs::remove_file(path);
 }
 
+mod bank_name;
 mod banking_gate;
 mod content_id;
 mod statements_auto;

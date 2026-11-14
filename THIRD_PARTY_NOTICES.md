@@ -12,22 +12,22 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | **`base64`** | `0.23.1` | `MIT OR Apache-2.0` | [https://github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |
 | **`chrono`** | `0.4.45` | `MIT OR Apache-2.0` | [https://github.com/chronotope/chrono](https://github.com/chronotope/chrono) |
 | **`futures-util`** | `0.3.34` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
+| **`getrandom`** | `0.4.3` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
 | **`hex`** | `0.4.3` | `MIT OR Apache-2.0` | [https://github.com/KokaKiwi/rust-hex](https://github.com/KokaKiwi/rust-hex) |
-| **`jsonwebtoken`** | `11.1.0` | `MIT` | [https://github.com/Keats/jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
+| **`jsonwebtoken`** | `12.0.0` | `MIT` | [https://github.com/Keats/jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
 | **`miniz_oxide`** | `0.9.1` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | **`libc`** | `0.2.191` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/libc](https://github.com/rust-lang/libc) |
-| **`p256`** | `0.13.2` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/elliptic-curves](https://github.com/RustCrypto/elliptic-curves/tree/master/p256) |
-| **`rand`** | `0.8.8` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
+| **`p256`** | `0.14.0` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/elliptic-curves](https://github.com/RustCrypto/elliptic-curves/tree/master/p256) |
 | **`rand`** | `0.9.5` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | **`rand`** | `0.10.3` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | **`regex`** | `1.13.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
 | **`reqwest`** | `0.13.5` | `MIT OR Apache-2.0` | [https://github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |
-| **`rsa`** | `0.9.10` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/RSA](https://github.com/RustCrypto/RSA) |
+| **`rsa`** | `0.10.0` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/RSA](https://github.com/RustCrypto/RSA) |
 | **`rusqlite`** | `0.41.1` | `MIT` | [https://github.com/rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
 | **`rusqlite_migration`** | `2.7.0` | `Apache-2.0` | [https://github.com/cljoly/rusqlite_migration](https://github.com/cljoly/rusqlite_migration) |
 | **`serde`** | `1.0.229` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/serde](https://github.com/serde-rs/serde) |
 | **`serde_json`** | `1.0.154` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/json](https://github.com/serde-rs/json) |
-| **`sha2`** | `0.10.9` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
+| **`sha2`** | `0.11.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | **`simpleicons-rs`** | `16.37.0` | `MIT AND CC0-1.0` | [https://github.com/cscnk52/simpleicons-rs](https://github.com/cscnk52/simpleicons-rs) |
 | **`thiserror`** | `2.0.21` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | **`tokio`** | `1.54.1` | `MIT` | [https://github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
@@ -62,7 +62,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 ## Complete Transitive Dependency Tree
 
 <details>
-<summary>Click to expand all transitive Rust crates (336 packages)</summary>
+<summary>Click to expand all transitive Rust crates (331 packages)</summary>
 
 | Crate | Version | License | Authors / Repository |
 |---|---|---|---|
@@ -81,13 +81,12 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `autocfg` | `1.5.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/cuviper/autocfg) (Josh Stone <cuviper@gmail.com>) |
 | `aws-lc-rs` | `1.19.0` | `ISC AND (Apache-2.0 OR ISC)` | [Repo](https://github.com/aws/aws-lc-rs) (AWS-LibCrypto) |
 | `aws-lc-sys` | `0.47.0` | `ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)` | [Repo](https://github.com/aws/aws-lc-rs) (AWS-LC) |
-| `base16ct` | `0.2.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/base16ct) (RustCrypto Developers) |
+| `base16ct` | `1.0.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `base64` | `0.22.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/marshallpierce/rust-base64) (Marshall Pierce <marshall@mpierce.org>) |
 | `base64` | `0.23.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/marshallpierce/rust-base64) (Marshall Pierce <marshall@mpierce.org>) |
 | `base64ct` | `1.8.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `basic-toml` | `0.1.10` | `MIT OR Apache-2.0` | [Repo](https://github.com/dtolnay/basic-toml) (Alex Crichton <alex@alexcrichton.com>, David Tolnay <dtolnay) |
 | `bitflags` | `2.13.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/bitflags/bitflags) (The Rust Project Developers) |
-| `block-buffer` | `0.10.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
 | `block-buffer` | `0.12.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
 | `bumpalo` | `3.20.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/fitzgen/bumpalo) (Nick Fitzgerald <fitzgen@gmail.com>) |
 | `bytes` | `1.12.1` | `MIT` | [Repo](https://github.com/tokio-rs/bytes) (Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmon) |
@@ -104,40 +103,40 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `clap_derive` | `4.6.7` | `MIT OR Apache-2.0` | [Repo](https://github.com/clap-rs/clap) |
 | `clap_lex` | `1.1.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/clap-rs/clap) |
 | `cmake` | `0.1.58` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/cmake-rs) (Alex Crichton <alex@alexcrichton.com>) |
+| `cmov` | `0.5.4` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
 | `combine` | `4.6.9` | `MIT` | [Repo](https://github.com/Marwes/combine) (Markus Westerlind <marwes91@gmail.com>) |
-| `const-oid` | `0.9.6` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/const-oid) (RustCrypto Developers) |
 | `const-oid` | `0.10.2` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `cookie` | `0.18.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/SergioBenitez/cookie-rs) (Sergio Benitez <sb@sergio.bz>, Alex Crichton <alex@alexcrich) |
 | `cookie_store` | `0.22.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/pfernie/cookie_store) (Patrick Fernie <patrick.fernie@gmail.com>) |
 | `core-foundation` | `0.10.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/servo/core-foundation-rs) (The Servo Project Developers) |
 | `core-foundation-sys` | `0.8.7` | `MIT OR Apache-2.0` | [Repo](https://github.com/servo/core-foundation-rs) (The Servo Project Developers) |
-| `cpufeatures` | `0.2.17` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
+| `cpubits` | `0.1.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
 | `cpufeatures` | `0.3.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
-| `crypto-bigint` | `0.5.5` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/crypto-bigint) (RustCrypto Developers) |
-| `crypto-common` | `0.1.6` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
+| `crypto-bigint` | `0.7.11` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/crypto-bigint) (RustCrypto Developers) |
 | `crypto-common` | `0.2.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
+| `crypto-primes` | `0.7.2` | `Apache-2.0 OR MIT` | [Repo](https://github.com/entropyxyz/crypto-primes) |
 | `csscolorparser` | `0.8.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/mazznoer/csscolorparser-rs) (Nor Khasyatillah <mazznoer@ymail.com>) |
-| `curve25519-dalek` | `4.1.3` | `BSD-3-Clause` | [Repo](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek) (Isis Lovecruft <isis@patternsinthevoid.net>, Henry de Valenc) |
+| `ctutils` | `0.4.8` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/utils) (RustCrypto Developers) |
+| `curve25519-dalek` | `5.0.0` | `BSD-3-Clause` | [Repo](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek) (Isis Lovecruft <isis@patternsinthevoid.net>, Henry de Valenc) |
 | `curve25519-dalek-derive` | `0.1.1` | `MIT/Apache-2.0` | [Repo](https://github.com/dalek-cryptography/curve25519-dalek) |
 | `data-encoding` | `2.11.1` | `MIT` | [Repo](https://github.com/ia0/data-encoding) |
-| `der` | `0.7.10` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/der) (RustCrypto Developers) |
+| `der` | `0.8.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `deranged` | `0.5.9` | `MIT OR Apache-2.0` | [Repo](https://github.com/jhpratt/deranged) (Jacob Pratt <jacob@jhpratt.dev>) |
-| `digest` | `0.10.7` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
 | `digest` | `0.11.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
 | `displaydoc` | `0.2.7` | `MIT OR Apache-2.0` | [Repo](https://github.com/yaahc/displaydoc) (Jane Lusby <jlusby@yaah.dev>) |
 | `document-features` | `0.2.12` | `MIT OR Apache-2.0` | [Repo](https://github.com/slint-ui/document-features) (Slint Developers <info@slint.dev>) |
 | `dunce` | `1.0.5` | `CC0-1.0 OR MIT-0 OR Apache-2.0` | [Repo](https://gitlab.com/kornelski/dunce) (Kornel <kornel@geekhood.net>) |
-| `ecdsa` | `0.16.9` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures/tree/master/ecdsa) (RustCrypto Developers) |
-| `ed25519` | `2.2.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures/tree/master/ed25519) (RustCrypto Developers) |
-| `ed25519-dalek` | `2.2.0` | `BSD-3-Clause` | [Repo](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek) (isis lovecruft <isis@patternsinthevoid.net>, Tony Arcieri <b) |
-| `elliptic-curve` | `0.13.8` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/traits/tree/master/elliptic-curve) (RustCrypto Developers) |
+| `ecdsa` | `0.17.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures) (RustCrypto Developers) |
+| `ed25519` | `3.0.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures) (RustCrypto Developers) |
+| `ed25519-dalek` | `3.0.0` | `BSD-3-Clause` | [Repo](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek) (isis lovecruft <isis@patternsinthevoid.net>, Tony Arcieri <b) |
+| `elliptic-curve` | `0.14.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
 | `equivalent` | `1.0.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/indexmap-rs/equivalent) |
 | `errno` | `0.3.14` | `MIT OR Apache-2.0` | [Repo](https://github.com/lambda-fairy/rust-errno) (Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfish) |
 | `fallible-iterator` | `0.3.0` | `MIT/Apache-2.0` | [Repo](https://github.com/sfackler/rust-fallible-iterator) (Steven Fackler <sfackler@gmail.com>) |
 | `fallible-streaming-iterator` | `0.1.9` | `MIT/Apache-2.0` | [Repo](https://github.com/sfackler/fallible-streaming-iterator) (Steven Fackler <sfackler@gmail.com>) |
 | `fastrand` | `2.5.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/smol-rs/fastrand) (Stjepan Glavina <stjepang@gmail.com>) |
-| `ff` | `0.13.1` | `MIT/Apache-2.0` | [Repo](https://github.com/zkcrypto/ff) (Sean Bowe <ewillbefull@gmail.com>, Jack Grigg <thestr4d@gmai) |
-| `fiat-crypto` | `0.2.9` | `MIT OR Apache-2.0 OR BSD-1-Clause` | [Repo](https://github.com/mit-plv/fiat-crypto) (Fiat Crypto library authors <jgross@mit.edu>) |
+| `ff` | `0.14.0` | `MIT/Apache-2.0` | [Repo](https://github.com/zkcrypto/ff) (Sean Bowe <ewillbefull@gmail.com>, Jack Grigg <thestr4d@gmai) |
+| `fiat-crypto` | `0.3.0` | `MIT OR Apache-2.0 OR BSD-1-Clause` | [Repo](https://github.com/mit-plv/fiat-crypto) (Fiat Crypto library authors <jgross@mit.edu>) |
 | `find-msvc-tools` | `0.1.15` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/cc-rs) |
 | `foldhash` | `0.2.0` | `Zlib` | [Repo](https://github.com/orlp/foldhash) (Orson Peters <orsonpeters@gmail.com>) |
 | `form_urlencoded` | `1.2.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/servo/rust-url) (The rust-url developers) |
@@ -149,19 +148,17 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `futures-sink` | `0.3.34` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/futures-rs) |
 | `futures-task` | `0.3.34` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/futures-rs) |
 | `futures-util` | `0.3.34` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/futures-rs) |
-| `generic-array` | `0.14.9` | `MIT` | [Repo](https://github.com/fizyk20/generic-array.git) (Bartłomiej Kamiński <fizyk20@gmail.com>, Aaron Trent <novacr) |
 | `getrandom` | `0.2.17` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/getrandom) (The Rand Project Developers) |
 | `getrandom` | `0.3.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/getrandom) (The Rand Project Developers) |
 | `getrandom` | `0.4.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/getrandom) (The Rand Project Developers) |
 | `glob` | `0.3.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/glob) (The Rust Project Developers) |
 | `goblin` | `0.8.2` | `MIT` | [Repo](https://github.com/m4b/goblin) (m4b <m4b.github.io@gmail.com>, seu <seu@panopticon.re>, Will) |
-| `group` | `0.13.0` | `MIT/Apache-2.0` | [Repo](https://github.com/zkcrypto/group) (Sean Bowe <ewillbefull@gmail.com>, Jack Grigg <jack@z.cash>) |
+| `group` | `0.14.0` | `MIT/Apache-2.0` | [Repo](https://github.com/zkcrypto/group) (Sean Bowe <ewillbefull@gmail.com>, Jack Grigg <jack@z.cash>) |
 | `hashbrown` | `0.17.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/hashbrown) |
 | `hashlink` | `0.12.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/djc/hashlink) |
 | `heck` | `0.5.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/withoutboats/heck) |
 | `hex` | `0.4.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/KokaKiwi/rust-hex) (KokaKiwi <kokakiwi@kokakiwi.net>) |
-| `hkdf` | `0.12.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/KDFs/) (RustCrypto Developers) |
-| `hmac` | `0.12.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/MACs) (RustCrypto Developers) |
+| `hmac` | `0.13.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/MACs) (RustCrypto Developers) |
 | `http` | `1.5.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/hyperium/http) (Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carll) |
 | `http-body` | `1.1.0` | `MIT` | [Repo](https://github.com/hyperium/http-body) (Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14) |
 | `http-body-util` | `0.1.5` | `MIT` | [Repo](https://github.com/hyperium/http-body) (Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14) |
@@ -190,8 +187,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `jni-sys-macros` | `0.4.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/jni-rs/jni-sys) (Robert Bragg <robert@sixbynine.org>) |
 | `jobserver` | `0.1.35` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/jobserver-rs) (Alex Crichton <alex@alexcrichton.com>) |
 | `js-sys` | `0.3.107` | `MIT OR Apache-2.0` | [Repo](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys) (The wasm-bindgen Developers) |
-| `jsonwebtoken` | `11.1.0` | `MIT` | [Repo](https://github.com/Keats/jsonwebtoken) (Vincent Prouillet <hello@vincentprouillet.com>) |
-| `lazy_static` | `1.5.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang-nursery/lazy-static.rs) (Marvin Löbel <loebel.marvin@gmail.com>) |
+| `jsonwebtoken` | `12.0.0` | `MIT` | [Repo](https://github.com/Keats/jsonwebtoken) (Vincent Prouillet <hello@vincentprouillet.com>) |
 | `libc` | `0.2.191` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/libc) |
 | `libm` | `0.2.16` | `MIT` | [Repo](https://github.com/rust-lang/compiler-builtins) (Alex Crichton <alex@alexcrichton.com>, Amanieu d'Antras <ama) |
 | `libsqlite3-sys` | `0.39.1` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
@@ -206,33 +202,32 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `mio` | `1.2.4` | `MIT` | [Repo](https://github.com/tokio-rs/mio) (Carl Lerche <me@carllerche.com>, Thomas de Zeeuw <thomasdeze) |
 | `nom` | `7.1.3` | `MIT` | [Repo](https://github.com/Geal/nom) (contact@geoffroycouprie.com) |
 | `num-bigint` | `0.4.8` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-num/num-bigint) (The Rust Project Developers) |
-| `num-bigint-dig` | `0.8.6` | `MIT/Apache-2.0` | [Repo](https://github.com/dignifiedquire/num-bigint) (dignifiedquire <dignifiedquire@gmail.com>, The Rust Project ) |
 | `num-conv` | `0.2.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/jhpratt/num-conv) (Jacob Pratt <jacob@jhpratt.dev>) |
 | `num-integer` | `0.1.47` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-num/num-integer) (The Rust Project Developers) |
-| `num-iter` | `0.1.46` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-num/num-iter) (The Rust Project Developers) |
 | `num-traits` | `0.2.19` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-num/num-traits) (The Rust Project Developers) |
 | `once_cell` | `1.21.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/matklad/once_cell) (Aleksey Kladov <aleksey.kladov@gmail.com>) |
 | `openssl-probe` | `0.2.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/rustls/openssl-probe) (Alex Crichton <alex@alexcrichton.com>) |
 | `openssl-src` | `300.6.1+3.6.3` | `MIT/Apache-2.0` | [Repo](https://github.com/alexcrichton/openssl-src-rs) (Alex Crichton <alex@alexcrichton.com>) |
 | `openssl-sys` | `0.9.118` | `MIT` | [Repo](https://github.com/rust-openssl/rust-openssl) (Alex Crichton <alex@alexcrichton.com>, Steven Fackler <sfack) |
-| `p256` | `0.13.2` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves/tree/master/p256) (RustCrypto Developers) |
-| `p384` | `0.13.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves/tree/master/p384) (RustCrypto Developers, Frank Denis <github@pureftpd.org>) |
-| `pem` | `3.0.6` | `MIT` | [Repo](https://github.com/jcreekmore/pem-rs.git) (Jonathan Creekmore <jonathan@thecreekmores.org>) |
-| `pem-rfc7468` | `0.7.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/pem-rfc7468) (RustCrypto Developers) |
+| `p256` | `0.14.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves) (RustCrypto Developers) |
+| `p384` | `0.14.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves) (RustCrypto Developers, Frank Denis <github@pureftpd.org>) |
+| `pem` | `4.0.0` | `MIT` | [Repo](https://github.com/jcreekmore/pem-rs.git) (Jonathan Creekmore <jonathan@thecreekmores.org>) |
+| `pem-rfc7468` | `1.0.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `percent-encoding` | `2.3.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/servo/rust-url/) (The rust-url developers) |
 | `phf` | `0.13.1` | `MIT` | [Repo](https://github.com/rust-phf/rust-phf) (Steven Fackler <sfackler@gmail.com>) |
 | `phf_generator` | `0.13.1` | `MIT` | [Repo](https://github.com/rust-phf/rust-phf) (Steven Fackler <sfackler@gmail.com>) |
 | `phf_macros` | `0.13.1` | `MIT` | [Repo](https://github.com/rust-phf/rust-phf) (Steven Fackler <sfackler@gmail.com>) |
 | `phf_shared` | `0.13.1` | `MIT` | [Repo](https://github.com/rust-phf/rust-phf) (Steven Fackler <sfackler@gmail.com>) |
 | `pin-project-lite` | `0.2.17` | `Apache-2.0 OR MIT` | [Repo](https://github.com/taiki-e/pin-project-lite) |
-| `pkcs1` | `0.7.5` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/pkcs1) (RustCrypto Developers) |
-| `pkcs8` | `0.10.2` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/pkcs8) (RustCrypto Developers) |
+| `pkcs1` | `0.8.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
+| `pkcs8` | `0.11.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `pkg-config` | `0.3.34` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/pkg-config-rs) (Alex Crichton <alex@alexcrichton.com>) |
 | `plain` | `0.2.3` | `MIT/Apache-2.0` | [Repo](https://github.com/randomites/plain) (jzr) |
 | `potential_utf` | `0.1.6` | `Unicode-3.0` | [Repo](https://github.com/unicode-org/icu4x) (The ICU4X Project Developers) |
 | `powerfmt` | `0.2.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/jhpratt/powerfmt) (Jacob Pratt <jacob@jhpratt.dev>) |
 | `ppv-lite86` | `0.2.21` | `MIT OR Apache-2.0` | [Repo](https://github.com/cryptocorrosion/cryptocorrosion) (The CryptoCorrosion Contributors) |
-| `primeorder` | `0.13.6` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves/tree/master/primeorder) (RustCrypto Developers) |
+| `primefield` | `0.14.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves) (RustCrypto Developers) |
+| `primeorder` | `0.14.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves) (RustCrypto Developers) |
 | `proc-macro2` | `1.0.107` | `MIT OR Apache-2.0` | [Repo](https://github.com/dtolnay/proc-macro2) (David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcr) |
 | `psl-types` | `2.0.11` | `MIT/Apache-2.0` | [Repo](https://github.com/addr-rs/psl-types) (rushmorem <rushmore@webenchanter.com>) |
 | `publicsuffix` | `2.3.0` | `MIT/Apache-2.0` | [Repo](https://github.com/rushmorem/publicsuffix) (rushmorem <rushmore@webenchanter.com>) |
@@ -242,12 +237,9 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `quote` | `1.0.47` | `MIT OR Apache-2.0` | [Repo](https://github.com/dtolnay/quote) (David Tolnay <dtolnay@gmail.com>) |
 | `r-efi` | `5.3.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | [Repo](https://github.com/r-efi/r-efi) |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | [Repo](https://github.com/r-efi/r-efi) |
-| `rand` | `0.8.8` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers) |
 | `rand` | `0.9.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers) |
 | `rand` | `0.10.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers) |
-| `rand_chacha` | `0.3.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers, Th) |
 | `rand_chacha` | `0.9.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers, Th) |
-| `rand_core` | `0.6.4` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers) |
 | `rand_core` | `0.9.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand) (The Rand Project Developers, The Rust Project Developers) |
 | `rand_core` | `0.10.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rand_core) (The Rand Project Developers) |
 | `rand_pcg` | `0.10.2` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-random/rngs) (The Rand Project Developers) |
@@ -255,11 +247,12 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `regex-automata` | `0.4.18` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/regex) (The Rust Project Developers, Andrew Gallant <jamslam@gmail.c) |
 | `regex-syntax` | `0.8.11` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/regex) (The Rust Project Developers, Andrew Gallant <jamslam@gmail.c) |
 | `reqwest` | `0.13.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/seanmonstar/reqwest) (Sean McArthur <sean@seanmonstar.com>) |
-| `rfc6979` | `0.4.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures/tree/master/rfc6979) (RustCrypto Developers) |
+| `rfc6979` | `0.6.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/signatures) (RustCrypto Developers) |
 | `ring` | `0.17.14` | `Apache-2.0 AND ISC` | [Repo](https://github.com/briansmith/ring) |
-| `rsa` | `0.9.10` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/RSA) (RustCrypto Developers, dignifiedquire <dignifiedquire@gmail.) |
+| `rsa` | `0.10.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/RSA) (RustCrypto Developers, dignifiedquire <dignifiedquire@gmail.) |
 | `rsqlite-vfs` | `0.2.0` | `MIT` | [Repo](https://github.com/Spxg/sqlite-wasm-rs) |
 | `rusqlite` | `0.41.1` | `MIT` | [Repo](https://github.com/rusqlite/rusqlite) (The rusqlite developers) |
+| `rusqlite_migration` | `2.7.0` | `Apache-2.0` | [Repo](https://github.com/cljoly/rusqlite_migration) (Clément Joly <foss@131719.xyz>) |
 | `rustc-hash` | `2.1.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/rust-lang/rustc-hash) (The Rust Project Developers) |
 | `rustc_version` | `0.4.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/djc/rustc-version-rs) |
 | `rustix` | `1.1.6` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [Repo](https://github.com/bytecodealliance/rustix) (Dan Gohman <dev@sunfishcode.online>, Jakub Konka <kubkon@jak) |
@@ -275,7 +268,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `schannel` | `0.1.30` | `MIT` | [Repo](https://github.com/steffengy/schannel-rs) (Steven Fackler <sfackler@gmail.com>, Steffen Butzer <steffen) |
 | `scroll` | `0.12.0` | `MIT` | [Repo](https://github.com/m4b/scroll) (m4b <m4b.github.io@gmail.com>, Ted Mielczarek <ted@mielczare) |
 | `scroll_derive` | `0.12.1` | `MIT` | [Repo](https://github.com/m4b/scroll) (m4b <m4b.github.io@gmail.com>, Ted Mielczarek <ted@mielczare) |
-| `sec1` | `0.7.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/sec1) (RustCrypto Developers) |
+| `sec1` | `0.8.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `security-framework` | `3.7.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/kornelski/rust-security-framework) (Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood) |
 | `security-framework-sys` | `2.17.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/kornelski/rust-security-framework) (Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood) |
 | `semver` | `1.0.28` | `MIT OR Apache-2.0` | [Repo](https://github.com/dtolnay/semver) (David Tolnay <dtolnay@gmail.com>) |
@@ -285,10 +278,12 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `serde_json` | `1.0.154` | `MIT OR Apache-2.0` | [Repo](https://github.com/serde-rs/json) |
 | `serde_spanned` | `1.1.3` | `MIT OR Apache-2.0` | [Repo](https://github.com/toml-rs/toml) |
 | `serde_urlencoded` | `0.7.1` | `MIT/Apache-2.0` | [Repo](https://github.com/nox/serde_urlencoded) (Anthony Ramine <n.oxyde@gmail.com>) |
+| `serdect` | `0.4.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `sha1` | `0.11.0` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/hashes) (RustCrypto Developers) |
-| `sha2` | `0.10.9` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/hashes) (RustCrypto Developers) |
+| `sha1_smol` | `1.0.1` | `BSD-3-Clause` | [Repo](https://github.com/mitsuhiko/sha1-smol) (Armin Ronacher <armin.ronacher@active-4.com>) |
+| `sha2` | `0.11.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/RustCrypto/hashes) (RustCrypto Developers) |
 | `shlex` | `2.0.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/comex/rust-shlex) (comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Ta) |
-| `signature` | `2.2.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/traits/tree/master/signature) (RustCrypto Developers) |
+| `signature` | `3.0.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/traits) (RustCrypto Developers) |
 | `simd_cesu8` | `1.2.0` | `Apache-2.0 OR MIT` | [Repo](https://github.com/seancroach/simd_cesu8) (Sean C. Roach <me@seancroach.dev>) |
 | `simdutf8` | `0.1.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/rusticstuff/simdutf8) (Hans Kratz <hans@appfour.com>) |
 | `simple_asn1` | `0.6.4` | `ISC` | [Repo](https://github.com/acw/simple_asn1) (Adam Wick <awick@uhsure.com>) |
@@ -298,8 +293,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `smallvec` | `1.16.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/servo/rust-smallvec) (The Servo Project Developers) |
 | `smawk` | `0.3.3` | `MIT` | [Repo](https://github.com/mgeisler/smawk) (Martin Geisler <martin@geisler.net>) |
 | `socket2` | `0.6.5` | `MIT OR Apache-2.0` | [Repo](https://github.com/rust-lang/socket2) (Alex Crichton <alex@alexcrichton.com>, Thomas de Zeeuw <thom) |
-| `spin` | `0.9.9` | `MIT` | [Repo](https://github.com/mvdnes/spin-rs.git) (Mathijs van de Nes <git@mathijs.vd-nes.nl>, John Ericson <gi) |
-| `spki` | `0.7.3` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats/tree/master/spki) (RustCrypto Developers) |
+| `spki` | `0.8.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/formats) (RustCrypto Developers) |
 | `sqlcipher-src` | `419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2` | `MIT AND BSD-3-Clause AND blessing AND WTFPL` | [Repo](https://github.com/LucaCappelletti94/sqlcipher-src) |
 | `sqlite-wasm-rs` | `0.6.2` | `MIT` | [Repo](https://github.com/Spxg/sqlite-wasm-rs) (Spxg <noz@live.com>) |
 | `stable_deref_trait` | `1.2.1` | `MIT OR Apache-2.0` | [Repo](https://github.com/storyyeller/stable_deref_trait) (Robert Grosse <n210241048576@gmail.com>) |
@@ -389,6 +383,7 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 | `windows_x86_64_msvc` | `0.52.6` | `MIT OR Apache-2.0` | [Repo](https://github.com/microsoft/windows-rs) (Microsoft) |
 | `winnow` | `1.0.5` | `MIT` | [Repo](https://github.com/winnow-rs/winnow) |
 | `wit-bindgen` | `0.57.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [Repo](https://github.com/bytecodealliance/wit-bindgen) (Alex Crichton <alex@alexcrichton.com>) |
+| `wnaf` | `0.14.1` | `Apache-2.0 OR MIT` | [Repo](https://github.com/RustCrypto/elliptic-curves) (RustCrypto Developers) |
 | `writeable` | `0.6.4` | `Unicode-3.0` | [Repo](https://github.com/unicode-org/icu4x) (The ICU4X Project Developers) |
 | `yoke` | `0.8.4` | `Unicode-3.0` | [Repo](https://github.com/unicode-org/icu4x) (Manish Goregaokar <manishsmail@gmail.com>) |
 | `yoke-derive` | `0.8.4` | `Unicode-3.0` | [Repo](https://github.com/unicode-org/icu4x) (Manish Goregaokar <manishsmail@gmail.com>) |

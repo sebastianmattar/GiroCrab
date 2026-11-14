@@ -1,7 +1,7 @@
 use base64::Engine as _;
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::signature::{SignatureEncoding, Signer};
-use rsa::RsaPrivateKey;
+use rsa::PrivateKey;
 
 use super::*;
 use crate::models::AccountKind;
@@ -51,7 +51,7 @@ fn parses_accounts_and_payments() {
 
 #[test]
 fn signature_roundtrip_and_find() {
-    let key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 1024).unwrap();
+    let key = PrivateKey::new(&mut getrandom::SysRng, 1024).unwrap();
     let mut c = BunqConnector::new();
     c.state.private_key_pem = key.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
     c.state.server_public_key = key

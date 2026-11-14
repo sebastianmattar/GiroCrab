@@ -281,11 +281,11 @@ impl Vault {
         login_name: String,
     ) -> Result<(), CoreError> {
         let db = self.db()?;
-        let kind: String = db
+        let (kind, old_name): (String, String) = db
             .query_row(
-                "SELECT connector FROM bank_connections WHERE id = ?1 AND deleted_ms IS NULL",
+                "SELECT connector, display_name FROM bank_connections WHERE id = ?1 AND deleted_ms IS NULL",
                 [connection_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?
             .ok_or_else(|| CoreError::NotFound {
@@ -295,14 +295,22 @@ impl Vault {
             message: kind.clone(),
         })?;
         let login = normalize_login(kind, &login_name);
+        let generic = crate::connectors::descriptor(kind).name;
         let name = if display_name.trim().is_empty() {
-            crate::connectors::descriptor(kind).name
+            generic.clone()
         } else {
             display_name.trim().to_string()
         };
         db.execute(
             "UPDATE bank_connections SET display_name = ?1, login_name = ?2 WHERE id = ?3",
             params![name, login, connection_id],
+        )?;
+        // The sidebar shows `accounts.bank_name`: follow the rename where it
+        // still carries the old or generic name (never a name the bank sent).
+        db.execute(
+            "UPDATE accounts SET bank_name = ?1
+             WHERE connection_id = ?2 AND bank_name IN (?3, ?4, '') AND bank_name <> ?1",
+            params![name, connection_id, old_name, generic],
         )?;
         deduplicate(&db)?;
         Ok(())

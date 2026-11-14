@@ -9,7 +9,7 @@ use rsa::pkcs8::{
     DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding,
 };
 use rsa::signature::{SignatureEncoding, Signer, Verifier};
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::{PrivateKey, PublicKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -56,7 +56,7 @@ impl From<CoreError> for ApiError {
 
 impl BunqConnector {
     pub(super) fn signing_key(&self) -> CoreResult<SigningKey<Sha256>> {
-        let key = RsaPrivateKey::from_pkcs8_pem(&self.state.private_key_pem).map_err(|e| {
+        let key = PrivateKey::from_pkcs8_pem(&self.state.private_key_pem).map_err(|e| {
             CoreError::Protocol {
                 message: format!("bunq key: {e}"),
             }
@@ -192,8 +192,8 @@ impl BunqConnector {
             message: tr("Die Antwort von bunq ist nicht korrekt signiert.").into(),
         };
         let sig = sig.ok_or_else(invalid)?;
-        let key = RsaPublicKey::from_public_key_pem(&self.state.server_public_key)
-            .map_err(|_| invalid())?;
+        let key =
+            PublicKey::from_public_key_pem(&self.state.server_public_key).map_err(|_| invalid())?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(sig)
             .map_err(|_| invalid())?;
@@ -211,15 +211,14 @@ impl BunqConnector {
 
     /// POST /installation with a fresh 2048-bit key.
     pub(super) async fn install(&mut self) -> CoreResult<()> {
-        let key =
-            tokio::task::spawn_blocking(|| RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048))
-                .await
-                .map_err(|e| CoreError::Protocol {
-                    message: e.to_string(),
-                })?
-                .map_err(|e| CoreError::Protocol {
-                    message: format!("bunq key: {e}"),
-                })?;
+        let key = tokio::task::spawn_blocking(|| PrivateKey::new(&mut getrandom::SysRng, 2048))
+            .await
+            .map_err(|e| CoreError::Protocol {
+                message: e.to_string(),
+            })?
+            .map_err(|e| CoreError::Protocol {
+                message: format!("bunq key: {e}"),
+            })?;
         let pem_err = |e: String| CoreError::Protocol { message: e };
         let public_pem = key
             .to_public_key()
