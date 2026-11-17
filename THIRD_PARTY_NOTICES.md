@@ -50,6 +50,17 @@ The macOS user interface uses only native Apple system frameworks (`SwiftUI`, `A
 |---|---|---|---|
 | **`uniffi`** (`uniffi-bindgen`, feature `cli`) | `0.32.2` | `MPL-2.0` | [https://github.com/mozilla/uniffi-rs](https://github.com/mozilla/uniffi-rs) |
 
+`cargo-ndk` (`4.1.2`, `MIT OR Apache-2.0`, [https://github.com/bbqsrc/cargo-ndk](https://github.com/bbqsrc/cargo-ndk)) cross-compiles the core for Android in CI; it is not shipped.
+
+## Android Libraries (`GiroCrabAndroid`, Gradle)
+
+The Android app loads the core through the UniFFI Kotlin bindings. Compose/AndroidX libraries are Apache-2.0 and not listed individually.
+
+| Library | Version | License | Repository |
+|---|---|---|---|
+| **`net.java.dev.jna:jna`** (AAR, ships `libjnidispatch`) | `5.15.0` | `Apache-2.0 OR LGPL-2.1-or-later` | [https://github.com/java-native-access/jna](https://github.com/java-native-access/jna) |
+| **`org.jetbrains.kotlinx:kotlinx-coroutines-android`** | `1.9.0` | `Apache-2.0` | [https://github.com/Kotlin/kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) |
+
 ## Linux Direct Dependencies (`GiroCrabLinux`)
 
 The Linux interface (Qt 6 / QML) uses these crates in addition to the core. Crates already listed above (`base64`, `miniz_oxide`, `reqwest`, `serde`, `serde_json`, `tokio`, `zeroize`) are not repeated.

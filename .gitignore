@@ -135,3 +135,5 @@ github_issues_prs_full.txt
 provenance-dataset.jsonl
 tmp/
 GiroCrabAndroid/.gradle/
+GiroCrabAndroid/app/src/main/jniLibs/
+GiroCrabAndroid/app/src/main/generated/
