@@ -43,6 +43,8 @@
 //! - 30: `tx_date_id` covers `deleted_ms`, `account_id` and `category_id` ([`TX_DATE_ID_COVERING`]).
 //! - 31: `booking_documents.seen_at`: read status of documents (NULL = unread); documents that exist
 //!   count as read; the list index carries the column, a partial index finds the unread ones.
+//! - 32: repair (#998): accounts the MoneyMoney import archived because their last refresh there
+//!   was cancelled (`cancel_tsp`) are active again ([`unarchive_cancelled_refreshes`]).
 //!
 //! Schema changes are a new step at the end of [`STEPS`]; never edit an
 //! existing step. After a bump, run
@@ -90,7 +92,24 @@ const STEPS: &[Step] = &[
     Step::Sql(crate::depot_values::SCHEMA),                    // 29: depot value history
     Step::Sql(TX_DATE_ID_COVERING),                            // 30
     Step::Hook(document_seen),                                 // 31: read status of documents
+    Step::Hook(unarchive_cancelled_refreshes),                 // 32: repair (#998)
 ];
+
+/// Step 32 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
+/// account was cancelled there, e.g. a TAN not confirmed) as "closed" and archived accounts that
+/// are in use: they left the totals and syncs skipped them. Such an archive carries MoneyMoney's
+/// earlier time next to the import's stamp; archiving in the app (`set_account_archived`, also the
+/// account selection) stamps both in the same second, and the vault merge copies them as a pair.
+/// The reactivation is stamped, so the merge carries it to the other devices.
+fn unarchive_cancelled_refreshes(conn: &Connection) -> CoreResult<()> {
+    conn.execute(
+        "UPDATE accounts SET archived_unix = NULL, archived_ms = ?1
+          WHERE archived_unix IS NOT NULL AND archived_unix * 1000 < archived_ms - 2000
+            AND deleted_ms IS NULL",
+        [crate::dates::now_ms()],
+    )?;
+    Ok(())
+}
 
 /// Step 31: `booking_documents.seen_at` (NULL = unread). The documents a vault has already count
 /// as read: an update must not turn a whole archive into "new". The index the document list is
@@ -961,7 +980,49 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 31);
+        assert_eq!(SCHEMA_VERSION, 32);
+    }
+
+    /// #998: what the MoneyMoney import archived from `cancel_tsp` is active again; an account
+    /// the user archived, a deleted one and an archive from before the stamps stay as they are.
+    #[test]
+    fn accounts_archived_for_a_cancelled_refresh_are_reactivated() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO account_groups(name,sf_symbol,sort_order) VALUES ('Konten','building.columns',1);
+             INSERT INTO accounts(group_id,external_ref,name,archived_unix,archived_ms,deleted_ms) VALUES
+               (1,'mm-1','Girokonto',1790000000,1790001000123,NULL),
+               (1,'mm-2','Alte Karte',1790002000,1790002000456,NULL),
+               (1,'mm-3','Gelöscht',1790000000,1790001000123,1790003000000),
+               (1,'mm-4','Früher archiviert',1700000000,0,NULL);
+             PRAGMA user_version = 31;",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let archived = |name: &str| {
+            conn.query_row(
+                "SELECT archived_unix FROM accounts WHERE name = ?1",
+                [name],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(archived("Girokonto"), None);
+        let stamp: i64 = conn
+            .query_row(
+                "SELECT archived_ms FROM accounts WHERE name = 'Girokonto'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            stamp > 1790001000123,
+            "the reactivation is stamped for the merge"
+        );
+        assert_eq!(archived("Alte Karte"), Some(1790002000));
+        assert_eq!(archived("Gelöscht"), Some(1790000000));
+        assert_eq!(archived("Früher archiviert"), Some(1700000000));
     }
 
     /// A vault that an early draft migrated as version 15 (scheduled transfers

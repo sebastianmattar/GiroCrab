@@ -3127,16 +3127,16 @@ fn a_database_without_value_history_imports_as_before() {
 
 #[test]
 fn portal_sync_adopts_the_active_card_next_to_closed_ones() {
-    // #816: two cards closed in MoneyMoney (archived on import) next to the
-    // active one under one Amex login; the first portal sync takes the active
-    // card over instead of adding a fourth account.
+    // #816: two closed cards (archived) next to the active one under one Amex
+    // login; the first portal sync takes the active card over instead of adding
+    // a fourth account.
     let extra = "
 INSERT INTO banks (rowid, country, bankcode, username, customer, credential, name, systemid, local_storage) VALUES
   (30, 'DE', '', 'amex-login', '', 'GEHEIM-30', 'American Express', 'SYS', 'LS');
-INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred, cancel_tsp) VALUES
-  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM', 1500000000),
-  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM', 1600000000),
-  (32, 30, 'xxxx-31003', '', 0, '', 'EUR', 'Amex Aktiv', 'Max Mustermann', 0, 3, 32, 0, 1, 'GEHEIM', NULL);
+INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred) VALUES
+  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM'),
+  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM'),
+  (32, 30, 'xxxx-31003', '', 0, '', 'EUR', 'Amex Aktiv', 'Max Mustermann', 0, 3, 32, 0, 1, 'GEHEIM');
 ";
     let v = vault();
     let path = fake_db_with(false, extra);
@@ -3145,8 +3145,11 @@ INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, curre
         .unwrap();
     v.import_moneymoney_database(path, PW.into(), options_from(&p, true))
         .unwrap();
-    assert!(account_by_name(&v, "Amex Alt 1").archived_unix.is_some());
-    assert!(account_by_name(&v, "Amex Alt 2").archived_unix.is_some());
+    // `cancel_tsp` says nothing about a closed account (#998): the user archives them
+    for name in ["Amex Alt 1", "Amex Alt 2"] {
+        v.set_account_archived(account_by_name(&v, name).id, true)
+            .unwrap();
+    }
     let active = account_by_name(&v, "Amex Aktiv");
     let conn = active.connection_id.unwrap();
     let before = v.list_accounts().unwrap().len();

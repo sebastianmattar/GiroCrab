@@ -453,9 +453,6 @@ struct SrcAccount {
     /// Balance MoneyMoney displays (`accounts.balances` blob): (cents, currency).
     shown_balance: Option<(i64, String)>,
     balance_ts: Option<i64>,
-    /// `accounts.cancel_tsp`: when the account was deactivated/closed in MoneyMoney
-    /// (Unix seconds); `None` = still active.
-    cancelled_ts: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1221,7 +1218,6 @@ fn read_accounts(conn: &Connection) -> CoreResult<Vec<SrcAccount>> {
             "balances",
             "balance_tsp",
             "bic",
-            "cancel_tsp",
         ],
         "ORDER BY sort, rowid",
     )?;
@@ -1249,7 +1245,6 @@ fn read_accounts(conn: &Connection) -> CoreResult<Vec<SrcAccount>> {
             shown_balance: parse_balances_blob(get(r, 11)?),
             balance_ts: vint(get(r, 12)?).filter(|t| *t > 0),
             bic: vtext(get(r, 13)?),
-            cancelled_ts: vint(get(r, 14)?).filter(|t| *t > 0),
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -2200,7 +2195,7 @@ pub(crate) fn adopt_account(
         // none (Amazon Visa web login) may still find the card with the IBAN
         // MoneyMoney stored for it – if it is the only one of its kind here.
         // includes soft-deleted rows: `store_fetch` revives or skips them;
-        // archived (closed in MoneyMoney) accounts are never guessed, or an old
+        // archived (closed) accounts are never guessed, or an old
         // card next to the active one would block the takeover (#816)
         let single = |iban_filter: &str| -> CoreResult<Option<i64>> {
             let mut st = conn.prepare(&format!(
@@ -2899,14 +2894,6 @@ impl ImportCtx<'_> {
         if kind == AccountKind::Loan {
             Vault::derive_initial_balance(conn, account_id)?;
         }
-        // Deactivated in MoneyMoney: archived here too (offline account that
-        // stays readable). Never un-archives what the user archived.
-        if let Some(ts) = a.cancelled_ts {
-            conn.execute(
-                "UPDATE accounts SET archived_unix = ?1, archived_ms = ?2 WHERE id = ?3 AND archived_unix IS NULL",
-                params![ts, now_ms(), account_id],
-            )?;
-        }
         // #212: MoneyMoney's opening balance becomes the account's. MoneyMoney
         // has no cut-off date: the Startsaldo applies before the first
         // booking. A balance-history row is dated, though (its value is the
@@ -3282,18 +3269,21 @@ fn statement_files(explicit: Option<String>, found: Option<PathBuf>) -> Option<S
 pub(crate) mod tests;
 
 #[cfg(test)]
-mod inactive_account_tests {
+mod cancelled_refresh_tests {
     use super::tests::{fake_db, options_from, PW};
     use super::*;
 
     #[test]
-    fn inactive_moneymoney_account_is_imported_archived() {
+    fn account_with_a_cancelled_refresh_is_imported_active() {
+        // #998: `cancel_tsp` is when MoneyMoney's last refresh of the account was
+        // cancelled (next to `error_tsp`, `balance_tsp` …), e.g. a TAN not confirmed
+        // after the start-up refresh. Such an account is in use, not closed.
         let path = fake_db();
         {
             let c = Connection::open(&path).unwrap();
             c.execute_batch(&format!("PRAGMA key = '{}';", PW.replace('\'', "''")))
                 .unwrap();
-            c.execute_batch("UPDATE accounts SET cancel_tsp = 1700000000 WHERE rowid = 2;")
+            c.execute_batch("UPDATE accounts SET cancel_tsp = 1700000000 WHERE rowid IN (1, 2);")
                 .unwrap();
         }
         let v = Vault::open(
@@ -3310,9 +3300,9 @@ mod inactive_account_tests {
             .unwrap();
         let accounts = v.list_accounts().unwrap();
         let find = |name: &str| accounts.iter().find(|a| a.name == name).unwrap();
-        let card = find("Visa-Karte");
-        assert!(card.archived_unix.is_some());
-        assert_eq!(card.archived_unix, Some(1_700_000_000));
-        assert!(find("Girokonto").archived_unix.is_none());
+        for name in ["Girokonto", "Visa-Karte"] {
+            assert!(find(name).archived_unix.is_none(), "{name}");
+            assert!(find(name).in_total, "{name}");
+        }
     }
 }

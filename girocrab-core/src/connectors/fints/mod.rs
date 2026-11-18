@@ -769,6 +769,12 @@ impl BankConnector for FinTsConnector {
                     AccountKind::Brokerage => "Depot".into(),
                     _ => "Girokonto".into(),
                 });
+            // No balance from HKSAL, HKWPD or a statement (not allowed for the account,
+            // an empty answer or an error): the stored one stays instead of 0,00 € (#998).
+            // Cards keep their own fallback, the open amount from their bookings.
+            if balance.is_none() && kind != AccountKind::CreditCard {
+                result.balances_unknown.push(label.clone());
+            }
             result.accounts.push(RemoteAccount {
                 external_ref: label.clone(),
                 name,

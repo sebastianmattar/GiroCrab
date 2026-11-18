@@ -1298,3 +1298,31 @@ async fn order_source_account_without_upd_restrictions_allows_every_order() {
         assert_eq!(acc.map(|a| a.iban).as_deref(), Some(iban));
     }
 }
+
+/// One savings account that allows only HKSAL, against a bank answering `hksal`.
+async fn fetch_savings(hksal: &'static str) -> FetchResult {
+    let (url, _) = mock_bank(vec![hksal]);
+    let state = serde_json::json!({"system_id": "123", "sec_func": "946", "tan_method_name": "", "tan_medium": "", "versions": {"HKSAL": [7]}, "tan_required": {}});
+    let mut c = two_step_connector(&url, state);
+    let mut savings = upd_acc("0532013000", "", IBAN_A, "Tagesgeld", &["HKSAL"]);
+    savings.kind_code = 10;
+    c.upd = vec![savings];
+    c.fetch(&test_ctx()).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_balance_the_bank_did_not_send_is_unknown_not_zero() {
+    // #998: no HISAL and no statement to take a closing balance from: the stored
+    // balance must stay, the 0 in `balance_cents` is only a placeholder.
+    let r = fetch_savings(ACCEPT).await;
+    assert_eq!(r.accounts.len(), 1);
+    assert_eq!(r.accounts[0].kind, AccountKind::Savings);
+    assert_eq!(r.balances_unknown, vec![r.accounts[0].external_ref.clone()]);
+
+    let r = fetch_savings(
+        "HNHBK:1:3+000000000000+300+DIALOG1+1'HIRMG:2:2+0010::Nachricht entgegengenommen.'HISAL:3:7:3+DE89370400440532013000+Tagesgeld+EUR+C:1234,56:EUR:20261118'",
+    )
+    .await;
+    assert_eq!(r.accounts[0].balance_cents, 123_456);
+    assert!(r.balances_unknown.is_empty());
+}
