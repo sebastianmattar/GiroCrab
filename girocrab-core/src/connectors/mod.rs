@@ -39,6 +39,7 @@ pub mod fints_presets;
 pub mod fnz;
 pub mod fordmoney;
 pub mod ibkr;
+pub mod kontist;
 pub mod opel;
 pub mod paypal;
 pub mod paypal_nvp;

@@ -110,6 +110,7 @@ CONNECTOR_DOCS = {
     "trade-republic": ("Trade Republic", "Trade Republic"),
     "volkswagen-bank": ("Volkswagen Bank", "Volkswagen Bank"),
     "uberspace": ("Uberspace", "Uberspace"),
+    "kontist": ("Kontist", "Kontist"),
     "schwaebisch-hall": ("Schwäbisch Hall (Bausparen)", "Schwäbisch Hall"),
 }
 

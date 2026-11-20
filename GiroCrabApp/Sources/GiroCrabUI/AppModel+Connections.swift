@@ -289,10 +289,19 @@ extension AppModel {
     }
 
     /// Deletes one archived account incl. bookings/documents/holdings (and its connection if it was the last account).
-    func deleteAccount(_ id: Int64) {
+    ///
+    /// The core deletes only accounts that are saved as archived. `archiveFirst` (account settings, where the
+    /// archive toggle may still be unsaved) archives and deletes in one go; the archive step does not show in
+    /// the UI. If the delete fails afterwards, the account stays archived and the error is shown as usual.
+    func deleteAccount(_ id: Int64, archiveFirst: Bool = false) {
         guard let vault else { return }
-        runCore { try vault.deleteAccount(accountId: id) }
-        if sidebarSelection == .account(id) { sidebarSelection = .allAccounts }
+        var deleted = false
+        runCore {
+            if archiveFirst { try vault.setAccountArchived(accountId: id, archived: true) }
+            try vault.deleteAccount(accountId: id)
+            deleted = true
+        }
+        if deleted, sidebarSelection == .account(id) { sidebarSelection = .allAccounts }
         reloadAll()
     }
 

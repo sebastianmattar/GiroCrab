@@ -1133,6 +1133,56 @@ fn english(de: &str) -> Option<&'static str> {
         "Volkswagen Bank: Unerwartete Antwort auf die TAN-Abfrage." => {
             "Volkswagen Bank: unexpected answer to the TAN request."
         }
+        // ------------------------------------------------------------ connectors/kontist.rs
+        "Kontist GraphQL-API (OAuth2 + Freigabe in der App)" => {
+            "Kontist GraphQL API (OAuth2 + approval in the app)"
+        }
+        "Kontist: Geschäftskonto mit Saldo und Umsätzen über die offizielle API. Nötig ist ein eigener API-Client auf kontist.dev (Client Management), dessen Client-ID in den Einstellungen eingetragen wird. Die erste Anmeldung wird in der Kontist-App bestätigt, danach läuft der Abruf ohne Freigabe, solange Kontist die Anmeldung gelten lässt." => {
+            "Kontist: business account with balance and bookings via the official API. Requires your own API client on kontist.dev (Client Management) whose client ID is entered in the settings. The first login is confirmed in the Kontist app; after that, syncs run without approval as long as Kontist keeps the login valid."
+        }
+        "Kontist-App" => "Kontist app",
+        "Bitte die Anmeldung in der Kontist-App bestätigen." => {
+            "Please confirm the login in the Kontist app."
+        }
+        "Bargeldauszahlung" => "Cash withdrawal",
+        "Lastschriftrückgabe" => "Direct debit return",
+        "Kontist: Anmeldung fehlgeschlagen. Bitte E-Mail-Adresse und Passwort prüfen." => {
+            "Kontist: Login failed. Please check email address and password."
+        }
+        "Kontist: Anmeldung fehlgeschlagen (HTTP {0})." => "Kontist: Login failed (HTTP {0}).",
+        "Kontist: Dem OAuth2-Client fehlen Berechtigungen (benötigt: offline, accounts, transactions, users)." => {
+            "Kontist: The OAuth2 client lacks permissions (needed: offline, accounts, transactions, users)."
+        }
+        "Kontist: Die OAuth2-Client-ID (oder das Secret) wurde abgelehnt. Bitte die Client-ID in den Einstellungen mit kontist.dev (Client Management) vergleichen; ohne angezeigtes Secret das Secret-Feld leer lassen." => {
+            "Kontist: The OAuth2 client ID (or secret) was rejected. Please compare the client ID in the settings with kontist.dev (Client Management); if no secret is shown there, leave the secret field empty."
+        }
+        "Kontist: Die Anmeldung wurde in der Kontist-App abgelehnt." => {
+            "Kontist: The login was denied in the Kontist app."
+        }
+        "Kontist: Die Freigabe in der App konnte nicht gestartet werden." => {
+            "Kontist: The approval in the app could not be started."
+        }
+        "Kontist: Die Freigabe ist abgelaufen. Bitte den Abruf erneut starten." => {
+            "Kontist: The approval has expired. Please start the sync again."
+        }
+        "Kontist: E-Mail-Adresse und Passwort erforderlich." => {
+            "Kontist: Email address and password required."
+        }
+        "Kontist: Kein Konto in der Antwort gefunden." => {
+            "Kontist: No account found in the response."
+        }
+        "Kontist: Zugriff verweigert. Bitte den Abruf erneut starten und in der Kontist-App freigeben." => {
+            "Kontist: Access denied. Please start the sync again and approve it in the Kontist app."
+        }
+        "Kontist: Unerwartete Antwort der API (HTTP {0})." => {
+            "Kontist: Unexpected API response (HTTP {0})."
+        }
+        "Kontist: Der Anmeldedienst antwortet nicht (HTTP {0}). Bitte später erneut versuchen." => {
+            "Kontist: The login service is not responding (HTTP {0}). Please try again later."
+        }
+        "Kontist: Die Umsatzliste wurde nicht vollständig geliefert. Bitte den Abruf erneut starten." => {
+            "Kontist: The list of bookings was not delivered completely. Please start the sync again."
+        }
         // ------------------------------------------------------------ connectors/uberspace.rs
         "Web-Dashboard (Direkt-Login)" => "Web dashboard (direct login)",
         "E-Mail-Adresse" => "Email address",
@@ -1571,6 +1621,15 @@ fn english(de: &str) -> Option<&'static str> {
         "Aus dem comdirect-Entwicklerportal (Persönlicher Bereich › Verwaltung › Entwicklerzugang)." => {
             "From the comdirect developer portal (Persönlicher Bereich › Verwaltung › Entwicklerzugang)."
         }
+        "Kontist Client-ID" => "Kontist client ID",
+        "Auf kontist.dev unter Client Management einen Client anlegen (Redirect-URI z. B. https://localhost/girocrab/callback, Scopes Offline, Accounts, Transactions, Users) und dessen Client-ID hier eintragen." => {
+            "Create a client on kontist.dev under Client Management (redirect URI e.g. https://localhost/girocrab/callback, scopes Offline, Accounts, Transactions, Users) and enter its client ID here."
+        }
+        "Kontist Client-Secret" => "Kontist client secret",
+        "Nur nötig, wenn kontist.dev zum Client ein Secret anzeigt; sonst leer lassen." => {
+            "Only needed if kontist.dev shows a secret for the client; otherwise leave empty."
+        }
+        "Kontist" => "Kontist",
         "comdirect Client-Secret" => "comdirect client secret",
         "Wird beim Freischalten des API-Zugangs einmalig angezeigt." => {
             "Shown once when API access is activated."

@@ -561,7 +561,7 @@ struct PeriodMenuButton: View {
         } label: {
             // Single period control (GitHub #102): the menu is the only selector,
             // so it always shows the active range.
-            Label(forDepot ? model.depotPeriodTitle : model.periodTitle, systemImage: "calendar")
+            Label(forDepot ? model.depotPeriodTitle : model.shownPeriod.title, systemImage: "calendar")
                 .lineLimit(1)
         }
         .menuStyle(.borderlessButton)

@@ -9158,13 +9158,13 @@
         }
       }
     },
-    "Das Konto wurde aufgelöst" : {
+    "Das Konto wurde aufgelöst (archivieren)" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The account has been closed"
+            "value" : "The account has been closed (archive)"
           }
         }
       }
@@ -19355,6 +19355,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Account selection not saved"
+          }
+        }
+      }
+    },
+    "Kontist Client-ID" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontist client ID"
+          }
+        }
+      }
+    },
+    "Kontist Client-Secret" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontist client secret"
+          }
+        }
+      }
+    },
+    "Kontist OAuth2-Client" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontist OAuth2 client"
           }
         }
       }

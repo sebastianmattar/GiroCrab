@@ -110,7 +110,7 @@ Section: misc
 Priority: optional
 Homepage: https://girocrab.de
 Depends: $depends
-Recommends: qml6-module-qtwebengine, qt6-image-formats-plugin-pdf, qml6-module-qtquick-pdf, gnome-keyring | kwalletmanager | keepassxc, tesseract-ocr, tesseract-ocr-deu
+Recommends: qml6-module-qtwebengine, qt6-image-formats-plugin-pdf, qml6-module-qtquick-pdf, gnome-keyring | kwalletmanager | keepassxc, tesseract-ocr, tesseract-ocr-deu, breeze-icon-theme
 Description: Verschlüsselte Finanzverwaltung (inoffizieller Linux-Port von GiroCrab)
  GiroCrab ruft Umsätze direkt bei der Bank ab (FinTS/HBCI, PSD2 und weitere
  Schnittstellen), kategorisiert sie mit Regeln und speichert alles in einem

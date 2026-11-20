@@ -60,7 +60,18 @@ public final class AppModel {
     var accountMarkers: [Int64: AccountMarker] = [:] { didSet { refreshAccountMarkerVisibility() } }
     /// Custom label for „Ohne Kategorie“ (vault setting `ui.uncategorized_name`, #597); empty = default.
     var uncategorizedName = ""
-    var categories: [GiroCrabCore.Category] = [] { didSet { refreshOtherCurrencies() } }
+    var categories: [GiroCrabCore.Category] = [] {
+        didSet {
+            categoriesRequest = categorySumsRequest
+            categoriesAwaitRefresh = false
+            refreshOtherCurrencies()
+        }
+    }
+    /// What `categories` were loaded for: a column without a booking list reloads them only
+    /// when it needs other sums (#1413).
+    @ObservationIgnored var categoriesRequest: CategorySumsRequest?
+    /// A background refresh (sync, merge, filter change) is to bring new sums.
+    @ObservationIgnored var categoriesAwaitRefresh = false
     /// "Zusätzlich" next to the sidebar totals (#1049): per category (with subcategories) what it holds in
     /// currencies other than EUR, which its total leaves out. Empty when no booking has another currency.
     var categoryOtherTotals: [Int64: [CurrencyAmount]] = [:]
@@ -151,19 +162,13 @@ public final class AppModel {
             // Geplant, Lastschriften, Belege and Vermögen show no booking list: loading it for
             // all accounts only replaced the list the column shows next (#1396).
             guard MainColumn(sidebarSelection) == .bookings else {
-                let cancelsLoad = selectionLoadTask != nil
-                if cancelsLoad { endSelectionLoad() }
-                // The sidebar sums drop the account filter of a category view (#406): one shown, or one
-                // whose sums are still in because the cancelled load would have replaced them.
-                let sumsMayBeFiltered: Bool
-                switch shownSelection {
-                case .category?, .uncategorized?: sumsMayBeFiltered = true
-                default: sumsMayBeFiltered = cancelsLoad
-                }
-                if sumsMayBeFiltered, !categoryAccountFilter.isEmpty { reloadCategories() }
+                if selectionLoadTask != nil { endSelectionLoad() }
                 // the recurring data and salary cycle follow the selection (all accounts here)
                 refreshSalaryCycle()
                 refreshRecurring()
+                // The sidebar sums drop the account filter of a category view (#406) and take the period,
+                // pay cycle or refresh a cancelled load would have brought (#1413).
+                if categoriesAwaitRefresh || categoriesRequest != categorySumsRequest { reloadCategories() }
                 return
             }
             reloadSelection(periodChanged: false)
@@ -190,8 +195,19 @@ public final class AppModel {
     /// switch between categories leaves the views reading them alone.
     private(set) var showsOverview = true
     private(set) var showsNewBookings = false
-    /// The column now shows `sidebarSelection` (its data is in, or the placeholder stands in).
-    func showSelection() { shownSelection = sidebarSelection }
+    /// The period of the data the column shows: `period` once that data is in, so the header and the
+    /// tile subtitles never name a period the list, chart and tiles do not show yet (#1413).
+    private(set) var shownPeriod = PeriodSetting(.all)
+    /// `period` with its custom dates, as the loads read it.
+    var requestedPeriod: PeriodSetting { PeriodSetting(period, customFrom: customPeriodFrom, customTo: customPeriodTo) }
+    /// The pay cycle behind the shown data (`salaryCycle` belongs to `sidebarSelection`, #1413).
+    private(set) var shownSalaryCycle: SalaryCycle?
+    /// The column now shows `sidebarSelection` in `period` (its data is in, or the placeholder stands in).
+    func showSelection() {
+        shownSelection = sidebarSelection
+        shownPeriod = requestedPeriod
+        shownSalaryCycle = salaryCycle
+    }
     /// Per sidebar row: is it the selected one (`sidebarRowSelection(for:)`), kept in step by
     /// `sidebarSelection`.
     @ObservationIgnored var sidebarRowSelections: [SidebarItem: SidebarRowSelection] = [:]
@@ -286,7 +302,10 @@ public final class AppModel {
         }
     }
     /// Latest salary of the selected accounts; start of the `.sinceSalary` period.
-    var salaryCycle: SalaryCycle?
+    var salaryCycle: SalaryCycle? {
+        // The column already shows the selection unless a load still holds its old data (#1413).
+        didSet { if selectionLoadTask == nil || isLoadingSelection { shownSalaryCycle = salaryCycle } }
+    }
     /// Recurring series of the selected accounts (GitHub #35).
     var recurring: [RecurringSeries] = [] {
         didSet { recurringByKey = Dictionary(grouping: recurring, by: \.baseKey) }

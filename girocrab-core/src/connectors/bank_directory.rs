@@ -172,6 +172,11 @@ fn own_api() -> Vec<(ConnectorKind, &'static str, &'static str)> {
             "bhw mybhw bausparvertrag bausparen baufinanzierung darlehen",
         ),
         (
+            ConnectorKind::Kontist,
+            "Kontist",
+            "kontist geschäftskonto selbstständige freelancer solaris",
+        ),
+        (
             ConnectorKind::OpelDirektbank,
             "Opel Direktbank",
             "opel direktbank opelbank opel-direktbank stellantis tagesgeld festgeld",

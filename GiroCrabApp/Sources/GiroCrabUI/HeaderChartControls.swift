@@ -220,7 +220,8 @@ struct HeaderPieChart: View {
 /// One SQL aggregate, loaded off the main thread.
 struct AccountExpensePie: View {
     @Environment(AppModel.self) private var model
-    @State private var parts: [HeaderPieSlices.Part]?
+    /// The slices and the key they were loaded for.
+    @State private var loaded: (key: Key, parts: [HeaderPieSlices.Part])?
 
     private struct Key: Hashable {
         let ids: [Int64]
@@ -228,26 +229,31 @@ struct AccountExpensePie: View {
         let to: String?
         /// Changes whenever the category sums are reloaded (edits, sync, import).
         let version: [Int64]
+
+        /// Same accounts and period: slices of an older `version` may stand in until the new ones
+        /// arrive, those of another period or selection never (#1413).
+        func covers(_ other: Key) -> Bool { ids == other.ids && from == other.from && to == other.to }
     }
 
     var body: some View {
-        let (from, to) = model.periodRange
+        // the period the header names (#1413), not one still loading
+        let (from, to) = model.shownPeriod.range(salaryCycle: model.shownSalaryCycle)
         let key = Key(ids: model.headerChartAccountIDs, from: from, to: to, version: model.categories.map(\.totalCents))
         Group {
-            if let parts {
-                HeaderPieChart(slices: HeaderPieSlices.fold(parts, limit: HeaderPieSlices.limit),
+            if let loaded, loaded.key.covers(key) {
+                HeaderPieChart(slices: HeaderPieSlices.fold(loaded.parts, limit: HeaderPieSlices.limit),
                                emptyText: "Keine kategorisierten Ausgaben im Zeitraum")
             } else {
                 Color.clear
             }
         }
         .task(id: key) {
-            let loaded = try? await model.vaultOffMain { vault in
+            let parts = try? await model.vaultOffMain { vault in
                 HeaderPieSlices.expenses(try vault.listCategoriesFiltered(
                     dateFrom: key.from, dateTo: key.to, accountIds: key.ids, checked: nil, direction: .expense))
             }
-            guard !Task.isCancelled, let loaded else { return }
-            parts = loaded
+            guard !Task.isCancelled, let parts else { return }
+            loaded = (key, parts)
         }
     }
 }

@@ -8,7 +8,7 @@ Verhalten und Texte kommen dabei 1:1 aus der Mac-App, auf Deutsch und Englisch. 
 Einstellungen › Sicherheit steht deshalb „Kern-Version“: Die Nummer gehört zum Kern, nicht zum
 Funktionsumfang der Oberfläche.
 
-## Funktionsstand 0.8.6 (in Arbeit)
+## Funktionsstand 0.8.7
 
 ### EquatePlus (#720)
 
@@ -74,7 +74,7 @@ Funktionsumfang der Oberfläche.
   Privatmodus verdeckt.
 - Startoption `--privacy[=all]` für Screenshots.
 
-## Korrekturen (Kern 0.8.6)
+## Korrekturen (Kern 0.8.7)
 
 - **„PostBox jetzt abrufen“** (comdirect, #838) ruft die PostBox jetzt wirklich ab; die Anforderung
   ging bisher vor jedem Abruf verloren.

@@ -180,7 +180,8 @@ struct TangibleAccountDetailView: View {
     /// series comes with the selection load: while that is pending it still belongs to the previous
     /// account, so nothing is drawn yet.
     private var chartContent: AssetValueChart.Content {
-        let (from, to) = model.periodRange
+        // the period the menu names (#1413)
+        let (from, to) = model.shownPeriod.range(salaryCycle: model.shownSalaryCycle)
         let history: [DailyBalance]
         if item != nil {
             history = model.assetStore.selectedHistory.filter { p in

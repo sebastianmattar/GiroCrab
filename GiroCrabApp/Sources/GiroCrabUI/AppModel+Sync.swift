@@ -48,7 +48,7 @@ extension AppModel {
             webLoginConnection = connection
             return
         }
-        if !isDemo, let st = connectionStatus(connection.id), (st.hasPin || (connection.connector == .tradeRepublic && st.hasSession)),
+        if !isDemo, let st = connectionStatus(connection.id), (st.hasPin || ([.tradeRepublic, .kontist].contains(connection.connector) && st.hasSession)),
            missingSettings(for: connection).isEmpty {
             startSync(connection, secret: "")
             return
@@ -656,12 +656,13 @@ extension AppModel {
         activeSession = nil
         activeChallenge = nil
         syncingConnectionID = nil
-        // Trade Republic on its stored session alone (no PIN given, none stored) whose session
-        // expired (#1128): the core asks for the PIN, which only the PIN sheet takes (it also
-        // offers the browser login). A PIN typed there that fails stays an error.
+        // Trade Republic or Kontist on its stored session alone (no PIN given, none stored) whose
+        // session expired (#1128): the core asks for the PIN/password, which only the PIN sheet
+        // takes (for Trade Republic it also offers the browser login). One typed there that fails
+        // stays an error.
         if let ce = error as? CoreError, case .Authentication = ce, retrySecret?.isEmpty ?? true,
            let conn = connections.first(where: { $0.id == syncingConnectionIDBeforeError }),
-           conn.connector == .tradeRepublic, connectionStatus(conn.id)?.hasPin != true {
+           [.tradeRepublic, .kontist].contains(conn.connector), connectionStatus(conn.id)?.hasPin != true {
             toast = describe(error)
             pendingLogin = PendingLogin(connection: conn)
             return

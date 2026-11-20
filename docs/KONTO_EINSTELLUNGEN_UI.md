@@ -28,10 +28,20 @@ Die Felder von oben nach unten:
 | Kontonummer, IBAN, Bank | Je eine Zeile mit Beschriftung links, nur Anzeige, nur wenn vorhanden (kommen von der Bank bzw. vom Import); jeder Wert lässt sich einzeln markieren und kopieren |
 | Advanzia-Benutzername | Nur bei Advanzia-Konten, samt Zugangsfeldern |
 | Konto-Notiz | Beschriftung in der linken Spalte, Editor rechts. Erscheint unter dem Kontonamen in der Kontoansicht; wird per iCloud mit den anderen Geräten abgeglichen, die neuere Änderung gilt (#980) |
-| Das Konto wurde aufgelöst | Archiviert bzw. reaktiviert das Konto |
+| Das Konto wurde aufgelöst (archivieren) | Archiviert bzw. reaktiviert das Konto. Ist das Toggle an (auch ungesichert), erscheint die Schaltfläche **Konto löschen …** (rote Schrift) unten links, auf Höhe von Abbrechen und Sichern |
 
-- **Das Konto wurde aufgelöst** (`setAccountArchived`) wird beim Speichern als Letztes ausgeführt, weil es alles neu lädt.
+- **Das Konto wurde aufgelöst (archivieren)** (`setAccountArchived`) wird beim Speichern als Letztes ausgeführt, weil es alles neu lädt.
   „Konto archivieren …“ im Menü bleibt daneben bestehen.
+- **Konto löschen …** (#1436) erscheint nur, solange das Toggle an ist; abgewählt verschwindet sie wieder. Sie sitzt
+  in der Knopfzeile und nimmt keine Formularzeile ein: wechselt die Höhe des Sheets beim Umlegen, zeichnet macOS kurz einen
+  schwarzen Balken über den oberen Rand. Der Klick öffnet
+  die Rückfrage `AccountDeletionPrompt`, dieselbe wie im Kontextmenü der Seitenleiste (Kontoname, Zahl der Buchungen,
+  Hinweis auf Belege, Depotpositionen und den Bankzugang beim letzten Konto). Erst **Löschen** löscht, **Abbrechen** ändert
+  nichts. Das Löschen wirkt sofort und ohne Sichern; andere ungesicherte Eingaben im Dialog gehen verloren (die Rückfrage sagt „unwiderruflich“, ein eigener Hinweistext unter der Schaltfläche entfällt). Der Kern löscht
+  nur gespeichert archivierte Konten, deshalb ruft `AppModel.deleteAccount(_:archiveFirst: true)` intern
+  `setAccountArchived(true)` und `deleteAccount` nacheinander auf (das Archivieren ist in der Oberfläche nicht sichtbar;
+  schlägt das Löschen fehl, bleibt das Konto archiviert). Danach schließt der Dialog, die Auswahl wechselt auf „Alle Konten“.
+  Die Rückfrage ist ein System-Dialog und wird nie in Problemberichten abgebildet, daher braucht sie kein `.sensitive()`.
 - **Startsaldo:** Leeres Feld entfernt den Startsaldo, sonst wird der Betrag mit dem bisherigen Stichtag gespeichert.
   „Stichtag und Kalibrierung …“ schließt den Dialog und öffnet das bisherige Startsaldo-Sheet (`OpeningBalanceSheet`)
   mit Stichtag, Kalibrieren und Vorschau; nicht gesicherte Eingaben im Dialog gehen dabei verloren.

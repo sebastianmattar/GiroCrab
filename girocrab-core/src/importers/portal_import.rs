@@ -520,13 +520,20 @@ fn norm_key(k: &str) -> String {
         .collect()
 }
 
+/// An object that lists several balance fields side by side (the card's balance
+/// summary): a zero there is a real balance, e.g. Amex `statement_balance_amount`
+/// once the last statement is paid. A lone zero elsewhere is a placeholder.
+fn is_balance_summary(o: &serde_json::Map<String, Value>) -> bool {
+    o.keys().filter(|k| norm_key(k).contains("balance")).count() >= 3
+}
+
 fn find_key<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     match v {
         Value::Object(o) => {
-            if let Some((_, x)) = o
-                .iter()
-                .find(|(k, x)| norm_key(k) == key && value_cents(x).is_some_and(|c| c != 0))
-            {
+            let zero_counts = is_balance_summary(o);
+            if let Some((_, x)) = o.iter().find(|(k, x)| {
+                norm_key(k) == key && value_cents(x).is_some_and(|c| c != 0 || zero_counts)
+            }) {
                 return Some(x);
             }
             o.values().find_map(|x| find_key(x, key))
@@ -972,6 +979,12 @@ fn to_fetch(
         balance,
     );
     FetchResult {
+        // a reported balance, even 0, replaces the stored one
+        balances_reported: if balance.is_some() {
+            vec![account.external_ref.clone()]
+        } else {
+            Vec::new()
+        },
         accounts: vec![account],
         transactions,
         state: None,
@@ -1205,6 +1218,11 @@ fn cards_fetch(
                     format!("{name} {}", i + 1)
                 }
             });
+        // A balance the portal reported, even 0 (statement paid), replaces the
+        // stored one; a card without one keeps it.
+        if c.balance.is_some() {
+            out.balances_reported.push(account_ref.clone());
+        }
         let (account, transactions) = card_account(
             &account_ref,
             &account_name,
@@ -2090,6 +2108,20 @@ mod tests {
     }
 
     #[test]
+    fn amex_paid_statement_leaves_a_zero_balance() {
+        // the last statement is paid by direct debit: nothing is owed any more
+        let b = r#"{"cash_advance_balance_amount":0,"charges_amount":0,"debits_balance_amount":0,"disputed_amount":0,"last_statement_balance_amount":123.45,"payment_due_amount":0,"payments_credits_amount":-123.45,"remaining_statement_balance_amount":0,"statement_balance_amount":0,"total_amount":0,"total_debits_balance_amount":0,"total_payments_credits_amount":-123.45}"#;
+        let (_, bal) =
+            super::parse_json_bodies(&[b.to_string()], super::ConnectorKind::AmericanExpress);
+        assert_eq!(bal, Some(0));
+        // a lone zero outside a balance summary is still no balance
+        let lone = r#"{"statement_balance_amount":0,"last_statement_balance_amount":123.45}"#;
+        let (_, bal) =
+            super::parse_json_bodies(&[lone.to_string()], super::ConnectorKind::AmericanExpress);
+        assert_eq!(bal, Some(-12345));
+    }
+
+    #[test]
     fn amex_statement_balance_wins() {
         let b = r#"{"charges_amount":1702.24,"debits_balance_amount":1702.24,"total_debits_balance_amount":1702.24,"last_statement_balance_amount":5515.59,"statement_balance_amount":6879.3,"totalAmount":0}"#;
         let (_, bal) =
@@ -2900,6 +2932,58 @@ mod card_tests {
             crate::merchants::payment_method(&rows[0], "", AccountKind::CreditCard, -1999, false),
             "Erika Mustermann"
         );
+    }
+
+    #[test]
+    fn a_paid_statement_brings_the_stored_card_balance_to_zero() {
+        let dir = crate::test_support::TempDir::new("girocrab-amex-paid");
+        let v = Vault::open(
+            dir.join("v.db").to_string_lossy().to_string(),
+            vec![3u8; 32],
+        )
+        .unwrap();
+        let conn = v
+            .add_bank_connection(ConnectorKind::AmericanExpress, String::new(), "Amex".into())
+            .unwrap();
+        let summary = |statement: f64, last: f64, payments: f64| {
+            format!(
+                r#"{{"cash_advance_balance_amount":0,"debits_balance_amount":0,"last_statement_balance_amount":{last},"remaining_statement_balance_amount":{statement},"statement_balance_amount":{statement},"total_payments_credits_amount":{payments}}}"#
+            )
+        };
+        let tx = r#"{"transactions":[{"charge_date":"2026-10-03","amount":10,"description":"REWE","identifier":"A1"}]}"#;
+        let paid = r#"{"transactions":[{"charge_date":"2026-11-12","amount":-123.45,"description":"ZAHLUNG/ÜBERWEISUNG ERHALTEN BESTEN DANK","identifier":"A2"}]}"#;
+        // stored and shown: a card stored with 0 shows its open amount, here
+        // nothing after the payment (the older charge is outside the fetch)
+        let balance = |v: &Vault| -> (i64, i64) {
+            let stored = v
+                .db()
+                .unwrap()
+                .query_row(
+                    "SELECT balance_cents FROM accounts WHERE deleted_ms IS NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            (stored, v.list_accounts().unwrap()[0].balance_cents)
+        };
+        // a statement of 123.45 is open
+        v.clone()
+            .import_portal_capture(
+                conn,
+                vec![tx.into(), summary(123.45, 123.45, 0.0)],
+                "[]".into(),
+            )
+            .unwrap();
+        assert_eq!(balance(&v), (-12345, -12345));
+        // paid by direct debit: nothing is owed any more
+        v.clone()
+            .import_portal_capture(
+                conn,
+                vec![paid.into(), summary(0.0, 123.45, -123.45)],
+                "[]".into(),
+            )
+            .unwrap();
+        assert_eq!(balance(&v), (0, 0));
     }
 
     #[test]

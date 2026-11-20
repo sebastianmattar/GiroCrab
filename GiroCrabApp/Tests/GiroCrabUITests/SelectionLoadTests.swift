@@ -15,16 +15,22 @@ final class SelectionLoadTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
-    override func tearDown() async throws { model = nil }
+    override func tearDown() async throws {
+        model = nil
+        // `interactivePeriod` remembers the period for the next launch (#840)
+        AppDefaults.store.removeObject(forKey: AppModel.lastPeriodKey)
+    }
 
     private func expectedIDs() throws -> [Int64] {
         try XCTUnwrap(model.vault).listTransactions(filter: model.currentFilter).transactions.map(\.id)
     }
 
-    private func awaitBookings(_ expected: [Int64]) async throws {
-        for _ in 0..<300 {
+    /// Waits for the background load to publish `expected`; `whileWaiting` looks at each state before.
+    private func awaitBookings(_ expected: [Int64], whileWaiting: () -> Void = {}) async throws {
+        for _ in 0..<1500 {
             if model.bookings.map(\.id) == expected { return }
-            try await Task.sleep(for: .milliseconds(10))
+            whileWaiting()
+            try await Task.sleep(for: .milliseconds(2))
         }
         XCTFail("The background selection load did not publish its bookings")
     }
@@ -123,6 +129,151 @@ final class SelectionLoadTests: XCTestCase {
         XCTAssertEqual(model.bookings.map(\.id), try expectedIDs())
         XCTAssertNil(model.errorMessage)
         try assertMatchesSynchronousLoad()
+    }
+
+    /// #1413: the period menu and the tile subtitles name the old period until the new data is in.
+    func testPeriodHeaderSwitchesWithTheData() async throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let before = model.bookings.map(\.id)
+        let year = Period.previousYear()
+        model.interactivePeriod = year
+        XCTAssertEqual(model.period, year)
+        XCTAssertEqual(model.shownPeriod.period, .all)
+        XCTAssertEqual(model.periodSubtitle, Period.all.title)
+        XCTAssertEqual(model.bookings.map(\.id), before)
+
+        let expected = try expectedIDs()
+        XCTAssertNotEqual(expected, before)
+        var sawMixed = false
+        try await awaitBookings(expected) { sawMixed = sawMixed || model.shownPeriod.period != .all }
+        XCTAssertFalse(sawMixed, "the header switched before the data")
+        XCTAssertEqual(model.shownPeriod.period, year)
+        XCTAssertEqual(model.periodSubtitle, year.title)
+    }
+
+    /// A synchronous period change (also new custom dates) shows its period at once.
+    func testSynchronousPeriodChangeShowsItsPeriod() {
+        model.period = .days(30)
+        XCTAssertEqual(model.shownPeriod, model.requestedPeriod)
+        // the dates as `applyCustomPeriod` sets them, without writing them to the defaults
+        model.customPeriodFrom = "2025-03-15"
+        model.customPeriodTo = "2025-06-30"
+        model.period = .custom
+        XCTAssertEqual(model.shownPeriod, model.requestedPeriod)
+        XCTAssertEqual(model.shownPeriod.customTo, "2025-06-30")
+        model.customPeriodTo = "2025-03-15"
+        model.periodDidChange()
+        XCTAssertEqual(model.shownPeriod, model.requestedPeriod, "new dates of `.custom`")
+    }
+
+    /// #1413: a period change that fails before the placeholder shows nothing of the old period.
+    func testFailedPeriodChangeShowsNoPreviousData() throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        XCTAssertFalse(model.bookings.isEmpty)
+        model.interactivePeriod = .days(30)
+        XCTAssertEqual(model.shownPeriod.period, .all)
+
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.shownSelection, .allAccounts)
+        XCTAssertEqual(model.shownPeriod.period, .days(30))
+        XCTAssertTrue(model.bookings.isEmpty)
+        XCTAssertTrue(model.history.isEmpty)
+        XCTAssertTrue(model.selectionFiguresMissing)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    /// „Seit Gehalt“ for all accounts, then a background switch to an account whose pay cycle differs,
+    /// stopped where its load has set that cycle and still runs its other queries.
+    private func switchToAccountWithOtherPayCycle(placeholderDelay: Duration = .seconds(30)) throws
+        -> (shown: SalaryCycle, account: Account, accountCycle: SalaryCycle?) {
+        model.period = .sinceSalary
+        let vault = try XCTUnwrap(model.vault)
+        let shown = try XCTUnwrap(model.salaryCycle)
+        let account = try XCTUnwrap(model.allAccounts.first {
+            $0.kind != .loan && (try? vault.salaryCycle(accountIds: [$0.id]))?.lastDate != shown.lastDate
+        })
+        let accountCycle = try vault.salaryCycle(accountIds: [account.id])
+        model.selectionPlaceholderDelay = placeholderDelay
+        model.interactiveSidebarSelection = .account(account.id)
+        model.salaryCycle = accountCycle
+        return (shown, account, accountCycle)
+    }
+
+    /// #1413: the tile subtitle names the pay cycle of the data shown, not that of a selection still loading.
+    func testPayCycleSubtitleSwitchesWithTheData() async throws {
+        model.period = .sinceSalary
+        let subtitle = model.periodSubtitle
+        let (shownCycle, account, accountCycle) = try switchToAccountWithOtherPayCycle()
+        XCTAssertEqual(model.shownSalaryCycle?.lastDate, shownCycle.lastDate)
+        XCTAssertEqual(model.periodSubtitle, subtitle)
+
+        try await awaitBookings(try expectedIDs())
+        XCTAssertEqual(model.shownSelection, .account(account.id))
+        XCTAssertEqual(model.shownSalaryCycle?.lastDate, accountCycle?.lastDate)
+        XCTAssertNotEqual(model.periodSubtitle, subtitle)
+    }
+
+    /// #1413: a superseded load left its pay cycle behind; a failed load of the selection shown
+    /// keeps that selection's cycle for the period, print and export.
+    func testFailedRefreshRestoresThePayCycleOfTheShownData() throws {
+        model.period = .sinceSalary
+        let bookings = model.bookings.map(\.id)
+        let (shownCycle, _, _) = try switchToAccountWithOtherPayCycle()
+        model.interactiveSidebarSelection = .allAccounts
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.bookings.map(\.id), bookings)
+        XCTAssertEqual(model.salaryCycle?.lastDate, shownCycle.lastDate)
+        XCTAssertEqual(model.periodRange.0, shownCycle.lastDate)
+    }
+
+    /// #1413: behind the placeholder the new selection shows, with its pay cycle once loaded,
+    /// which a failed load then keeps.
+    func testPlaceholderShowsThePayCycleOfItsSelection() throws {
+        let (_, _, accountCycle) = try switchToAccountWithOtherPayCycle(placeholderDelay: .zero)
+        XCTAssertTrue(model.isLoadingSelection)
+        XCTAssertEqual(model.shownSalaryCycle?.lastDate, accountCycle?.lastDate)
+
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.salaryCycle?.lastDate, accountCycle?.lastDate)
+        XCTAssertEqual(model.shownSalaryCycle?.lastDate, accountCycle?.lastDate)
+    }
+
+    /// #1413: the header's expense pie queries the accounts of the selection shown, not one still loading.
+    func testHeaderPieFollowsTheShownSelection() async throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let before = model.headerChartAccountIDs
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertEqual(model.headerChartAccountIDs, before)
+        try await awaitBookings(try expectedIDs())
+        XCTAssertEqual(model.headerChartAccountIDs, [account.id])
+    }
+
+    /// A failed refresh that already read its pay cycle (a sync brought a new salary) keeps it.
+    func testFailedRefreshKeepsTheCycleItLoaded() throws {
+        model.period = .sinceSalary
+        let vault = try XCTUnwrap(model.vault)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        let fresh = try vault.salaryCycle(accountIds: [account.id])
+        model.startSelectionLoad(keepingShown: true)
+        model.salaryCycle = fresh
+        model.failSelectionLoad(LoadFailure(), cycleLoaded: true)
+        XCTAssertEqual(model.salaryCycle?.lastDate, fresh?.lastDate)
+    }
+
+    /// #1413: a non-booking column cancels a pending period change; the sidebar sums still follow the period.
+    func testNonBookingColumnLoadsSumsOfAPendingPeriod() throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let before = model.categories.map(\.totalCents)
+        model.interactivePeriod = Period.previousYear()
+        XCTAssertEqual(model.categories.map(\.totalCents), before)
+
+        model.sidebarSelection = .planned
+        XCTAssertEqual(model.shownPeriod.period, Period.previousYear())
+        let sums = model.categories.map(\.totalCents)
+        XCTAssertNotEqual(sums, before)
+        model.reloadCategories()
+        XCTAssertEqual(model.categories.map(\.totalCents), sums)
     }
 
     func testRapidSwitchesKeepTheLatestSelection() async throws {

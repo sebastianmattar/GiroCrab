@@ -1,11 +1,5 @@
-GiroCrab v0.8.6 (iOS Build 23 unter Version 0.7.5, Schema v31)
+GiroCrab iOS 0.7.5 (Build 24) – enthält den kompletten Funktionsumfang von GiroCrab v0.8.7:
 
-Hinweis zur Versionsnummer in TestFlight:
-Weil unsere Entwicklung schneller voranschreitet als Apples Versions-Review fuer neue Release-Zweige, liefern wir das komplette v0.8.6-Release auf iOS ohne Wartezeit direkt als Build 23 unter 0.7.5 aus.
-
-Was ist neu und was kann getestet werden:
-- Natuerliche Buchungssuche, neue Beleg-Filter & Postfach-Filter nach Bankzugang (#1056).
-- Neue Konto-Einstellungen auf iOS & macOS; offizielle FinTS-Produktregistrierung direkt aktiv (#1092).
-- Echtzeitueberweisung-Statuspruefung bei Code 3045 (#1121), FFB-Postfach-PDFs (#1105) & FFB-Depot-Zusammenfuehrung (#1103).
-- Trade-Republic-Verrechnungskonto beim Import (#1114), PayPal-Fremdwaehrungen (#1110), offene Reservierungen (#1111) & ING Business (#974).
-- Advanzia-Wiederanlegen (#1115), Ford-Money-/Opel-Steuerabgleich (#1102) & N26-90-Tage-Consent (#1082).
+• Neue Banken: BHW Bausparkasse (inkl. Postfach-PDFs) und Kontist-Geschäftskonto (GraphQL-API) sowie aktualisierte FinTS-Adresse für 1822direkt.
+• Zahlungen & Buchungsliste: Bekannte Empfänger verwalten/ausblenden, direktes Notiz-Symbol an Buchungen zum schnellen Öffnen der Notiz, Auto-Fokus im TAN-Dialog sowie FinTS-Überweisungskorrekturen (Volksbanken/Postbank & HISPAS pain.001.001.09).
+• Verbesserungen: Saubere VR- und Rechtsform-Erkennung bei Händlern, keine Kurz-Akronym-Fehltreffer ohne Gegenpartei, Fremdwährungs-Zusatzsummen und iCloud-Abgleich für Konto-Notizen.

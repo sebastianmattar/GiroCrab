@@ -400,7 +400,7 @@ struct MerchantFocusBar: View {
             Image(systemName: "storefront").foregroundStyle(Theme.secondary)
             Text("Alle Buchungen von").foregroundStyle(Theme.secondary)
             Text(focus.name).fontWeight(.semibold).lineLimit(1).sensitive(.personal)
-            Text(verbatim: "· \(model.periodTitle)").foregroundStyle(Theme.secondary).lineLimit(1)
+            Text(verbatim: "· \(model.shownPeriod.title)").foregroundStyle(Theme.secondary).lineLimit(1)
             Spacer(minLength: 8)
             Button("Zurück", systemImage: "xmark.circle.fill") { model.leaveMerchantFocus() }
                 .buttonStyle(.borderless)

@@ -1796,7 +1796,7 @@ QtObject {
         if (!isDemo) {
             const st = connectionStatus(connection.id)
             const missing = missingSettings(connection)
-            if (st && (st.has_pin || (connection.connector === "TradeRepublic" && st.has_session)) && missing.length === 0) {
+            if (st && (st.has_pin || (["TradeRepublic", "Kontist"].indexOf(connection.connector) >= 0 && st.has_session)) && missing.length === 0) {
                 startSync(connection, ""); return
             }
             if (missing.length) { setupRequest = { connection: connection, keys: missing }; return }
@@ -2111,6 +2111,12 @@ QtObject {
             if (m && keys.indexOf(m[1]) < 0) keys.unshift(m[1])
             setupRequest = { connection: connection, keys: keys }
             return
+        }
+        // Kontist on its stored refresh token alone (no password given, none stored) whose
+        // token expired: ask for the password instead of showing an error.
+        if (e.kind === "Authentication" && retrySecret === "" && connection.connector === "Kontist") {
+            const st = connectionStatus(connection.id)
+            if (!(st && st.has_pin)) { toast = e.message; pendingLogin = connection; return }
         }
         errorTitle = qsTr("Abruf von „%1“ fehlgeschlagen").arg(connection.display_name)
         errorRetry = () => { const c = connections.find(x => x.id === connection.id); if (c) requestSync(c) }
@@ -3839,6 +3845,8 @@ QtObject {
         "comdirect.client_secret": qsTr("comdirect Client-Secret"),
         "paypal.client_id": qsTr("PayPal Client-ID"),
         "paypal.client_secret": qsTr("PayPal Secret"),
+        "kontist.client_id": qsTr("Kontist Client-ID"),
+        "kontist.client_secret": qsTr("Kontist Client-Secret"),
         "enablebanking.application_id": qsTr("Enable Banking Application-ID"),
         "enablebanking.private_key_pem": qsTr("Enable Banking Private Key"),
         "enablebanking.redirect_url": qsTr("Enable Banking Redirect-URL") })

@@ -112,6 +112,113 @@ jobs:
           REPO: ${{ github.repository }}
         run: gh release upload "$TAG_NAME" dist/GiroCrab-Android-alpha.apk --clobber --repo "$REPO"
 
+  linux-debian-package:
+    name: Linux .deb (Debian 13 ${{ matrix.arch }})
+    needs: draft-release
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - name: Build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential pkg-config \
+            dpkg-dev perl libdbus-1-dev qt6-base-dev qt6-declarative-dev qt6-declarative-private-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-shapes qml6-module-qtquick-dialogs qml6-module-qt-labs-qmlmodels \
+            qml6-module-qtcore qml6-module-org-kde-kirigami
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: GiroCrabLinux
+          key: debian-${{ matrix.arch }}
+      - name: Build .deb
+        working-directory: GiroCrabLinux
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: DEB_VERSION="${TAG_NAME#v}" ./packaging/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: girocrab-linux-deb-${{ matrix.arch }}
+          path: GiroCrabLinux/target/debian/*.deb
+          if-no-files-found: error
+
+  linux-flatpak-package:
+    name: Linux Flatpak (${{ matrix.arch }})
+    needs: draft-release
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
+      options: --privileged
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Flatpak-Installation in die beschreibbare Schicht kopieren
+        run: |
+          cp -a /var/lib/flatpak /var/lib/flatpak.rw
+          rm -rf /var/lib/flatpak
+          mv /var/lib/flatpak.rw /var/lib/flatpak
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          manifest-path: GiroCrabLinux/packaging/flatpak/de.girocrab.GiroCrab.yml
+          bundle: girocrab-linux-${{ matrix.arch }}.flatpak
+          arch: ${{ matrix.arch }}
+          cache: true
+          cache-key: flatpak-builder-${{ matrix.arch }}-${{ hashFiles('GiroCrabLinux/packaging/flatpak/**') }}
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: girocrab-linux-flatpak-${{ matrix.arch }}
+          path: girocrab-linux-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
+
+  linux-release-attach:
+    needs: [draft-release, linux-debian-package, linux-flatpak-package]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: girocrab-linux-*
+          path: dist-linux
+          merge-multiple: true
+      - name: Checksums & attach Linux packages to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          cd dist-linux
+          sha256sum *.deb *.flatpak > SHA256SUMS-linux.txt
+          gh release upload "$TAG_NAME" *.deb *.flatpak SHA256SUMS-linux.txt --clobber --repo "$REPO"
+
   sync-docs-website:
     # Stable releases only. README goes through a PR (main is protected); the website is pushed to
     # GiroCrab/girocrab.de with WEBSITE_DEPLOY_TOKEN (docs/docs-website-sync.md). No token => website skipped.

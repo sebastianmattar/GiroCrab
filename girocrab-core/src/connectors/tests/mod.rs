@@ -452,6 +452,16 @@ fn card_open_balance_since_settlement() {
         r("2026-11-05", -1000, "Cafe"),
     ];
     assert_eq!(open_card_balance(&with_refund), Some(-137371));
+    // Amex: the statement paid by direct debit, nothing charged since
+    let paid = vec![
+        r("2026-10-20", -12345, "Shop"),
+        r(
+            "2026-11-12",
+            12345,
+            "Zahlung/Überweisung Erhalten Besten Dank",
+        ),
+    ];
+    assert_eq!(open_card_balance(&paid), Some(0));
     assert_eq!(open_card_balance(&[]), None);
 }
 

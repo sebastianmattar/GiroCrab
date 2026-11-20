@@ -58,6 +58,7 @@ pub(crate) fn clear_session_inner(db: &Connection, connection_id: i64) -> CoreRe
             "valid_until",
             "saved_unix",
             "source",
+            "refresh_token",
         ] {
             if let Some(mut old) = o.remove(k) {
                 wipe(&mut old);
@@ -392,11 +393,11 @@ impl Vault {
         login_name: String,
     ) -> Result<(), CoreError> {
         let db = self.db()?;
-        let (kind, old_name): (String, String) = db
+        let (kind, old_name, old_login): (String, String, String) = db
             .query_row(
-                "SELECT connector, display_name FROM bank_connections WHERE id = ?1 AND deleted_ms IS NULL",
+                "SELECT connector, display_name, login_name FROM bank_connections WHERE id = ?1 AND deleted_ms IS NULL",
                 [connection_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?
             .ok_or_else(|| CoreError::NotFound {
@@ -414,6 +415,11 @@ impl Vault {
             "UPDATE bank_connections SET display_name = ?1, login_name = ?2 WHERE id = ?3",
             params![name, login, connection_id],
         )?;
+        // A stored session (cookies, refresh token) belongs to the old login:
+        // keeping it would fetch that login's data under the new one.
+        if login != old_login {
+            clear_session_inner(&db, connection_id)?;
+        }
         // The sidebar shows `accounts.bank_name`: follow the rename where it
         // still carries the old or generic name (never a name the bank sent).
         db.execute(
@@ -479,7 +485,8 @@ impl Vault {
         )? > 0;
         let (has_session, session_saved_unix, consent_valid_until) = state.with_value(|v| {
             let filled = |key: &str| v[key].as_str().is_some_and(|s| !s.is_empty());
-            let has_session = filled("cookies") || filled("session_id");
+            // A stored refresh token (Kontist) also lets a sync run without the password.
+            let has_session = filled("cookies") || filled("session_id") || filled("refresh_token");
             let valid_until = v["valid_until"]
                 .as_str()
                 .filter(|s| !s.is_empty() && has_session)
@@ -828,6 +835,53 @@ mod tests {
         v.clear_connection_session(c).unwrap();
         assert!(!v.connection_status(c).unwrap().has_session);
         assert_eq!(stored(&v), serde_json::json!({"doc_items": ["a"]}));
+    }
+
+    #[test]
+    fn a_stored_refresh_token_counts_as_session() {
+        let dir = crate::test_support::TempDir::new("girocrab-refresh-session");
+        let path = dir.join("v.db");
+        let v = Vault::open(path.to_string_lossy().to_string(), vec![6u8; 32]).unwrap();
+        let c = v
+            .add_bank_connection(ConnectorKind::Kontist, String::new(), "a@b.de".into())
+            .unwrap();
+        assert!(!v.connection_status(c).unwrap().has_session);
+        v.db()
+            .unwrap()
+            .execute(
+                "UPDATE bank_connections SET state_json = '{\"refresh_token\":\"r\"}' WHERE id = ?1",
+                [c],
+            )
+            .unwrap();
+        assert!(v.connection_status(c).unwrap().has_session);
+        v.clear_connection_session(c).unwrap();
+        assert!(!v.connection_status(c).unwrap().has_session);
+    }
+
+    #[test]
+    fn a_new_login_drops_the_stored_session_a_rename_keeps_it() {
+        let dir = crate::test_support::TempDir::new("girocrab-login-change");
+        let path = dir.join("v.db");
+        let v = Vault::open(path.to_string_lossy().to_string(), vec![6u8; 32]).unwrap();
+        let c = v
+            .add_bank_connection(ConnectorKind::Kontist, String::new(), "a@b.de".into())
+            .unwrap();
+        let store = |v: &Vault| {
+            v.db()
+                .unwrap()
+                .execute(
+                    "UPDATE bank_connections SET state_json = '{\"refresh_token\":\"r\"}' WHERE id = ?1",
+                    [c],
+                )
+                .unwrap();
+        };
+        store(&v);
+        v.update_bank_connection(c, "Firma".into(), "a@b.de".into())
+            .unwrap();
+        assert!(v.connection_status(c).unwrap().has_session);
+        v.update_bank_connection(c, "Firma".into(), "x@y.de".into())
+            .unwrap();
+        assert!(!v.connection_status(c).unwrap().has_session);
     }
 
     /// Direct debit, standing order and planned data hang on the duplicate

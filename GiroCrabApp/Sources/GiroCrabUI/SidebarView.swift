@@ -235,7 +235,7 @@ struct SidebarView: View {
         ) { d in
             switch d {
             case .archiveAccount(let a): Button("Archivieren") { model.setAccountArchived(a, true) }
-            case .deleteAccount(let a): Button("Löschen", role: .destructive) { model.deleteAccount(a.id) }
+            case .deleteAccount(let a): AccountDeletionPrompt.confirmButton { model.deleteAccount(a.id) }
             case .removeConnection(let id): Button("Entfernen", role: .destructive) { model.removeConnection(id) }
             case .deleteCategory(let c): Button("Löschen", role: .destructive) { model.deleteCategory(c.id) }
             }
@@ -244,8 +244,7 @@ struct SidebarView: View {
             switch d {
             case .archiveAccount:
                 Text("Das Konto wird nicht mehr abgerufen, von Regeln nicht mehr verändert und zählt nicht mehr zur Gesamtsumme. Buchungen, Kategorien, Belege und die Gruppe bleiben erhalten. Es lässt sich jederzeit reaktivieren.")
-            case .deleteAccount(let a):
-                Text("Das Konto wird samt \(a.transactionCount) Buchungen, Belegen und Depotpositionen unwiderruflich gelöscht – auch aus Auswertungen und Kategoriesummen. Ist es das letzte Konto seines Bankzugangs, wird auch der Bankzugang mit den gespeicherten Zugangsdaten entfernt.")
+            case .deleteAccount(let a): AccountDeletionPrompt.message(a)
             case .deleteCategory:
                 Text("Die Kategorie wird samt ihren Unterkategorien und Regeln unwiderruflich gelöscht. Zugeordnete Buchungen bleiben erhalten und stehen danach ohne Kategorie da.")
             case .removeConnection:
@@ -1026,7 +1025,7 @@ private enum SidebarDialog {
     var title: Text {
         switch self {
         case .archiveAccount(let a): Text("Konto „\(a.name)“ archivieren?")
-        case .deleteAccount(let a): Text("Konto „\(a.name)“ löschen?")
+        case .deleteAccount(let a): AccountDeletionPrompt.title(a)
         case .removeConnection: Text("Bankzugang entfernen?")
         case .deleteCategory(let c): Text("Kategorie „\(c.name)“ löschen?")
         }

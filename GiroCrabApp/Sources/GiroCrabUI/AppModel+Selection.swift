@@ -115,6 +115,7 @@ extension AppModel {
         if periodChanged { reloadCategories() } else { refreshRecurring() }
         reloadBookings()
         reloadHistory()
+        showSelection() // the data is in: header and title follow at once (#1413)
     }
 
     /// A synchronous reload while a background selection load is still running:
@@ -188,6 +189,7 @@ extension AppModel {
         scopeLoadTask?.cancel()
         dropPendingPage()
         guard let vault else { return }
+        if keepingShown { categoriesAwaitRefresh = true }
         let ids = selectionAccountIDs
         let month = Calendar(identifier: .gregorian).dateComponents([.year, .month], from: Date())
         var placeholderDelay: Duration?
@@ -213,11 +215,13 @@ extension AppModel {
                     self.showSelectionPlaceholder()
                 }
             }
+            var cycleLoaded = false
             do {
                 // The pay cycle comes first: `.sinceSalary` derives the period from it.
                 let cycle = try await Self.offMain { try vault.salaryCycle(accountIds: ids) }
                 guard !Task.isCancelled, let self else { return }
                 self.salaryCycle = cycle
+                cycleLoaded = true
                 let filter = self.listFilter
                 let (from, to) = self.periodRange
                 let chart = self.historyRequest
@@ -264,18 +268,23 @@ extension AppModel {
                 Perf.signposter.endInterval("publishSelection", publish)
             } catch {
                 guard !Task.isCancelled, let self else { return }
-                self.failSelectionLoad(error)
+                self.failSelectionLoad(error, cycleLoaded: cycleLoaded)
             }
         }
         selectionLoadTask = task
     }
 
-    /// The selection load threw. A failed refresh keeps what the column shows; a new
-    /// selection must not show the previous one's data under its title.
-    func failSelectionLoad(_ error: Error) {
+    /// The selection load threw. A failed refresh keeps what the column shows; a new selection
+    /// or period must not show the previous one's data under its title (#1413).
+    /// `cycleLoaded`: the load set `salaryCycle` itself; otherwise it may still be a superseded load's.
+    func failSelectionLoad(_ error: Error, cycleLoaded: Bool = false) {
         selectionLoadTask = nil
         endSelectionLoad()
-        if shownSelection != sidebarSelection { showSelectionWithoutData() }
+        if shownSelection != sidebarSelection || shownPeriod != requestedPeriod {
+            showSelectionWithoutData()
+        } else if !cycleLoaded {
+            salaryCycle = shownSalaryCycle
+        }
         errorMessage = describe(error)
     }
 
@@ -487,17 +496,10 @@ extension AppModel {
     }
 
     /// Date range of the selected period; `.sinceSalary` starts at the latest salary.
-    var periodRange: (String?, String?) {
-        if period == .sinceSalary, let c = salaryCycle { return (c.lastDate, nil) }
-        if period == .custom { return (customPeriodFrom, customPeriodTo) }
-        return period.range
-    }
+    var periodRange: (String?, String?) { requestedPeriod.range(salaryCycle: salaryCycle) }
 
-    /// Label of the period menu: the preset name or "15.03.2025 – 30.06.2025".
-    var periodTitle: String {
-        guard period == .custom else { return period.title }
-        return "\(DateText.medium(customPeriodFrom)) – \(DateText.medium(customPeriodTo))"
-    }
+    /// Title of the selected period: the preset name or "15.03.2025 – 30.06.2025".
+    var periodTitle: String { requestedPeriod.title }
 
     /// Default of the date dialog before the user ever picked a range: last month.
     static var defaultCustomPeriod: (from: String, to: String) {
@@ -547,10 +549,10 @@ extension AppModel {
         reloadSelection(periodChanged: true)
     }
 
-    /// Subtitle of the period-based KPI tiles.
+    /// Subtitle of the period-based KPI tiles: the period of the figures they show.
     var periodSubtitle: String {
-        guard period == .sinceSalary else { return periodTitle }
-        guard let c = salaryCycle else { return String(localized: "Monat (kein Gehalt)") }
+        guard shownPeriod.period == .sinceSalary else { return shownPeriod.title }
+        guard let c = shownSalaryCycle else { return String(localized: "Monat (kein Gehalt)") }
         return String(localized: "Seit Gehalt am \(DateText.medium(c.lastDate))")
     }
 

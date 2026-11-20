@@ -179,6 +179,17 @@ pub fn descriptor(kind: ConnectorKind) -> BankDescriptor {
             required_settings: vec![],
             note: tr("BHW Bausparkasse: Bausparverträge und Darlehen mit Saldo und Umsätzen. Anmeldung mit der 10-stelligen Vertragsnummer oder der 11-stelligen BHW-ID; statt eines Passworts kommen Vorname, Geburtsdatum und Postleitzahl getrennt durch Semikolon in das zweite Feld (z. B. „Erika;31.12.1970;12345“). Jede Anmeldung wird mit einem Einmal-Code per E-Mail oder SMS bestätigt. Dokumente aus dem myBHW-Postfach lassen sich abrufen. Inoffiziell: nutzt die Schnittstelle des myBHW-Portals, Änderungen sind möglich.").into(),
         },
+        ConnectorKind::Kontist => BankDescriptor {
+            kind,
+            name: "Kontist".into(),
+            protocol: tr("Kontist GraphQL-API (OAuth2 + Freigabe in der App)").into(),
+            bank_code: String::new(),
+            sf_symbol: "briefcase".into(),
+            login_label: tr("E-Mail-Adresse").into(),
+            secret_label: tr("Passwort").into(),
+            required_settings: s(&["kontist.client_id"]),
+            note: tr("Kontist: Geschäftskonto mit Saldo und Umsätzen über die offizielle API. Nötig ist ein eigener API-Client auf kontist.dev (Client Management), dessen Client-ID in den Einstellungen eingetragen wird. Die erste Anmeldung wird in der Kontist-App bestätigt, danach läuft der Abruf ohne Freigabe, solange Kontist die Anmeldung gelten lässt.").into(),
+        },
         ConnectorKind::OpelDirektbank => BankDescriptor {
             kind,
             name: "Opel Direktbank".into(),
@@ -687,6 +698,15 @@ pub const BANK_MATRIX: &[MatrixEntry] = &[
         issues: &[],
     },
     MatrixEntry {
+        name: "Kontist",
+        kind: Some(ConnectorKind::Kontist),
+        interface: Interface::RestApi,
+        official: Some(true),
+        capabilities: &[Capability::Transactions, Capability::Balances],
+        status: Status::Verified,
+        issues: &[],
+    },
+    MatrixEntry {
         name: "Opel Direktbank",
         kind: Some(ConnectorKind::OpelDirektbank),
         interface: Interface::WebPortal,
@@ -813,6 +833,7 @@ pub fn make_connector_for(kind: ConnectorKind, key: &str, demo: bool) -> Box<dyn
         ConnectorKind::OpelDirektbank => Box::new(opel::OpelDirektbankConnector::new()),
         ConnectorKind::Bhw => Box::new(bhw::BhwConnector::new()),
         ConnectorKind::Finpension => Box::new(finpension::FinpensionConnector),
+        ConnectorKind::Kontist => Box::new(kontist::KontistConnector::new()),
         ConnectorKind::ScalableCapital => Box::new(scalable::ScalableConnector::new()),
         ConnectorKind::EnableBanking => {
             let (country, aspsp) = ConnectorKind::enable_banking_target(key).unwrap_or(("DE", ""));

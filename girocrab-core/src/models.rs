@@ -67,6 +67,9 @@ pub enum ConnectorKind {
     Bhw,
     /// Finpension (CH): Säule 3a, Freizügigkeit, 1e – import of the CSV/JSON export (#300).
     Finpension,
+    /// Kontist business account via the official GraphQL API (own OAuth2
+    /// client, approval in the Kontist app).
+    Kontist,
 }
 
 impl ConnectorKind {
@@ -99,6 +102,7 @@ impl ConnectorKind {
             ConnectorKind::OpelDirektbank => "opeldirektbank",
             ConnectorKind::Bhw => "bhw",
             ConnectorKind::Finpension => "finpension",
+            ConnectorKind::Kontist => "kontist",
         }
     }
     pub fn from_str(s: &str) -> Option<Self> {
@@ -160,6 +164,7 @@ impl ConnectorKind {
             ConnectorKind::OpelDirektbank,
             ConnectorKind::Bhw,
             ConnectorKind::Finpension,
+            ConnectorKind::Kontist,
         ]
     }
 }
