@@ -3638,28 +3638,26 @@ fn a_database_without_value_history_imports_as_before() {
     assert_eq!(r.value_history_imported, 0);
 }
 
-#[test]
-fn portal_sync_adopts_the_active_card_next_to_closed_ones() {
-    // #816: two cards closed in MoneyMoney (archived on import) next to the
-    // active one under one Amex login; the first portal sync takes the active
-    // card over instead of adding a fourth account.
-    let extra = "
+/// Two old Amex cards and the active one under one login, imported with the old
+/// cards' `refresh` value (16 and up: closed in MoneyMoney); `prepare` runs before
+/// the first portal sync. That sync must take the active card over instead of
+/// adding a fourth account.
+fn amex_portal_sync_adopts_the_active_card(old_refresh: i64, prepare: impl FnOnce(&Vault)) {
+    let extra = format!(
+        "
 INSERT INTO banks (rowid, country, bankcode, username, customer, credential, name, systemid, local_storage) VALUES
   (30, 'DE', '', 'amex-login', '', 'GEHEIM-30', 'American Express', 'SYS', 'LS');
 INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred, refresh) VALUES
-  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM', 19),
-  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM', 16),
+  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM', {old_refresh}),
+  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM', {old_refresh}),
   (32, 30, 'xxxx-31003', '', 0, '', 'EUR', 'Amex Aktiv', 'Max Mustermann', 0, 3, 32, 0, 1, 'GEHEIM', 3);
-";
+"
+    );
     let v = vault();
-    let path = fake_db_with(false, extra);
-    let p = v
-        .preview_moneymoney_database(path.clone(), PW.into(), None)
-        .unwrap();
-    v.import_moneymoney_database(path, PW.into(), options_from(&p, true))
-        .unwrap();
-    assert!(account_by_name(&v, "Amex Alt 1").archived_unix.is_some());
-    assert!(account_by_name(&v, "Amex Alt 2").archived_unix.is_some());
+    import_with(&v, &fake_db_with(false, &extra), |o| {
+        o.create_connections = true
+    });
+    prepare(&v);
     let active = account_by_name(&v, "Amex Aktiv");
     let conn = active.connection_id.unwrap();
     let before = v.list_accounts().unwrap().len();
@@ -3672,38 +3670,26 @@ INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, curre
 }
 
 #[test]
+fn portal_sync_adopts_the_active_card_next_to_closed_ones() {
+    // #816: the cards closed in MoneyMoney are archived on import
+    amex_portal_sync_adopts_the_active_card(19, |v| {
+        for name in ["Amex Alt 1", "Amex Alt 2"] {
+            assert!(account_by_name(v, name).archived_unix.is_some(), "{name}");
+        }
+    });
+}
+
+#[test]
 fn portal_sync_prefers_cards_whose_state_is_known() {
     // #816 after the #998 repair: the old cards are active again until the next
-    // import says they are closed; the active card is still taken over.
-    let extra = "
-INSERT INTO banks (rowid, country, bankcode, username, customer, credential, name, systemid, local_storage) VALUES
-  (30, 'DE', '', 'amex-login', '', 'GEHEIM-30', 'American Express', 'SYS', 'LS');
-INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred) VALUES
-  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM'),
-  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM'),
-  (32, 30, 'xxxx-31003', '', 0, '', 'EUR', 'Amex Aktiv', 'Max Mustermann', 0, 3, 32, 0, 1, 'GEHEIM');
-";
-    let v = vault();
-    let path = fake_db_with(false, extra);
-    let p = v
-        .preview_moneymoney_database(path.clone(), PW.into(), None)
-        .unwrap();
-    v.import_moneymoney_database(path, PW.into(), options_from(&p, true))
-        .unwrap();
-    let old: Vec<i64> = ["Amex Alt 1", "Amex Alt 2"]
-        .iter()
-        .map(|n| account_by_name(&v, n).id)
-        .collect();
-    super::note_archive_unknown(&v.db().unwrap(), &old).unwrap();
-    let active = account_by_name(&v, "Amex Aktiv");
-    let conn = active.connection_id.unwrap();
-    let before = v.list_accounts().unwrap().len();
-    let body = r#"{"summary":{"total_balance":{"amount":"50,00"}},"transactions":[{"post_date":"2026-11-01","billing_amount":"12,34","description":"Shop","reference_number":"R1"}]}"#;
-    v.clone()
-        .import_portal_capture(conn, vec![body.to_string()], "[]".into())
-        .unwrap();
-    assert_eq!(v.list_accounts().unwrap().len(), before);
-    assert_eq!(bookings(&v, active.id).len(), 1);
+    // import says whether they are closed
+    amex_portal_sync_adopts_the_active_card(3, |v| {
+        let old: Vec<i64> = ["Amex Alt 1", "Amex Alt 2"]
+            .iter()
+            .map(|n| account_by_name(v, n).id)
+            .collect();
+        note_archive_unknown(&v.db().unwrap(), &old).unwrap();
+    });
 }
 
 #[test]
@@ -3752,4 +3738,103 @@ fn adopt_account_reuses_imported_trade_republic_checking_account_without_iban() 
             .unwrap();
         assert_eq!(ext, "tr:cash");
     }
+}
+
+/// Visa-Karte closed in MoneyMoney (bit 16 of `refresh`, the low bits are its
+/// refresh settings), Girokonto open.
+const CARD_CLOSED: &str = "UPDATE accounts SET refresh = 19 WHERE rowid = 2;
+     UPDATE accounts SET refresh = 3 WHERE rowid = 1;";
+
+#[test]
+fn account_with_a_cancelled_refresh_is_imported_active() {
+    // #998: `cancel_tsp` is when MoneyMoney's last refresh of the account was
+    // cancelled (next to `error_tsp`, `balance_tsp` …), e.g. a TAN not confirmed
+    // after the start-up refresh. Such an account is in use, not closed.
+    let v = vault();
+    import_with(
+        &v,
+        &fake_db_with(
+            false,
+            "UPDATE accounts SET cancel_tsp = 1700000000 WHERE rowid IN (1, 2);",
+        ),
+        |_| {},
+    );
+    for name in ["Girokonto", "Visa-Karte"] {
+        let a = account_by_name(&v, name);
+        assert!(a.archived_unix.is_none(), "{name}");
+        assert!(a.in_total, "{name}");
+    }
+}
+
+#[test]
+fn account_closed_in_moneymoney_is_imported_archived() {
+    let v = vault();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    let card = account_by_name(&v, "Visa-Karte");
+    assert!(card.archived_unix.is_some());
+    assert!(!card.in_total);
+    assert!(!bookings(&v, card.id).is_empty(), "bookings imported");
+    assert!(account_by_name(&v, "Girokonto").archived_unix.is_none());
+    // stamped in one second like an archive in the app: the #998 repair
+    // (schema step 34) must never take it for a wrong one
+    let (unix, ms): (i64, i64) = v
+        .db()
+        .unwrap()
+        .query_row(
+            "SELECT archived_unix, archived_ms FROM accounts WHERE id = ?1",
+            [card.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(
+        unix * 1000 >= ms - crate::schema::ARCHIVE_STAMP_GAP_MS,
+        "{unix} {ms}"
+    );
+}
+
+#[test]
+fn reimport_keeps_the_archive_state_of_existing_accounts() {
+    // #890: the state in GiroCrab is the user's choice, whatever MoneyMoney says
+    let v = vault();
+    import_with(&v, &fake_db(), |_| {});
+    let card = account_by_name(&v, "Visa-Karte").id;
+    v.set_account_archived(account_by_name(&v, "Girokonto").id, true)
+        .unwrap();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    let again = account_by_name(&v, "Visa-Karte");
+    assert_eq!(again.id, card);
+    assert!(again.archived_unix.is_none());
+    assert!(account_by_name(&v, "Girokonto").archived_unix.is_some());
+}
+
+#[test]
+fn deleted_closed_account_comes_back_archived() {
+    // archived, deleted and imported again: revived, but still closed in MoneyMoney
+    let v = vault();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    let card = account_by_name(&v, "Visa-Karte").id;
+    v.delete_account(card).unwrap();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    let revived = account_by_name(&v, "Visa-Karte");
+    assert_eq!(revived.id, card);
+    assert!(revived.archived_unix.is_some());
+    assert!(!bookings(&v, card).is_empty());
+}
+
+#[test]
+fn accounts_the_repair_reactivated_take_moneymoney_state_on_the_next_import() {
+    // #998 step 34 cannot tell a closed account: the next import can
+    let v = vault();
+    import_with(&v, &fake_db(), |_| {});
+    let giro = account_by_name(&v, "Girokonto").id;
+    let card = account_by_name(&v, "Visa-Karte").id;
+    note_archive_unknown(&v.db().unwrap(), &[giro, card]).unwrap();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    assert!(account_by_name(&v, "Visa-Karte").archived_unix.is_some());
+    assert!(account_by_name(&v, "Girokonto").archived_unix.is_none());
+    assert!(archive_unknown(&v.db().unwrap()).unwrap().is_empty());
+    // from now on the user's choice stays (#890)
+    v.set_account_archived(card, false).unwrap();
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    assert!(account_by_name(&v, "Visa-Karte").archived_unix.is_none());
 }

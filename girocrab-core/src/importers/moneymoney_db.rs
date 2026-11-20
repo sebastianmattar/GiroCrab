@@ -80,52 +80,38 @@ pub(crate) const ARCHIVE_UNKNOWN_KEY: &str = "moneymoney_db.archive_unknown";
 
 /// The accounts in [`ARCHIVE_UNKNOWN_KEY`].
 pub(crate) fn archive_unknown(conn: &Connection) -> CoreResult<Vec<i64>> {
-    let value: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            [ARCHIVE_UNKNOWN_KEY],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(value
+    Ok(Vault::setting_inner(conn, ARCHIVE_UNKNOWN_KEY)?
         .unwrap_or_default()
         .split(',')
         .filter_map(|id| id.trim().parse().ok())
         .collect())
 }
 
+/// Stores [`ARCHIVE_UNKNOWN_KEY`] (none left: the setting goes).
+fn store_archive_unknown(conn: &Connection, ids: &[i64]) -> CoreResult<()> {
+    let value = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+    Vault::set_setting_inner(conn, ARCHIVE_UNKNOWN_KEY, &value)
+}
+
 /// Adds `ids` to [`ARCHIVE_UNKNOWN_KEY`].
 pub(crate) fn note_archive_unknown(conn: &Connection, ids: &[i64]) -> CoreResult<()> {
     let mut all = archive_unknown(conn)?;
-    all.extend(
-        ids.iter()
-            .filter(|id| !all.contains(id))
-            .collect::<Vec<_>>(),
-    );
-    store_archive_unknown(conn, &all)
-}
-
-fn store_archive_unknown(conn: &Connection, ids: &[i64]) -> CoreResult<()> {
-    if ids.is_empty() {
-        conn.execute("DELETE FROM settings WHERE key = ?1", [ARCHIVE_UNKNOWN_KEY])?;
-        return Ok(());
+    for id in ids {
+        if !all.contains(id) {
+            all.push(*id);
+        }
     }
-    let value = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
-    conn.execute(
-        "INSERT INTO settings(key, value, is_secret) VALUES (?1, ?2, 0)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![ARCHIVE_UNKNOWN_KEY, value],
-    )?;
-    Ok(())
+    store_archive_unknown(conn, &all)
 }
 
 /// Takes `id` out of [`ARCHIVE_UNKNOWN_KEY`]; `true` if it was in there.
 fn take_archive_unknown(conn: &Connection, id: i64) -> CoreResult<bool> {
     let mut ids = archive_unknown(conn)?;
-    let Some(i) = ids.iter().position(|x| *x == id) else {
+    let before = ids.len();
+    ids.retain(|x| *x != id);
+    if ids.len() == before {
         return Ok(false);
-    };
-    ids.remove(i);
+    }
     store_archive_unknown(conn, &ids)?;
     Ok(true)
 }
@@ -2379,45 +2365,39 @@ pub(crate) fn adopt_account(
         // those the #998 repair reactivated while another one fits (they may
         // be closed cards, too)
         let unknown = archive_unknown(conn)?;
-        let known = if unknown.is_empty() {
-            String::new()
-        } else {
-            let ids: Vec<String> = unknown.iter().map(i64::to_string).collect();
-            format!("AND id NOT IN ({})", ids.join(","))
-        };
-        // exactly one account for `query` (its `{}` takes a filter), known ones first
-        let only = |query: &str, args: &[&dyn rusqlite::ToSql]| -> CoreResult<Option<i64>> {
-            let ids = |filter: &str| -> CoreResult<Vec<i64>> {
-                let mut st = conn.prepare(&query.replace("{}", filter))?;
-                Ok(st
-                    .query_map(args, |r| r.get(0))?
-                    .collect::<Result<_, _>>()?)
-            };
-            let mut found = ids(&known)?;
-            if found.is_empty() && !known.is_empty() {
-                found = ids("")?;
-            }
-            Ok((found.len() == 1).then(|| found[0]))
+        // exactly one fitting account, those whose state is known first
+        let pick = |ids: Vec<i64>| -> Option<i64> {
+            let known: Vec<i64> = ids
+                .iter()
+                .copied()
+                .filter(|id| !unknown.contains(id))
+                .collect();
+            let ids = if known.is_empty() { ids } else { known };
+            (ids.len() == 1).then(|| ids[0])
         };
         let single = |iban_filter: &str| -> CoreResult<Option<i64>> {
-            only(
-                &format!(
-                    "SELECT id FROM accounts WHERE connection_id = ?1 AND external_ref LIKE 'moneymoney-db:%'
-                       AND kind = ?2 AND archived_unix IS NULL {iban_filter} {{}} LIMIT 2"
-                ),
-                params![connection_id, kind.as_str()],
-            )
+            let mut st = conn.prepare(&format!(
+                "SELECT id FROM accounts WHERE connection_id = ?1 AND external_ref LIKE 'moneymoney-db:%'
+                   AND kind = ?2 AND archived_unix IS NULL {iban_filter}"
+            ))?;
+            let ids = st
+                .query_map(params![connection_id, kind.as_str()], |r| r.get(0))?
+                .collect::<Result<_, _>>()?;
+            Ok(pick(ids))
         };
         let currency = currency.trim().to_uppercase();
         let single_cur = |extra_filter: &str| -> CoreResult<Option<i64>> {
-            only(
-                &format!(
-                    "SELECT id FROM accounts WHERE connection_id = ?1 AND external_ref LIKE 'moneymoney-db:%'
-                       AND kind = ?2 AND archived_unix IS NULL
-                       AND (?3 = '' OR upper(IFNULL(currency, '')) IN ('', ?3)) {extra_filter} {{}} LIMIT 2"
-                ),
-                params![connection_id, kind.as_str(), currency],
-            )
+            let mut st = conn.prepare(&format!(
+                "SELECT id FROM accounts WHERE connection_id = ?1 AND external_ref LIKE 'moneymoney-db:%'
+                   AND kind = ?2 AND archived_unix IS NULL
+                   AND (?3 = '' OR upper(IFNULL(currency, '')) IN ('', ?3)) {extra_filter}"
+            ))?;
+            let ids = st
+                .query_map(params![connection_id, kind.as_str(), currency], |r| {
+                    r.get(0)
+                })?
+                .collect::<Result<_, _>>()?;
+            Ok(pick(ids))
         };
         match single("AND replace(IFNULL(iban, ''), ' ', '') = ''")? {
             Some(id) => Some(id),
@@ -3039,19 +3019,11 @@ impl ImportCtx<'_> {
                 .transpose()?,
         };
         if let Some(id) = target {
-            let deleted: bool = conn
-                .query_row(
-                    "SELECT deleted_ms IS NOT NULL FROM accounts WHERE id = ?1",
-                    [id],
-                    |r| r.get(0),
-                )
-                .optional()?
-                .unwrap_or(false);
-            crate::sync_merge::revive_account_if_deleted(conn, id)?;
+            let revived = crate::sync_merge::revive_account_if_deleted(conn, id)?;
             // Nobody chose the archive state of a revived account (it comes back
             // active) or of one the #998 repair reactivated: MoneyMoney's applies.
             let unknown = take_archive_unknown(conn, id)?;
-            if a.closed && (deleted || unknown) {
+            if a.closed && (revived || unknown) {
                 archive_closed(conn, id)?;
             }
             let cur: String = conn
@@ -3504,155 +3476,3 @@ fn statement_files(explicit: Option<String>, found: Option<PathBuf>) -> Option<S
 
 #[cfg(test)]
 pub(crate) mod tests;
-
-#[cfg(test)]
-mod closed_account_tests {
-    use super::tests::{PW, fake_db, options_from};
-    use super::*;
-
-    /// The fake database with `sql` run on it.
-    fn db_with(sql: &str) -> String {
-        let path = fake_db();
-        let c = Connection::open(&path).unwrap();
-        c.execute_batch(&format!("PRAGMA key = '{}';", PW.replace('\'', "''")))
-            .unwrap();
-        c.execute_batch(sql).unwrap();
-        path
-    }
-
-    fn vault(name: &str) -> std::sync::Arc<Vault> {
-        Vault::open(
-            crate::test_support::thread_temp_path(name)
-                .to_string_lossy()
-                .to_string(),
-            vec![7u8; 32],
-        )
-        .unwrap()
-    }
-
-    fn import(v: &Vault, path: &str) {
-        let p = v
-            .preview_moneymoney_database(path.to_string(), PW.into(), None)
-            .unwrap();
-        v.import_moneymoney_database(path.to_string(), PW.into(), options_from(&p, false))
-            .unwrap();
-    }
-
-    fn account(v: &Vault, name: &str) -> crate::models::Account {
-        v.list_accounts()
-            .unwrap()
-            .into_iter()
-            .find(|a| a.name == name)
-            .unwrap()
-    }
-
-    #[test]
-    fn account_with_a_cancelled_refresh_is_imported_active() {
-        // #998: `cancel_tsp` is when MoneyMoney's last refresh of the account was
-        // cancelled (next to `error_tsp`, `balance_tsp` …), e.g. a TAN not confirmed
-        // after the start-up refresh. Such an account is in use, not closed.
-        let path = db_with("UPDATE accounts SET cancel_tsp = 1700000000 WHERE rowid IN (1, 2);");
-        let v = vault("mmdb-cancelled-vault.db");
-        import(&v, &path);
-        for name in ["Girokonto", "Visa-Karte"] {
-            assert!(account(&v, name).archived_unix.is_none(), "{name}");
-            assert!(account(&v, name).in_total, "{name}");
-        }
-    }
-
-    #[test]
-    fn account_closed_in_moneymoney_is_imported_archived() {
-        // bit 16 of `refresh` is the closed flag; the low bits are refresh settings
-        let path = db_with(
-            "UPDATE accounts SET refresh = 19 WHERE rowid = 2;
-             UPDATE accounts SET refresh = 3 WHERE rowid = 1;",
-        );
-        let v = vault("mmdb-closed-vault.db");
-        import(&v, &path);
-        let card = account(&v, "Visa-Karte");
-        assert!(card.archived_unix.is_some());
-        assert!(!card.in_total);
-        assert!(!bookings_of(&v, card.id).is_empty(), "bookings imported");
-        assert!(account(&v, "Girokonto").archived_unix.is_none());
-        // stamped in one second like an archive in the app: the #998 repair
-        // (schema step 34) must never take it for a wrong one
-        let (unix, ms): (i64, i64) = v
-            .db()
-            .unwrap()
-            .query_row(
-                "SELECT archived_unix, archived_ms FROM accounts WHERE id = ?1",
-                [card.id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert!(
-            unix * 1000 >= ms - crate::schema::ARCHIVE_STAMP_GAP_MS,
-            "{unix} {ms}"
-        );
-    }
-
-    #[test]
-    fn reimport_keeps_the_archive_state_of_existing_accounts() {
-        // #890: the state in GiroCrab is the user's choice, whatever MoneyMoney says
-        let v = vault("mmdb-reimport-vault.db");
-        import(&v, &fake_db());
-        let card = account(&v, "Visa-Karte").id;
-        let giro = account(&v, "Girokonto").id;
-        v.set_account_archived(giro, true).unwrap();
-        import(
-            &v,
-            &db_with(
-                "UPDATE accounts SET refresh = 19 WHERE rowid = 2;
-                 UPDATE accounts SET refresh = 3 WHERE rowid = 1;",
-            ),
-        );
-        assert!(account(&v, "Visa-Karte").archived_unix.is_none());
-        assert_eq!(account(&v, "Visa-Karte").id, card);
-        assert!(account(&v, "Girokonto").archived_unix.is_some());
-    }
-
-    const CARD_CLOSED: &str = "UPDATE accounts SET refresh = 19 WHERE rowid = 2;
-         UPDATE accounts SET refresh = 3 WHERE rowid = 1;";
-
-    #[test]
-    fn deleted_closed_account_comes_back_archived() {
-        // archived, deleted and imported again: revived, but still closed in MoneyMoney
-        let v = vault("mmdb-revive-closed-vault.db");
-        import(&v, &db_with(CARD_CLOSED));
-        let card = account(&v, "Visa-Karte").id;
-        v.delete_account(card).unwrap();
-        import(&v, &db_with(CARD_CLOSED));
-        let revived = account(&v, "Visa-Karte");
-        assert_eq!(revived.id, card);
-        assert!(revived.archived_unix.is_some());
-        assert!(!bookings_of(&v, card).is_empty());
-    }
-
-    #[test]
-    fn accounts_the_repair_reactivated_take_moneymoney_state_on_the_next_import() {
-        // #998 step 34 cannot tell a closed account: the next import can
-        let v = vault("mmdb-unknown-vault.db");
-        import(&v, &fake_db());
-        let (giro, card) = (account(&v, "Girokonto").id, account(&v, "Visa-Karte").id);
-        note_archive_unknown(&v.db().unwrap(), &[giro, card]).unwrap();
-        import(&v, &db_with(CARD_CLOSED));
-        assert!(account(&v, "Visa-Karte").archived_unix.is_some());
-        assert!(account(&v, "Girokonto").archived_unix.is_none());
-        assert!(archive_unknown(&v.db().unwrap()).unwrap().is_empty());
-        // from now on the user's choice stays (#890)
-        v.set_account_archived(card, false).unwrap();
-        import(&v, &db_with(CARD_CLOSED));
-        assert!(account(&v, "Visa-Karte").archived_unix.is_none());
-    }
-
-    fn bookings_of(v: &Vault, account_id: i64) -> Vec<i64> {
-        let db = v.db().unwrap();
-        let mut st = db
-            .prepare("SELECT id FROM transactions WHERE account_id = ?1 AND deleted_ms IS NULL")
-            .unwrap();
-        st.query_map([account_id], |r| r.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
-    }
-}

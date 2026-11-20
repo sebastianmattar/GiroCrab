@@ -145,19 +145,13 @@ pub(crate) const ARCHIVE_STAMP_GAP_MS: i64 = 2000;
 fn unarchive_cancelled_refreshes(conn: &Connection) -> CoreResult<()> {
     let ids: Vec<i64> = conn
         .prepare(
-            "SELECT id FROM accounts
-              WHERE archived_unix IS NOT NULL AND archived_unix * 1000 < archived_ms - ?1
-                AND deleted_ms IS NULL AND external_ref LIKE 'moneymoney-db:%'",
+            "UPDATE accounts SET archived_unix = NULL, archived_ms = ?1
+              WHERE archived_unix IS NOT NULL AND archived_unix * 1000 < archived_ms - ?2
+                AND deleted_ms IS NULL AND external_ref LIKE 'moneymoney-db:%'
+              RETURNING id",
         )?
-        .query_map([ARCHIVE_STAMP_GAP_MS], |r| r.get(0))?
+        .query_map([crate::dates::now_ms(), ARCHIVE_STAMP_GAP_MS], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
-    let now = crate::dates::now_ms();
-    for id in &ids {
-        conn.execute(
-            "UPDATE accounts SET archived_unix = NULL, archived_ms = ?1 WHERE id = ?2",
-            rusqlite::params![now, id],
-        )?;
-    }
     crate::importers::moneymoney_db::note_archive_unknown(conn, &ids)
 }
 
@@ -1097,29 +1091,28 @@ mod tests {
         )
         .unwrap();
         migrate(&mut conn).unwrap();
-        // (archived_unix, archived_ms)
+        // (id, archived_unix, archived_ms)
         let row = |name: &str| {
             conn.query_row(
-                "SELECT archived_unix, archived_ms FROM accounts WHERE name = ?1",
+                "SELECT id, archived_unix, archived_ms FROM accounts WHERE name = ?1",
                 [name],
-                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .unwrap()
         };
-        let (archived, stamp) = row("Girokonto");
+        let (giro, archived, stamp) = row("Girokonto");
         assert_eq!(archived, None);
         assert!(stamp > 1790001000123, "stamped, so the merge carries it");
-        assert_eq!(row("Alte Karte").0, Some(1790002000));
-        assert_eq!(row("Gelöscht").0, Some(1790000000));
-        assert_eq!(row("Früher archiviert").0, Some(1700000000));
-        assert_eq!(row("Bankkonto").0, Some(1790000000));
-        let giro: i64 = conn
-            .query_row(
-                "SELECT id FROM accounts WHERE name = 'Girokonto'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
+        assert_eq!(row("Alte Karte").1, Some(1790002000));
+        assert_eq!(row("Gelöscht").1, Some(1790000000));
+        assert_eq!(row("Früher archiviert").1, Some(1700000000));
+        assert_eq!(row("Bankkonto").1, Some(1790000000));
         assert_eq!(
             crate::importers::moneymoney_db::archive_unknown(&conn).unwrap(),
             vec![giro]
