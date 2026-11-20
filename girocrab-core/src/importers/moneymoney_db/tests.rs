@@ -3672,6 +3672,41 @@ INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, curre
 }
 
 #[test]
+fn portal_sync_prefers_cards_whose_state_is_known() {
+    // #816 after the #998 repair: the old cards are active again until the next
+    // import says they are closed; the active card is still taken over.
+    let extra = "
+INSERT INTO banks (rowid, country, bankcode, username, customer, credential, name, systemid, local_storage) VALUES
+  (30, 'DE', '', 'amex-login', '', 'GEHEIM-30', 'American Express', 'SYS', 'LS');
+INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred) VALUES
+  (30, 30, 'xxxx-11001', '', 0, '', 'EUR', 'Amex Alt 1', 'Max Mustermann', 0, 3, 30, 0, 1, 'GEHEIM'),
+  (31, 30, 'xxxx-21002', '', 0, '', 'EUR', 'Amex Alt 2', 'Max Mustermann', 0, 3, 31, 0, 1, 'GEHEIM'),
+  (32, 30, 'xxxx-31003', '', 0, '', 'EUR', 'Amex Aktiv', 'Max Mustermann', 0, 3, 32, 0, 1, 'GEHEIM');
+";
+    let v = vault();
+    let path = fake_db_with(false, extra);
+    let p = v
+        .preview_moneymoney_database(path.clone(), PW.into(), None)
+        .unwrap();
+    v.import_moneymoney_database(path, PW.into(), options_from(&p, true))
+        .unwrap();
+    let old: Vec<i64> = ["Amex Alt 1", "Amex Alt 2"]
+        .iter()
+        .map(|n| account_by_name(&v, n).id)
+        .collect();
+    super::note_archive_unknown(&v.db().unwrap(), &old).unwrap();
+    let active = account_by_name(&v, "Amex Aktiv");
+    let conn = active.connection_id.unwrap();
+    let before = v.list_accounts().unwrap().len();
+    let body = r#"{"summary":{"total_balance":{"amount":"50,00"}},"transactions":[{"post_date":"2026-11-01","billing_amount":"12,34","description":"Shop","reference_number":"R1"}]}"#;
+    v.clone()
+        .import_portal_capture(conn, vec![body.to_string()], "[]".into())
+        .unwrap();
+    assert_eq!(v.list_accounts().unwrap().len(), before);
+    assert_eq!(bookings(&v, active.id).len(), 1);
+}
+
+#[test]
 fn external_refs_never_change() {
     // Imported accounts are matched again by this ref on the next import.
     assert_eq!(fnv("12345678|0532013000"), "663cb359");

@@ -127,20 +127,38 @@ fn account_notes(conn: &Connection) -> CoreResult<()> {
     Ok(())
 }
 
+/// An archive the app (`set_account_archived`, also the account selection) or the MoneyMoney
+/// import sets carries its time and its stamp from the same second. Step 34 takes an archive
+/// whose time lies more than this before its stamp for one the import of v0.8.5 made.
+pub(crate) const ARCHIVE_STAMP_GAP_MS: i64 = 2000;
+
 /// Step 34 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
 /// account was cancelled there, e.g. a TAN not confirmed) as "closed" and archived accounts that
 /// are in use: they left the totals and syncs skipped them. Such an archive carries MoneyMoney's
-/// earlier time next to the import's stamp; archiving in the app (`set_account_archived`, also the
-/// account selection) stamps both in the same second, and the vault merge copies them as a pair.
-/// The reactivation is stamped, so the merge carries it to the other devices.
+/// earlier time next to the import's stamp (see [`ARCHIVE_STAMP_GAP_MS`]); only accounts the
+/// importer owns were archived that way, and the vault merge copies time and stamp as a pair.
+/// The reactivation is stamped, so the merge carries it to the other devices. Some of these
+/// accounts are closed in MoneyMoney after all, which the vault cannot tell: they are noted
+/// ([`moneymoney_db::ARCHIVE_UNKNOWN_KEY`]) so the next import gives them MoneyMoney's state.
+///
+/// [`moneymoney_db::ARCHIVE_UNKNOWN_KEY`]: crate::importers::moneymoney_db::ARCHIVE_UNKNOWN_KEY
 fn unarchive_cancelled_refreshes(conn: &Connection) -> CoreResult<()> {
-    conn.execute(
-        "UPDATE accounts SET archived_unix = NULL, archived_ms = ?1
-          WHERE archived_unix IS NOT NULL AND archived_unix * 1000 < archived_ms - 2000
-            AND deleted_ms IS NULL",
-        [crate::dates::now_ms()],
-    )?;
-    Ok(())
+    let ids: Vec<i64> = conn
+        .prepare(
+            "SELECT id FROM accounts
+              WHERE archived_unix IS NOT NULL AND archived_unix * 1000 < archived_ms - ?1
+                AND deleted_ms IS NULL AND external_ref LIKE 'moneymoney-db:%'",
+        )?
+        .query_map([ARCHIVE_STAMP_GAP_MS], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    let now = crate::dates::now_ms();
+    for id in &ids {
+        conn.execute(
+            "UPDATE accounts SET archived_unix = NULL, archived_ms = ?1 WHERE id = ?2",
+            rusqlite::params![now, id],
+        )?;
+    }
+    crate::importers::moneymoney_db::note_archive_unknown(conn, &ids)
 }
 
 /// Step 31: `booking_documents.seen_at` (NULL = unread). The documents a vault has already count
@@ -1060,8 +1078,9 @@ mod tests {
         assert_eq!(SCHEMA_VERSION, 34);
     }
 
-    /// #998: what the MoneyMoney import archived from `cancel_tsp` is active again; an account
-    /// the user archived, a deleted one and an archive from before the stamps stay as they are.
+    /// #998: what the MoneyMoney import archived from `cancel_tsp` is active again and noted for
+    /// the next import; an account the user archived, a deleted one, an archive from before the
+    /// stamps and one the importer does not own stay as they are.
     #[test]
     fn accounts_archived_for_a_cancelled_refresh_are_reactivated() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -1069,37 +1088,42 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO account_groups(name,sf_symbol,sort_order) VALUES ('Konten','building.columns',1);
              INSERT INTO accounts(group_id,external_ref,name,archived_unix,archived_ms,deleted_ms) VALUES
-               (1,'mm-1','Girokonto',1790000000,1790001000123,NULL),
-               (1,'mm-2','Alte Karte',1790002000,1790002000456,NULL),
-               (1,'mm-3','Gelöscht',1790000000,1790001000123,1790003000000),
-               (1,'mm-4','Früher archiviert',1700000000,0,NULL);
+               (1,'moneymoney-db:1','Girokonto',1790000000,1790001000123,NULL),
+               (1,'moneymoney-db:2','Alte Karte',1790002000,1790002000456,NULL),
+               (1,'moneymoney-db:3','Gelöscht',1790000000,1790001000123,1790003000000),
+               (1,'moneymoney-db:4','Früher archiviert',1700000000,0,NULL),
+               (1,'DE89370400440532013000','Bankkonto',1790000000,1790001000123,NULL);
              PRAGMA user_version = 33;",
         )
         .unwrap();
         migrate(&mut conn).unwrap();
-        let archived = |name: &str| {
+        // (archived_unix, archived_ms)
+        let row = |name: &str| {
             conn.query_row(
-                "SELECT archived_unix FROM accounts WHERE name = ?1",
+                "SELECT archived_unix, archived_ms FROM accounts WHERE name = ?1",
                 [name],
-                |r| r.get::<_, Option<i64>>(0),
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?)),
             )
             .unwrap()
         };
-        assert_eq!(archived("Girokonto"), None);
-        let stamp: i64 = conn
+        let (archived, stamp) = row("Girokonto");
+        assert_eq!(archived, None);
+        assert!(stamp > 1790001000123, "stamped, so the merge carries it");
+        assert_eq!(row("Alte Karte").0, Some(1790002000));
+        assert_eq!(row("Gelöscht").0, Some(1790000000));
+        assert_eq!(row("Früher archiviert").0, Some(1700000000));
+        assert_eq!(row("Bankkonto").0, Some(1790000000));
+        let giro: i64 = conn
             .query_row(
-                "SELECT archived_ms FROM accounts WHERE name = 'Girokonto'",
+                "SELECT id FROM accounts WHERE name = 'Girokonto'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(
-            stamp > 1790001000123,
-            "the reactivation is stamped for the merge"
+        assert_eq!(
+            crate::importers::moneymoney_db::archive_unknown(&conn).unwrap(),
+            vec![giro]
         );
-        assert_eq!(archived("Alte Karte"), Some(1790002000));
-        assert_eq!(archived("Gelöscht"), Some(1790000000));
-        assert_eq!(archived("Früher archiviert"), Some(1700000000));
     }
 
     /// A vault that an early draft migrated as version 15 (scheduled transfers
