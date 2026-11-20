@@ -47,7 +47,10 @@
 //!   `account.note.<id>` ([`account_notes`]).
 //! - 33: `hidden_recipients` (#978): IBANs left out of the transfer suggestions; index
 //!   `tx_recipients` over the outgoing bookings with an IBAN.
-//! - 34: repair (#998): accounts the MoneyMoney import archived because their last refresh there
+//! - 34: per-account total switch (#337): `accounts.include_in_total` and its
+//!   sync stamp `accounts.total_ms`; existing amazon-orders accounts start
+//!   excluded (stamp 0, so any explicit user choice wins on sync).
+//! - 35: repair (#998): accounts the MoneyMoney import archived because their last refresh there
 //!   was cancelled (`cancel_tsp`) are active again ([`unarchive_cancelled_refreshes`]).
 //!
 //! Schema changes are a new step at the end of [`STEPS`]; never edit an
@@ -98,7 +101,8 @@ const STEPS: &[Step] = &[
     Step::Hook(document_seen),                                 // 31: read status of documents
     Step::Hook(account_notes),                                 // 32: account notes sync (#980)
     Step::Sql(crate::recipients::SCHEMA),                      // 33: hidden recipients (#978)
-    Step::Hook(unarchive_cancelled_refreshes),                 // 34: repair (#998)
+    Step::Hook(account_total_flag),                            // 34 (#337)
+    Step::Hook(unarchive_cancelled_refreshes),                 // 35: repair (#998)
 ];
 
 /// Step 32 (#980): the account note moves from the vault setting `account.note.<id>` (keyed by
@@ -128,11 +132,11 @@ fn account_notes(conn: &Connection) -> CoreResult<()> {
 }
 
 /// An archive the app (`set_account_archived`, also the account selection) or the MoneyMoney
-/// import sets carries its time and its stamp from the same second. Step 34 takes an archive
+/// import sets carries its time and its stamp from the same second. Step 35 takes an archive
 /// whose time lies more than this before its stamp for one the import of v0.8.5 made.
 pub(crate) const ARCHIVE_STAMP_GAP_MS: i64 = 2000;
 
-/// Step 34 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
+/// Step 35 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
 /// account was cancelled there, e.g. a TAN not confirmed) as "closed" and archived accounts that
 /// are in use: they left the totals and syncs skipped them. Such an archive carries MoneyMoney's
 /// earlier time next to the import's stamp (see [`ARCHIVE_STAMP_GAP_MS`]); only accounts the
@@ -900,6 +904,26 @@ CREATE TABLE loan_links (
 CREATE INDEX loan_links_loan ON loan_links(loan_account_id);
 "#;
 
+/// Step 34 (#337): per-account switch for the overall money totals, with its
+/// sync stamp. The one-time refill puts the order connector's existing
+/// accounts out of the totals (a Bestellkonto is a proof account, not a money
+/// account); it runs only when this step introduces the column, so a vault a
+/// development build already gave the column keeps every user decision.
+fn account_total_flag(conn: &Connection) -> CoreResult<()> {
+    if !has_column(conn, "main", "accounts", "include_in_total")? {
+        conn.execute_batch(
+            "ALTER TABLE accounts ADD COLUMN include_in_total INTEGER NOT NULL DEFAULT 1;
+             UPDATE accounts SET include_in_total = 0 WHERE id IN (
+                SELECT a.id FROM accounts a JOIN bank_connections c ON c.id = a.connection_id
+                 WHERE c.connector = 'amazon-orders');",
+        )?;
+    }
+    if !has_column(conn, "main", "accounts", "total_ms")? {
+        conn.execute_batch("ALTER TABLE accounts ADD COLUMN total_ms INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1069,7 +1093,7 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 34);
+        assert_eq!(SCHEMA_VERSION, 35);
     }
 
     /// #998: what the MoneyMoney import archived from `cancel_tsp` is active again and noted for
@@ -1087,7 +1111,7 @@ mod tests {
                (1,'moneymoney-db:3','Gelöscht',1790000000,1790001000123,1790003000000),
                (1,'moneymoney-db:4','Früher archiviert',1700000000,0,NULL),
                (1,'DE89370400440532013000','Bankkonto',1790000000,1790001000123,NULL);
-             PRAGMA user_version = 33;",
+             PRAGMA user_version = 34;",
         )
         .unwrap();
         migrate(&mut conn).unwrap();

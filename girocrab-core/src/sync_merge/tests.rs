@@ -1581,7 +1581,7 @@ fn soft_deleted_rows_appear_in_no_public_api() {
         PeriodGranularity::Year,
     ] {
         both!(format!("cashflow_by_period({g:?})"), |v| v
-            .cashflow_by_period(g, 6, None));
+            .cashflow_by_period(g, 6, None, true));
     }
     both!("suggest_recipients", |v| v
         .suggest_recipients(String::new(), 20));

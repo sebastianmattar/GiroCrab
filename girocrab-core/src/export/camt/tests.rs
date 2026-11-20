@@ -1,3 +1,6 @@
+// xmllint checks the exports against the ISO 20022 schemas; tests may start processes (#948).
+#![allow(clippy::disallowed_types)]
+
 use super::*;
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -1184,6 +1184,50 @@ fn english(de: &str) -> Option<&'static str> {
             "Kontist: The list of bookings was not delivered completely. Please start the sync again."
         }
         // ------------------------------------------------------------ connectors/uberspace.rs
+        // ------------------------------------------------------------ connectors/hanseatic.rs
+        "Online-Banking (Direkt-Login, Freigabe in der App)" => {
+            "Online banking (direct login, approval in the app)"
+        }
+        "Hanseatic Bank: Kreditkarten mit vorgemerkten Umsätzen sowie SparBriefe, Tages- und Festgeld mit Saldo und Umsätzen. Ältere Umsätze, für die die Bank eine zusätzliche Freigabe verlangt, werden nicht abgerufen. Die erste Anmeldung wird in der App der Hanseatic Bank (oder per smsTAN) bestätigt; danach merkt sich GiroCrab das Gerät. Kontoauszüge und weitere Dokumente aus der Postbox lassen sich abrufen; ungelesene Dokumente gelten danach bei der Bank als gelesen. Inoffiziell: nutzt die Schnittstelle des Online-Bankings, Änderungen sind möglich." => {
+            "Hanseatic Bank: credit cards with pending transactions as well as SparBrief, instant-access and fixed-term savings with balance and transactions. Older transactions for which the bank requires an additional approval are not fetched. The first login is approved in the Hanseatic Bank app (or via smsTAN); GiroCrab then remembers the device. Statements and other Postbox documents can be fetched; unread documents then count as read at the bank. Unofficial: uses the interface of the online banking, changes are possible."
+        }
+        "Hanseatic Bank: Antwort nicht erkannt (Online-Banking geändert?)." => {
+            "Hanseatic Bank: response not recognised (online banking changed?)."
+        }
+        "Hanseatic Bank: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen." => {
+            "Hanseatic Bank: Incomplete or invalid response. No data was imported."
+        }
+        "Hanseatic Bank: Anmeldung fehlgeschlagen. Bitte Kundennummer und Passwort prüfen." => {
+            "Hanseatic Bank: Login failed. Please check customer number and password."
+        }
+        "Hanseatic Bank: Der Zugang ist gesperrt. Bitte an die Bank wenden." => {
+            "Hanseatic Bank: Access is locked. Please contact the bank."
+        }
+        "Hanseatic Bank: Die Sitzung wurde beendet. Bitte den Abruf erneut starten." => {
+            "Hanseatic Bank: The session has ended. Please start the sync again."
+        }
+        "Hanseatic Bank: Die Anmeldung wurde in der App nicht bestätigt." => {
+            "Hanseatic Bank: The login was not approved in the app."
+        }
+        "Hanseatic Bank: Die Freigabe in der App ist abgelaufen. Bitte den Abruf erneut starten." => {
+            "Hanseatic Bank: The approval in the app has expired. Please start the sync again."
+        }
+        "Hanseatic Bank: Die smsTAN ist ungültig." => "Hanseatic Bank: The smsTAN is invalid.",
+        "Hanseatic Bank: Die Anfrage wurde abgelehnt." => {
+            "Hanseatic Bank: The request was rejected."
+        }
+        "Hanseatic Bank: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen." => {
+            "Hanseatic Bank: Unexpected redirect to another address – aborted."
+        }
+        "Hanseatic Bank: Kundennummer und Passwort erforderlich." => {
+            "Hanseatic Bank: Customer number and password required."
+        }
+        "Bitte die Anmeldung in der App der Hanseatic Bank bestätigen." => {
+            "Please approve the login in the Hanseatic Bank app."
+        }
+        "Bitte die smsTAN eingeben, die die Hanseatic Bank an die hinterlegte Mobilnummer gesendet hat." => {
+            "Please enter the smsTAN the Hanseatic Bank sent to your registered mobile number."
+        }
         "Web-Dashboard (Direkt-Login)" => "Web dashboard (direct login)",
         "E-Mail-Adresse" => "Email address",
         "Uberspace-Hosting: Guthaben und Buchungen aller Asteroids, die zur E-Mail-Adresse des Dashboards gehören. Inoffiziell: liest die Seiten des Dashboards, Änderungen sind möglich." => {

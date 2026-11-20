@@ -3,14 +3,35 @@ name: Android Build
 on:
   push:
     branches: [main, feat/android-parity, fix/android-workflow-green]
-    paths: ['GiroCrabAndroid/**', '.github/workflows/android.yml']
+    paths:
+      - 'GiroCrabAndroid/**'
+      - 'girocrab-core/**'
+      - 'uniffi-bindgen/**'
+      - 'GiroCrabAndroid/scripts/build-rust-android.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/android.yml'
   pull_request:
-    paths: ['GiroCrabAndroid/**', '.github/workflows/android.yml']
+    paths:
+      - 'GiroCrabAndroid/**'
+      - 'girocrab-core/**'
+      - 'uniffi-bindgen/**'
+      - 'GiroCrabAndroid/scripts/build-rust-android.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Pinned so a runner-image update cannot change what the APK is built with.
+  NDK_VERSION: '27.2.12479018'
 
 jobs:
   android-apk:
@@ -28,6 +49,33 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          # rust-cache resolves these relative to the workspace root; the script
+          # writes to <repo>/target/{android,host}, not into girocrab-core/.
+          workspaces: |
+            . -> target/android
+            . -> target/host
+
+      - name: Install Android NDK
+        run: |
+          if [ ! -d "$ANDROID_HOME/ndk/$NDK_VERSION" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" >/dev/null
+          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build native library and Kotlin bindings
+        run: ./GiroCrabAndroid/scripts/build-rust-android.sh
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -37,11 +85,25 @@ jobs:
         working-directory: GiroCrabAndroid
         run: gradle assembleDebug --console=plain --stacktrace
 
-      - name: Check APK
+      # A comment in build.gradle.kts promised this library long before it
+      # existed: without the check, a broken native build ships a demo-only APK
+      # that looks fine.
+      - name: Verify native libraries in APK
         working-directory: GiroCrabAndroid
         run: |
-          ls -la app/build/outputs/apk/debug/
-          unzip -l app/build/outputs/apk/debug/*.apk | grep -c 'classes.*\.dex'
+          apk=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          count=$(unzip -l "$apk" | grep -c 'lib/.*/libgirocrab_core.so' || true)
+          unzip -l "$apk" | grep 'lib/.*/libgirocrab_core.so' || true
+          echo "native libraries in APK: $count"
+          test "$count" -eq 3
+
+      # R8 runs only in release builds; a missing keep rule for the UniFFI
+      # bindings or JNA fails at runtime, not at compile time. Building the APK
+      # here catches layout/proguard regressions; the on-device start stays a
+      # manual step before a release.
+      - name: Build Release APK (R8 smoke test)
+        working-directory: GiroCrabAndroid
+        run: gradle assembleRelease --console=plain --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

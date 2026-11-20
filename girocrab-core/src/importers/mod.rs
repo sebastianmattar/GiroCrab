@@ -9,3 +9,4 @@ pub mod amazon_orders;
 pub mod moneymoney_db;
 pub mod moneymoney_import;
 pub mod portal_import;
+pub mod portal_statements;

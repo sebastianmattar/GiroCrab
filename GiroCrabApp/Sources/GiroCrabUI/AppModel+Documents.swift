@@ -128,7 +128,7 @@ extension AppModel {
         guard let c = account.connector, account.kind != .loan || c == .bhw else { return false }
         // switched off per connection (bank connection dialog): the core would refuse it
         if let cid = account.connectionId, documentsOffConnectionIDs.contains(cid) { return false }
-        return [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .easybank, .fordMoney, .opelDirektbank, .bhw, .ffb].contains(c)
+        return [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .easybank, .fordMoney, .opelDirektbank, .bhw, .hanseaticBank, .ffb].contains(c)
     }
 
     /// BHW mailbox PDFs whose mailbox entry names no listed contract are stored without

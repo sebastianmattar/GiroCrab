@@ -655,6 +655,11 @@ ios_pipeline() {
     echo "error: iOS archive has ${got_short} (${got_build}), expected ${IOS_MARKETING_VERSION} (${NEXT_BUILD}); aborting before upload" >&2
     exit 1
   fi
+  if [ "$FINTS_ID_EMBEDDED" -eq 1 ]; then
+    IOS_APP="$(ls -d "$IOS_ARCHIVE"/Products/Applications/*.app | head -1)"
+    echo "==> Verify FinTS product ID in iOS archive"
+    scripts/fints-registrierung.sh check-app "$IOS_APP"
+  fi
 
   if [ -d "GiroCrabApp/TestFlight" ]; then
     mkdir -p "$IOS_ARCHIVE/TestFlight"

@@ -1734,6 +1734,42 @@ async fn demo_transfer_flow_adds_pending_booking_and_suggests_recipient() {
     let _ = std::fs::remove_file(path);
 }
 
+/// Order accounts (Amazon) are proof accounts: they start outside the overall
+/// money totals (#337), only on creation — a re-fetch keeps the user's choice.
+#[test]
+fn amazon_accounts_start_outside_the_totals_only_on_creation() {
+    let p_dir = crate::test_support::TempDir::new("girocrab-amz-total");
+    let p = p_dir.join("v.db");
+    let v = Vault::open(p.to_string_lossy().to_string(), vec![3u8; 32]).unwrap();
+    let conn = v
+        .add_bank_connection(ConnectorKind::AmazonOrders, String::new(), "login".into())
+        .unwrap();
+    let mk = || FetchResult {
+        accounts: vec![RemoteAccount {
+            external_ref: "orders".into(),
+            name: "Amazon Bestellungen".into(),
+            owner: String::new(),
+            iban: String::new(),
+            account_number: String::new(),
+            currency: "EUR".into(),
+            kind: AccountKind::PaymentService,
+            balance_cents: 0,
+            balance_date: "2026-11-16".into(),
+        }],
+        ..Default::default()
+    };
+    store_fetch(&v, ConnectorKind::AmazonOrders, conn, mk()).unwrap();
+    let acc = v.list_accounts().unwrap().pop().unwrap();
+    assert!(!acc.include_in_total, "new order account starts excluded");
+    assert!(!acc.in_total, "effective flag follows");
+    // the user switches it back on; the next fetch keeps that choice
+    v.set_account_include_in_total(acc.id, true).unwrap();
+    store_fetch(&v, ConnectorKind::AmazonOrders, conn, mk()).unwrap();
+    let acc = v.list_accounts().unwrap().pop().unwrap();
+    assert!(acc.include_in_total, "re-fetch keeps the user's choice");
+    assert!(acc.in_total);
+}
+
 mod account_selection;
 mod bank_name;
 mod banking_gate;

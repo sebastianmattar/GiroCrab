@@ -296,12 +296,16 @@ impl Vault {
     /// current period last; empty periods are included with zeros).
     /// `account_ids` limits the sums to these accounts, so the cashflow card can
     /// follow the sidebar selection (#731); `None` or empty = all accounts.
-    #[uniffi::method(default(account_ids = None))]
+    /// `respect_in_total`: the card as an overall money figure (#337) — only
+    /// accounts of the effective total set contribute. Default `false` keeps
+    /// the proof semantics of a directly requested selection (single account).
+    #[uniffi::method(default(account_ids = None, respect_in_total = false))]
     pub fn cashflow_by_period(
         &self,
         granularity: PeriodGranularity,
         count: u32,
         account_ids: Option<Vec<i64>>,
+        respect_in_total: bool,
     ) -> Result<Vec<PeriodCashflow>, CoreError> {
         let today = crate::dates::today();
         crate::planning::cashflow_for(
@@ -311,6 +315,7 @@ impl Vault {
             account_ids.as_deref().unwrap_or_default(),
             today.year().into(),
             today.month() as u32,
+            respect_in_total,
         )
     }
 
@@ -392,6 +397,7 @@ pub(crate) fn cashflow_for(
     account_ids: &[i64],
     year: i32,
     month: u32,
+    respect_in_total: bool,
 ) -> Result<Vec<PeriodCashflow>, CoreError> {
     let count = count.clamp(1, 60) as i32;
     let per_year = match granularity {
@@ -437,16 +443,34 @@ pub(crate) fn cashflow_for(
         PeriodGranularity::Year => format!("{first}-01-01"),
     };
     // Same bookings, transfer detection and flow classification as the booking
-    // list and its KPI tiles (`list_transactions` / `SelectionFlow`).
+    // list and its KPI tiles (`list_transactions` / `SelectionFlow`). In a
+    // totals context (#337) the card is an overall money figure: only accounts
+    // of the effective total set (own switch, group, archiving) contribute —
+    // a directly requested selection (single account) is a proof view and
+    // keeps its sums.
+    // one guard for both reads, so a merge committing in between can never
+    // combine old eligibility with new booking amounts
+    let db = v.db()?;
+    let allowed: Option<std::collections::HashSet<i64>> = if respect_in_total {
+        Some(crate::user_groups::total_account_ids(&db)?)
+    } else {
+        None
+    };
     let filter = BookingFilter {
         account_ids: account_ids.to_vec(),
         date_from: Some(from),
         ..Default::default()
     };
     let mut acc: HashMap<String, (i64, i64)> = HashMap::new();
-    v.visit_bookings(&*v.db()?, &filter, |_, b| {
-        // other currencies are never added to the sums, unless one account is selected (#1049)
-        if !counts_in_sums(account_ids.len(), &b.currency) {
+    v.visit_bookings(&db, &filter, |_, b| {
+        // other currencies are never added to the sums, unless one account is
+        // selected (#1049); in a totals context only the effective total set
+        // contributes (#337) — a directly requested account is a proof view
+        if !allowed
+            .as_ref()
+            .is_none_or(|set| set.contains(&b.account_id))
+            || !counts_in_sums(account_ids.len(), &b.currency)
+        {
             return;
         }
         let (date, amt) = (&b.booking_date, b.amount_cents);
@@ -709,19 +733,19 @@ mod tests {
         tx(&v, "2", "2025-02-10", -30_000, None);
         tx(&v, "3", "2025-05-10", -10_000, None);
         tx(&v, "4", "2024-12-31", -5_000, None);
-        let m = cashflow_for(&v, PeriodGranularity::Month, 3, &[], 2025, 2).unwrap();
+        let m = cashflow_for(&v, PeriodGranularity::Month, 3, &[], 2025, 2, false).unwrap();
         assert_eq!(
             m.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
             ["2024-12", "2025-01", "2025-02"]
         );
         assert_eq!((m[1].income_cents, m[2].expense_cents), (100_000, 30_000));
-        let q = cashflow_for(&v, PeriodGranularity::Quarter, 2, &[], 2025, 5).unwrap();
+        let q = cashflow_for(&v, PeriodGranularity::Quarter, 2, &[], 2025, 5, false).unwrap();
         assert_eq!(q[0].key, "2025-Q1");
         assert_eq!(
             (q[0].income_cents, q[0].expense_cents, q[1].expense_cents),
             (100_000, 30_000, 10_000)
         );
-        let y = cashflow_for(&v, PeriodGranularity::Year, 2, &[], 2025, 5).unwrap();
+        let y = cashflow_for(&v, PeriodGranularity::Year, 2, &[], 2025, 5, false).unwrap();
         assert_eq!(
             (y[0].key.as_str(), y[0].expense_cents, y[1].expense_cents),
             ("2024", 5_000, 40_000)
@@ -830,6 +854,7 @@ mod tests {
             &[],
             today.year().into(),
             today.month() as u32,
+            false,
         )
         .unwrap();
         assert_eq!(cf.last().unwrap().expense_cents, 1_000);
@@ -866,7 +891,8 @@ mod tests {
             )
             .unwrap();
         let expense = |ids: &[i64]| {
-            cashflow_for(&v, PeriodGranularity::Month, 1, ids, 2025, 2).unwrap()[0].expense_cents
+            cashflow_for(&v, PeriodGranularity::Month, 1, ids, 2025, 2, false).unwrap()[0]
+                .expense_cents
         };
         assert_eq!(expense(&[]), 10_000);
         assert_eq!(expense(&[first]), 3_000);

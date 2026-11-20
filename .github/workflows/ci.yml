@@ -87,8 +87,8 @@ jobs:
             flag rust "core_touched || touched '^(girocrab-mcp/|uniffi-bindgen/|tools/)|$workspace|$ci'"
             # Swift app, the core behind it (bindings), CI itself
             flag swift "core_touched || touched '^GiroCrabApp/|$workspace|$ci'"
-            # macOS-only branches of the core (peer credentials of the local socket, MCP socket path)
-            flag macos_local_api "touched '^(girocrab-core/src/local_api|girocrab-mcp/)|$ci'"
+            # macOS-only branches of the core (peer credentials of the local socket in sys.rs, MCP socket path)
+            flag macos_local_api "touched '^(girocrab-core/src/(local_api|sys\.rs)|girocrab-mcp/)|$ci'"
             # Core tests on Windows: only the core itself can break them
             flag windows_core "core_touched || touched '^Cargo\.(toml|lock)$|$ci'"
             # Windows front end (also builds the core)
@@ -179,11 +179,20 @@ jobs:
         run: scripts/lint-serde-feature.sh
       - name: Free functions are exported to UniFFI only from ffi.rs
         run: scripts/lint-ffi-exports.sh
+      - name: No unsafe outside sys.rs, no processes, hidden includes or encoded data in the payment path
+        run: scripts/lint-no-obfuscation.sh
       - if: needs.changes.outputs.rust == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: girocrab-core builds with the optional serde feature
         if: needs.changes.outputs.rust == 'true'
         run: cargo check -p girocrab-core --features serde
+      # Both builds that ship: default features (the Swift app) and serde (Linux); the
+      # serde one is up to date after the step above.
+      - name: The core library contains only its sources and data tables (no test files, no unlisted env)
+        if: needs.changes.outputs.rust == 'true'
+        run: |
+          scripts/lint-no-obfuscation.sh --compiled
+          scripts/lint-no-obfuscation.sh --compiled --features serde
       - name: Install cargo-nextest
         if: needs.changes.outputs.rust == 'true'
         uses: taiki-e/install-action@v2

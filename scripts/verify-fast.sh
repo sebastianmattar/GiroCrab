@@ -86,6 +86,8 @@ if [ "$mode" != lint ]; then
   if [ "$rust" = true ]; then
     run "cargo clippy --workspace -D warnings" cargo clippy -q --workspace --all-targets -- -D warnings
     run "core builds with --features serde" env GIROCRAB_SKIP_SWIFT=1 cargo check -q -p girocrab-core --features serde
+    run "core library: sources + data tables only" env GIROCRAB_SKIP_SWIFT=1 scripts/lint-no-obfuscation.sh --compiled
+    run "core library (serde): sources + data only" env GIROCRAB_SKIP_SWIFT=1 scripts/lint-no-obfuscation.sh --compiled --features serde
     [ "$mode" = tests ] && run "cargo test girocrab-core --lib" env GIROCRAB_SKIP_SWIFT=1 cargo test -q -p girocrab-core --lib
   fi
   [ "$linux" = true ] && skip "GiroCrabLinux clippy/test" "needs Qt: left to CI"

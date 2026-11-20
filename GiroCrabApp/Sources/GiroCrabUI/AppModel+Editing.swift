@@ -108,7 +108,15 @@ extension AppModel {
                 let r = try await Self.offMain { () -> CategoryRefresh in
                     let page = try Perf.interval("listTransactions") { try vault.listTransactions(filter: filter) }
                     try Task.checkCancellation()
-                    let flow = listHasFlow ? page.flow : try vault.selectionFlow(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    // fallback in the filter's own calculation context (#337)
+                    let flow: SelectionFlow
+                    if listHasFlow {
+                        flow = page.flow
+                    } else if filter.respectInTotal {
+                        flow = try vault.selectionFlowForTotals(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    } else {
+                        flow = try vault.selectionFlow(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    }
                     try Task.checkCancellation()
                     return CategoryRefresh(
                         page: page,
@@ -127,7 +135,11 @@ extension AppModel {
                 let (nowFrom, nowTo) = self.periodRange
                 let nowSums = self.categorySumFilter
                 if nowFrom == from, nowTo == to, nowSums.accounts == sums.accounts, nowSums.checked == sums.checked, nowSums.direction == sums.direction, nowSums.amount == sums.amount {
-                    if self.currentFilter.accountIds == filter.accountIds {
+                    // same calculation context as the captured filter, not only
+                    // the same accounts: the totals switch changes the KPIs
+                    // without changing the account list (#337)
+                    if self.currentFilter.accountIds == filter.accountIds,
+                       self.currentFilter.respectInTotal == filter.respectInTotal {
                         self.selectionFlow = (r.flow.consumptionCents, r.flow.investedCents, r.flow.incomeCents)
                     }
                     self.categories = r.categories

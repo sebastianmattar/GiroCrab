@@ -245,25 +245,55 @@ fn group_sums_skip_archived_accounts_and_excluded_subgroups() {
     assert_eq!(alt_group.accounts.len(), 1, "archived account still listed");
     v.set_account_archived(ids[2], false).unwrap();
 
-    // "Alt" out of the total: keeps its own sum, "Alle" no longer adds it
+    // "Alt" out of the total: its own header keeps showing its money sum
+    // (review point 1 on #1100) – it only falls out of the overview figures
+    // ("Alle" no longer adds it); accounts and bookings stay
     v.update_user_group(alt.clone(), "Alt".into(), "archivebox".into(), false)
         .unwrap();
     let s = sums(&v);
-    assert_eq!(s["Alt"], -50_00);
+    assert_eq!(s["Alt"], -50_00, "own sum keeps showing");
     assert_eq!(s["Alle"], 5_100_00);
 
-    // the parent out of the total too: its own sum still shows everything
-    // inside it, apart from the subgroup excluded on its own
+    // the parent out of the total too: both excluded groups keep showing
+    // their own sums (review point 1 on #1100) — they only fall out of the
+    // overview figures, never to zero in their own header
     v.update_user_group(alle.clone(), "Alle".into(), "folder".into(), false)
         .unwrap();
-    assert_eq!(sums(&v)["Alle"], 5_100_00);
+    let s = sums(&v);
+    assert_eq!(s["Alle"], 5_100_00, "own sum keeps showing (Giro + Depot)");
+    assert_eq!(s["Alt"], -50_00, "own sum keeps showing (Visa is back)");
     v.update_user_group(alt.clone(), "Alt".into(), "archivebox".into(), true)
         .unwrap();
     assert_eq!(
-        sums(&v)["Alle"],
-        5_050_00,
-        "subgroup only inherits the exclusion"
+        sums(&v)["Alt"],
+        -50_00,
+        "own sum wins over the inherited exclusion"
     );
+    // the re-included subgroup rolls up into the excluded parent's own sum
+    assert_eq!(sums(&v)["Alle"], 5_050_00);
+
+    // the account's own switch still applies inside an excluded group's own
+    // sum (review point 1 on #1100): the group exclusion keeps the header,
+    // the account switch keeps dropping the account from money sums
+    v.update_user_group(alt.clone(), "Alt".into(), "archivebox".into(), false)
+        .unwrap();
+    v.set_account_include_in_total(ids[2], false).unwrap();
+    assert_eq!(
+        sums(&v)["Alt"],
+        0,
+        "the switched-out account leaves even the excluded group's own sum"
+    );
+    v.set_account_include_in_total(ids[2], true).unwrap();
+    assert_eq!(sums(&v)["Alt"], -50_00);
+    v.update_user_group(alt.clone(), "Alt".into(), "archivebox".into(), true)
+        .unwrap();
+
+    // both back in: the full sums return
+    v.update_user_group(alle.clone(), "Alle".into(), "folder".into(), true)
+        .unwrap();
+    let s = sums(&v);
+    assert_eq!(s["Alle"], 5_050_00);
+    assert_eq!(s["Alt"], -50_00);
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -436,13 +436,19 @@ pub(crate) fn store_fetch(
                 None => {
                     let (group, sym, order) = group_for(acc.kind);
                     let gid = Vault::ensure_group(&tx, group, sym, order)?;
+                    // Amazon's order account is a proof account: it starts
+                    // outside the overall money totals (#337); the user can
+                    // switch it back on. Stamp 0, so any explicit choice wins
+                    // on sync. Only on creation — a re-fetch never resets a
+                    // stored decision.
+                    let include_in_total = kind != ConnectorKind::AmazonOrders;
                     tx.execute(
                         "INSERT INTO accounts(connection_id, group_id, external_ref, name, bank_name, owner, iban, account_number, currency, kind,
-                                              balance_cents, balance_date, sf_symbol, sort_order, created_ms)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, (SELECT IFNULL(MAX(sort_order),0)+1 FROM accounts), ?14)",
+                                              balance_cents, balance_date, sf_symbol, sort_order, created_ms, include_in_total, total_ms)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, (SELECT IFNULL(MAX(sort_order),0)+1 FROM accounts), ?14, ?15, 0)",
                         params![connection_id, gid, acc.external_ref, acc.name, bank_name, acc.owner, acc.iban, acc.account_number,
                                 acc.currency, acc.kind.as_str(), acc.balance_cents, acc.balance_date, acc.kind.sf_symbol(),
-                                crate::dates::now_ms()],
+                                crate::dates::now_ms(), include_in_total],
                     )?;
                     let id = tx.last_insert_rowid();
                     crate::user_groups::place_new_account(&tx, id)?;
@@ -1376,6 +1382,7 @@ impl Vault {
                     | ConnectorKind::FordMoney
                     | ConnectorKind::OpelDirektbank
                     | ConnectorKind::Bhw
+                    | ConnectorKind::HanseaticBank
                     | ConnectorKind::Ffb
             )
         });

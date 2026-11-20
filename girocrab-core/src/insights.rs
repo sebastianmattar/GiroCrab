@@ -12,12 +12,16 @@ use crate::merchants::{FlowKind, MerchantResolver};
 use crate::models::*;
 use crate::vault::{LIVE_BOOKINGS_SQL, Vault, sql_int_list};
 
-fn all_bookings(v: &Vault, scope: BookingScope) -> Result<Vec<Booking>, CoreError> {
+fn all_bookings(
+    v: &Vault,
+    db: &rusqlite::Connection,
+    scope: BookingScope,
+) -> Result<Vec<Booking>, CoreError> {
     let filter = BookingFilter {
         scope,
         ..Default::default()
     };
-    v.collect_bookings(&*v.db()?, &filter)
+    v.collect_bookings(db, &filter)
 }
 
 fn month_key(date: &str) -> String {
@@ -100,13 +104,52 @@ impl Vault {
             .flow)
     }
 
+    /// The same tiles as [`selection_flow`](Self::selection_flow), but for
+    /// overall money figures (#337): accounts outside the effective total set
+    /// (own switch off, excluded group, archived) contribute nothing. A
+    /// selection that is empty after that exclusion means "none" (zero sums),
+    /// never "all accounts".
+    pub fn selection_flow_for_totals(
+        &self,
+        account_ids: Vec<i64>,
+        date_from: Option<String>,
+        date_to: Option<String>,
+    ) -> Result<SelectionFlow, CoreError> {
+        // rows-free path like `selection_flow`: only the flow is used, so no
+        // booking is enriched or kept
+        Ok(self
+            .list_page(
+                BookingFilter {
+                    account_ids,
+                    date_from,
+                    date_to,
+                    respect_in_total: true,
+                    ..Default::default()
+                },
+                false,
+            )?
+            .flow)
+    }
+
     /// "Sparpläne & Perks": recurring plans with a month grid, Saveback and
     /// Round up totals, and consumption vs. investment per month.
     pub fn investment_dashboard(&self, months: u32) -> Result<InvestmentDashboard, CoreError> {
         let months_list = last_months(months);
         let first_month = months_list.first().cloned().unwrap_or_default();
         let this_month = months_list.last().cloned().unwrap_or_default();
-        let all = all_bookings(self, BookingScope::All)?;
+        // Overall money figure (#337): only accounts of the effective total set
+        // contribute — own switch, group and archiving, like the KPI tiles and
+        // the cashflow card. The booking list itself is never narrowed by this.
+        // One guard for both reads, so a merge committing in between cannot mix
+        // old amounts with new eligibility.
+        let all: Vec<Booking> = {
+            let db = self.db()?;
+            let allowed = crate::user_groups::total_account_ids(&db)?;
+            all_bookings(self, &db, BookingScope::All)?
+                .into_iter()
+                .filter(|b| allowed.contains(&b.account_id))
+                .collect()
+        };
 
         // Monthly flows
         let mut monthly: BTreeMap<String, MonthFlow> = months_list

@@ -60,11 +60,11 @@ GiroCrab ist eine freie, quelloffene Banking-App (GPLv3) für macOS, Linux (Qt 6
 
 ### ✨ Neu in v0.8.7
 
-- 🏦 **Neue Banken – BHW Bausparkasse & Kontist (#1435, #1440, #1416):** Native Anbindung für die **BHW Bausparkasse** (Bausparverträge, Baudarlehen & automatische Postfach-PDF-Zuordnung) sowie **Kontist**-Geschäftskonten über die offizielle GraphQL-API; außerdem aktualisierte FinTS-Serveradresse für **1822direkt** (`banking-hs6`).
-- 💸 **Empfängerliste, Buchungsnotizen & FinTS-Überweisungen (#1129, #1130, #1441, #1088, #1419):** Bekannte Empfänger verwalten und aus Überweisungsvorschlägen ausblenden, direktes Notiz-Symbol in der Buchungsliste mit Hover-Vorschau und Fokus-Sprung in den Inspektor, sofortige FinTS-Überweisungen ohne unerlaubtes Ausführungsdatum (u. a. Volksbanken/Postbank) sowie Auswertung von `HISPAS`-SEPA-Formaten (`pain.001.001.09`, u. a. comdirect).
-- 🐧 **Großes Linux-Update & direkte Release-Pakete (#1150, #1151, #1384, #1423, #1418):** EquatePlus-Anmeldung & Beleg-Download, automatischer Hintergrund-Abruf, vollständiger Privatmodus in allen Formularen, Breeze-Icon-Fallback unter GNOME, sofortige Listen-Aktualisierung beim Tag-Filter sowie fertige `.deb`- und `.flatpak`-Pakete direkt am Release.
-- 🛠️ **Qualitäts- & Zuordnungs-Fixes (#1438, #1133, #1425, #1049, #980):** Saubere `VR`-Großschreibung und Rechtsform-Kürzung in Händlernamen, kein Fehltreffer kurzer Akronyme bei Buchungen ohne Gegenpartei, korrekte Abweisung abgewählter Konten nach „Abrufweg umstellen“, Fremdwährungs-Zusatzsummen und iCloud-Abgleich für Konto-Notizen.
-- 📱 **iOS / TestFlight – v0.8.7 unter der Haube (Build 24 unter Version 0.7.5):** Damit das Update ohne externe Beta-Review-Wartezeit sofort bei euch landet, erscheint der komplette **v0.8.7-Funktionsumfang** auf iOS direkt als Build 24 unter Version `0.7.5`.
+- 🏦 **Neue Banken & Amex-Kontoauszüge (#1168, #1435, #1440, #1451, #1456, #1416):** Native Konnektoren für **Hanseatic Bank** (Kreditkarten, Tages-/Festgeld, SparBrief & Postbox-PDFs), **BHW Bausparkasse** (Bausparverträge, Baudarlehen & Postfach-PDFs) und **Kontist**-Geschäftskonten, automatischer & manueller **PDF-Kontoauszugsabruf für American Express** im Portal-Fenster, **C24, N26 und Bank Norwegian** verifiziert in der Banken-Matrix sowie aktualisierte FinTS-Adresse für **1822direkt**.
+- 🧮 **Kontoschalter für Gesamtsummen & Kontoeinstellungen (#1100, #1445, #1455):** Einzelne Konten lassen sich gezielt aus Gesamtsummen, Cashflow und Vermögen ausschließen (mit iCloud-Sync-Stempel; Amazon-Bestellkonten starten ausgeschlossen), aufgelöste Konten direkt in den Kontoeinstellungen löschen und Konten mit negativem Startsaldo ohne gesperrten „Sichern“-Button bearbeiten.
+- 💸 **Empfängerliste, Buchungsnotizen & FinTS-Überweisungen (#1129, #1130, #1441, #1088, #1419):** Bekannte Empfänger verwalten/ausblenden, direktes Notiz-Symbol an Buchungen mit Hover-Vorschau, sofortige FinTS-Überweisungen ohne unerlaubtes Ausführungsdatum sowie `HISPAS`-SEPA-Formaterkennung (`pain.001.001.09`).
+- 🐧 **Linux-Release-Pakete & Android Native-Build (#1150, #1151, #1458, #1384, #1423, #1443):** EquatePlus-Anmeldung & Beleg-Download, Hintergrund-Sync inkl. sauberem Dialog-Abbruch bei „Alle abrufen“, Privatmodus, Breeze-Icons, direkte `.deb`- & `.flatpak`-Pakete am GitHub-Release sowie CI-geprüfter nativer Rust-/UniFFI-Build unter Android.
+- 🛠️ **iPadOS FinTS-Registrierung, Amex-Saldo & Zeitraumwechsel (#1449, #1446, #1444, #1379):** Eingebaute FinTS-Produktregistrierung jetzt fest verifiziert im iOS/iPadOS-TestFlight-Build (Build 24 unter Version `0.7.5`), korrekter `0,00 €`-Saldo bei bezahlter Amex-Abrechnung, synchroner Kopfbereich beim Zeitraumwechsel und erweiterter Code-Integritäts-Linter (`forbid(unsafe_code)`).
 
 ### ✨ Neu in v0.8.6
 
@@ -224,6 +224,7 @@ Kurz: `girocrab-core` (Rust, per UniFFI) enthält Tresor, Regeln, Händler-Erken
 | FFB (FIL Fondsbank) | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | 🧪 Test gesucht |
 | FNZ Bank | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | ✅ Verifiziert |
 | Ford Money | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht |
+| Hanseatic Bank | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht |
 | Opel Direktbank | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht |
 | quirion | Web-Portal | ✓ | ✓ | ✓ | – | – | – | ✓ | ✅ Verifiziert |
 | Schwäbisch Hall (Bausparen) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht [#290](https://github.com/GiroCrab/GiroCrab/issues/290) |
@@ -244,7 +245,10 @@ Kurz: `girocrab-core` (Rust, per UniFFI) enthält Tresor, Regeln, Händler-Erken
 | Scalable Capital | REST-API | ✓ | ✓ | ✓ | ✓ | – | – | – | 🧪 Test gesucht [#45](https://github.com/GiroCrab/GiroCrab/issues/45) |
 | Amazon Visa | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
 | American Express | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
+| Bank Norwegian | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
+| C24 | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
 | ING Business | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | 🧪 Test gesucht [#721](https://github.com/GiroCrab/GiroCrab/issues/721) |
+| N26 | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
 | PayPal (DE) | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verifiziert |
 | Revolut | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | 🧪 Test gesucht [#289](https://github.com/GiroCrab/GiroCrab/issues/289) |
 | Weitere Banken per PSD2 (Enable Banking) | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ⚠️ Mit Einschränkungen |
@@ -321,11 +325,11 @@ GiroCrab is a free, open-source banking app (GPLv3) for macOS, Linux (Qt 6 / QML
 
 ### ✨ What's new in v0.8.7
 
-- 🏦 **New Banks – BHW Bausparkasse & Kontist (#1435, #1440, #1416):** Native connectors for **BHW Bausparkasse** (home savings contracts, loans & automatic mailbox PDF matching) and **Kontist** business accounts via the official GraphQL API, plus the updated FinTS endpoint for **1822direkt** (`banking-hs6`).
-- 💸 **Recipient Management, Booking Notes & FinTS Transfers (#1129, #1130, #1441, #1088, #1419):** Manage and hide saved transfer recipients, click or hover the new note indicator right in the booking list to jump straight to the note editor, send immediate FinTS transfers without rejected execution dates, and detect `pain.001.001.09` schemas from `HISPAS` (including comdirect).
-- 🐧 **Major Linux Port Update & Release Packages (#1150, #1151, #1384, #1423, #1418):** EquatePlus browser sign-in & PDF downloads, automatic background sync, privacy redaction across all sheets, Breeze fallback icons under GNOME, live tag-filter refreshes, and prebuilt `.deb` and `.flatpak` packages attached directly to GitHub Releases.
-- 🛠️ **Quality & Matching Fixes (#1438, #1133, #1425, #1049, #980):** Preserved `VR` casing and cleaner legal-form stripping in merchant names, no false short-acronym matches on counterparty-less bookings, proper exclusion checks after switching fetch routes, non-EUR supplemental totals, and iCloud sync for account notes.
-- 📱 **iOS / TestFlight – Full v0.8.7 under the hood (Build 24 under version 0.7.5):** To deliver updates without Apple external beta review delays, the complete **v0.8.7 feature set** ships on iOS immediately as Build 24 under version `0.7.5`.
+- 🏦 **New Banks & Amex PDF Statements (#1168, #1435, #1440, #1451, #1456, #1416):** Native connectors for **Hanseatic Bank** (credit cards, savings & Postbox PDFs), **BHW Bausparkasse** (home savings, loans & mailbox PDFs), and **Kontist** business accounts, automatic & on-demand **American Express PDF statement downloads** in the portal sheet, verified **C24, N26, and Bank Norwegian** matrix entries, plus updated FinTS endpoint for **1822direkt**.
+- 🧮 **Per-Account Totals Switch & Account Settings (#1100, #1445, #1455):** Exclude individual accounts from overall totals, cashflow, and net worth (synced across devices; Amazon Orders accounts start excluded by default), delete archived accounts directly from Account Settings, and save accounts with negative opening balances cleanly.
+- 💸 **Recipient Management, Booking Notes & FinTS Transfers (#1129, #1130, #1441, #1088, #1419):** Manage/hide saved transfer recipients, jump straight to booking notes via the new list indicator, send immediate FinTS transfers without rejected execution dates, and detect `pain.001.001.09` from `HISPAS`.
+- 🐧 **Linux Release Packages & Android Native Layer (#1150, #1151, #1458, #1384, #1423, #1443):** EquatePlus sign-in & PDFs, auto-sync with clean dialog cancellation during "Retrieve All", full privacy redaction, Breeze fallback icons, prebuilt `.deb` & `.flatpak` release assets, and CI-verified multi-ABI Rust/UniFFI builds on Android.
+- 🛠️ **iPadOS FinTS Registration, Amex €0 Balance & Period Sync (#1449, #1446, #1444, #1379):** Verified built-in FinTS product registration inside the iOS/iPadOS TestFlight archive (Build 24 under version `0.7.5`), accurate `€0.00` Amex balance after paid statements, aligned headers during period switches, and workspace-wide `forbid(unsafe_code)` obfuscation checks.
 
 ### ✨ What's new in v0.8.6
 
@@ -473,6 +477,7 @@ your bank directly. Optional iCloud sync exchanges an encrypted snapshot via you
 | FFB (FIL Fondsbank) | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | 🧪 Testing wanted |
 | FNZ Bank | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | ✅ Verified |
 | Ford Money | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted |
+| Hanseatic Bank | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted |
 | Opel Direktbank | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted |
 | quirion | Web-Portal | ✓ | ✓ | ✓ | – | – | – | ✓ | ✅ Verified |
 | Schwäbisch Hall (Bausparen) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted [#290](https://github.com/GiroCrab/GiroCrab/issues/290) |
@@ -493,8 +498,11 @@ your bank directly. Optional iCloud sync exchanges an encrypted snapshot via you
 | Scalable Capital | REST-API | ✓ | ✓ | ✓ | ✓ | – | – | – | 🧪 Testing wanted [#45](https://github.com/GiroCrab/GiroCrab/issues/45) |
 | Amazon Visa | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
 | American Express | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
+| Bank Norwegian | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
+| C24 | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
 | ING Business | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | 🧪 Testing wanted [#721](https://github.com/GiroCrab/GiroCrab/issues/721) |
 | More banks via PSD2 (Enable Banking) | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ⚠️ Limited |
+| N26 | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
 | PayPal (DE) | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | ✅ Verified |
 | Revolut | Enable Banking (PSD2) | ✓ | ✓ | – | – | – | – | – | 🧪 Testing wanted [#289](https://github.com/GiroCrab/GiroCrab/issues/289) |
 | Finpension | Datei-Import | ✓ | ✓ | ✓ | – | – | – | – | 🧪 Testing wanted [#300](https://github.com/GiroCrab/GiroCrab/issues/300) |

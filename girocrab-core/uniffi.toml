@@ -1,0 +1,20 @@
+# UniFFI-Konfiguration für girocrab-core.
+#
+# Kotlin 2.0 lehnt eine Konstruktor-Eigenschaft ab, die `Throwable.message`
+# verdeckt, ohne sie zu überschreiben ("'message' hides member of supertype
+# 'Throwable' and needs an 'override' modifier"; unter Kotlin 1.9 war es eine
+# Warnung). UniFFI erzeugt für jede Fehlervariante mit Feld `message` genau
+# diese Kollision — siehe mozilla/uniffi-rs#1434, dort ist die Empfehlung der
+# Maintainer, das Feld sprachspezifisch umzubenennen.
+#
+# Deshalb nur für Kotlin: der Rust-Kern behält `message` (278 Fundstellen),
+# Swift sieht weiterhin `message`, Kotlin bekommt `detail`.
+[bindings.kotlin.rename]
+"CoreError.Database.message" = "detail"
+"CoreError.InvalidInput.message" = "detail"
+"CoreError.Network.message" = "detail"
+"CoreError.Bank.message" = "detail"
+"CoreError.Authentication.message" = "detail"
+"CoreError.Protocol.message" = "detail"
+"CoreError.BrowserLoginRequired.message" = "detail"
+"CoreError.BankingBlocked.message" = "detail"

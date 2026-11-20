@@ -73,7 +73,7 @@ const MM_CLOSED: i64 = 16;
 
 /// Vault setting (this device only, not merged): ids of imported accounts whose
 /// archive state nobody chose, so the next import gives them MoneyMoney's. The
-/// #998 repair (schema step 34) reactivates accounts the import of v0.8.5
+/// #998 repair (schema step 35) reactivates accounts the import of v0.8.5
 /// archived wrongly, and some of them are closed in MoneyMoney after all. Until
 /// then a sync's takeover prefers the other accounts (#816).
 pub(crate) const ARCHIVE_UNKNOWN_KEY: &str = "moneymoney_db.archive_unknown";

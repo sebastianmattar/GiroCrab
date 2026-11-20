@@ -10,6 +10,11 @@ description = "GiroCrab core: encrypted ledger, categorisation rules and bank co
 name = "girocrab_core"
 crate-type = ["lib", "staticlib", "cdylib"]
 
+# `unsafe` only in src/sys.rs, the one file that lifts this (#948). Not the
+# workspace's `forbid`: that could not be lifted there.
+[lints.rust]
+unsafe_code = "deny"
+
 [features]
 # JSON (de)serialisation of the FFI records, for front ends without UniFFI
 # bindings (GiroCrabLinux). Off for the Swift app.

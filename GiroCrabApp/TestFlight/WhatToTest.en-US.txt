@@ -1,5 +1,6 @@
 GiroCrab iOS 0.7.5 (Build 24) – includes the complete GiroCrab v0.8.7 feature set:
 
-• New banks: BHW Bausparkasse (including mailbox PDFs) and Kontist business accounts (official GraphQL API), plus updated 1822direkt FinTS endpoint.
-• Transfers & booking list: Manage/hide known recipients, tap the new note indicator on bookings to jump straight to the note editor, automatic focus in the TAN prompt, and FinTS transfer fixes (immediate execution date & HISPAS pain.001.001.09 detection).
-• Improvements: Preserved VR casing and legal-form stripping in merchant names, prevented short-acronym false matches without counterparty, supplemental foreign-currency totals, and iCloud sync for account notes.
+• FinTS on iPhone & iPad (#1449): GiroCrab's built-in FinTS product registration is now verified inside the iOS/iPadOS archive.
+• Three new banks: Hanseatic Bank (incl. Postbox PDFs), BHW Bausparkasse (incl. mailbox PDFs), and Kontist business accounts, plus updated 1822direkt FinTS endpoint.
+• Accounts & totals (#1100, #1445, #1446): Per-account "Include in totals" switch, account deletion directly in Account Settings, and accurate €0.00 Amex balance after paid statements.
+• Transfers & list: Manage/hide saved recipients, booking note indicator, aligned period headers (#1444), and FinTS transfer fixes.

@@ -184,6 +184,7 @@ fehlende Angabe mit ⚠️.
 - [ ] **Dependencies and licences:** `scripts/check-third-party-notices.sh` passes, and `THIRD_PARTY_NOTICES.md` is updated in the same PR when `Cargo.toml`, `Cargo.lock` or `Package.swift` changed.
 - [ ] **Brand neutrality:** `scripts/lint-brand-names.sh` passes.
 - [ ] **New access:** new network, process or file access is named in the PR description.
+- [ ] **No hidden code:** `unsafe` only in `girocrab-core/src/sys.rs`; `scripts/lint-no-obfuscation.sh` passes (rules in `docs/ARCHITECTURE.md`). An exception is a new entry in that script.
 
 #### ⚡ Performance & Responsiveness (Pflicht / mandatory)
 

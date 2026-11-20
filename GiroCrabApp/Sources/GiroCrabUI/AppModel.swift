@@ -101,6 +101,10 @@ public final class AppModel {
     var listBalances = ListBalances()
     /// Watches Ansicht › Saldo anzeigen, which the settings window can change too.
     @ObservationIgnored private var runningBalanceObserver: NSKeyValueObservation?
+    /// Bumped whenever the effective total set changes (#337: account / group
+    /// switch, group move). The overall money figures (cashflow card) follow
+    /// it — the booking list count alone does not move, it is a proof view.
+    var totalsVersion = 0
     /// Flows of the selected account/group in the selected period; nil = not loaded yet.
     var selectionFlow: (consumption: Int64, invested: Int64, income: Int64)? { didSet { refreshOtherCurrencies() } }
     /// „Ohne Kategorie“ badge while list filters narrow the sums; nil = the accounts' own counts (#357).

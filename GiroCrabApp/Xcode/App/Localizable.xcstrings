@@ -922,6 +922,17 @@
         }
       }
     },
+    "%lld Kontoauszüge konnten nicht geladen werden – beim nächsten Abruf erneut versuchen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld statements could not be loaded – they are tried again with the next fetch."
+          }
+        }
+      }
+    },
     "%lld Lastschriften · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1443,6 +1454,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld new documents from the online archive"
+          }
+        }
+      }
+    },
+    "%lld neue Kontoauszüge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld new statements"
           }
         }
       }
@@ -3844,6 +3866,17 @@
         }
       }
     },
+    "Alle Kontoauszüge laden" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load all statements"
+          }
+        }
+      }
+    },
     "Alle Markierungen entfernen" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5701,6 +5734,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expanded"
+          }
+        }
+      }
+    },
+    "Ausgeschaltet zählen die Konten dieser Gruppe und ihrer Untergruppen nicht zu den übergreifenden Geld- und Vermögenswerten – „Verfügbar“, Einnahmen, Konsum, Investitionen, Cashflow, Vermögen und die Saldoverläufe der Übersicht – z. B. für Geschäfts- oder Kinderkonten." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When switched off, the accounts in this group and its subgroups are excluded from overall financial figures: available funds, income, consumption, investments, cashflow, wealth and overview balance history, for example for business or children's accounts."
           }
         }
       }
@@ -11517,6 +11561,17 @@
         }
       }
     },
+    "Dieses Konto ist archiviert und zählt nicht zu den Gesamtsummen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This account is archived and does not count towards overall totals."
+          }
+        }
+      }
+    },
     "Dieses Konto stammt aus einer früheren Version. Wählen Sie es einmalig aus, um es mit seinen vorhandenen Umsätzen weiterzuverwenden." : {
       "localizations" : {
         "en" : {
@@ -12414,6 +12469,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "One file per selected account to Downloads"
+          }
+        }
+      }
+    },
+    "Eine Gruppe ist ausgeschlossen – dieses Konto zählt deshalb trotz eingeschaltetem Kontoschalter nicht zu den Gesamtsummen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A group is excluded, so this account does not count towards overall totals even though its own switch is on."
           }
         }
       }
@@ -15898,6 +15964,17 @@
         }
       }
     },
+    "Gruppe „%@“ ist ausgeschlossen – dieses Konto zählt deshalb trotz eingeschaltetem Kontoschalter nicht zu den Gesamtsummen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group “%@” is excluded, so this account does not count towards overall totals even though its own switch is on."
+          }
+        }
+      }
+    },
     "Gruppe „%@“ löschen?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17012,6 +17089,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Include in Total"
+          }
+        }
+      }
+    },
+    "In Gesamtsummen zählen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Include in overall totals"
           }
         }
       }
@@ -18798,6 +18886,17 @@
         }
       }
     },
+    "Keine neuen Kontoauszüge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No new statements"
+          }
+        }
+      }
+    },
     "Keine neuen Umsätze" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19739,6 +19838,17 @@
         }
       }
     },
+    "Kontoauszüge werden geladen …" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading statements …"
+          }
+        }
+      }
+    },
     "Kontoauszüge, Abrechnungen, Depotauszüge und Steuerdokumente aus dem Online-Archiv der Consorsbank, höchstens einmal pro Woche beim Abruf. GiroCrab meldet sich dafür mit Kontonummer und PIN dieses Zugangs im Online-Banking an, die Anmeldung geben Sie in der Consorsbank App frei. Die Schnittstelle ist inoffiziell. Gespeicherte Dokumente werden nicht erneut geladen, denn jeder Abruf markiert ein Dokument bei der Bank als gelesen." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20670,6 +20780,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Delete local session?"
+          }
+        }
+      }
+    },
+    "Lädt alle Kontoauszüge, die das Portal anbietet und die noch nicht im Tresor sind." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loads every statement the portal offers that is not in the vault yet."
           }
         }
       }

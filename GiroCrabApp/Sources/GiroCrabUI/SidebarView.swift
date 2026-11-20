@@ -472,6 +472,15 @@ struct SidebarView: View {
         Button("Einstellungen …", systemImage: "gearshape") { editedAccount = IDBox(id: account.id) }
         CategoryChipToggle(accountID: account.id)
         AccountGroupMenu(account: account)
+        // the account's own switch for the overall money totals (#337); the
+        // group (or a group that group is in) and archiving can still keep it
+        // out — the row's tooltip explains that precedence
+        Toggle(isOn: Binding(
+            get: { account.includeInTotal },
+            set: { model.setAccountIncludeInTotal(account, $0) }
+        )) {
+            Label("In Gesamtsummen zählen", systemImage: "plus.forwardslash.minus")
+        }
         Divider()
         Button("Alle Buchungen als gelesen markieren", systemImage: "checkmark.circle") { model.markAllChecked(accountIDs: [account.id]) }
         ManualLoanAccountMenu(model: model, account: account)
@@ -770,6 +779,12 @@ struct AccountRow: View {
                         ProgressView().controlSize(.mini)
                             .accessibilityLabel(Text("Wird synchronisiert"))
                     }
+                    // outside the overall money totals (#337): like a group's
+                    // eye.slash — the effective flag (own switch, group, archiving)
+                    if account.showsTotalExclusionIndicator {
+                        AccountTotalExclusionIndicator(
+                            help: model.totalExclusionIconHelp(account, redaction: redaction))
+                    }
                 }
                 // row 2: bank / loan progress left, balance right
                 HStack(spacing: 6) {
@@ -809,7 +824,10 @@ struct AccountRow: View {
             }
         }
         .padding(.vertical, 1)
-        .opacity(account.isArchived ? 0.55 : 1)
+        .opacity(account.isArchived ? 0.55 : (account.showsTotalExclusionIndicator ? 0.6 : 1))
+        // reachable explanation (#337): why the account stays out of the totals
+        // although its own switch is on — the group that wins, or archiving
+        .helpIfPresent(model.totalExclusionReason(account, redaction: redaction))
         // one element per account: unread count, name, bank / loan progress, balance
         .accessibilityElement(children: .combine)
     }

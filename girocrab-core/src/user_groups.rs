@@ -555,23 +555,27 @@ pub(crate) fn merge_attached(
     let rows: Vec<(
         (i64, Option<String>, i64, i64, String, i64, Option<String>, i64),
         (Option<i64>, i64, String, i64, String, i64),
+        (bool, i64),
     )> = tx
         .prepare(
             // includes soft-deleted rows (vault merge)
             "SELECT id, user_group_uuid, user_sort_order, placement_ms, name, name_ms, color_hex, color_ms,
-                    archived_unix, archived_ms, sf_symbol, symbol_ms, note, note_ms
+                    archived_unix, archived_ms, sf_symbol, symbol_ms, note, note_ms,
+                    include_in_total != 0, total_ms
              FROM other.accounts",
         )?
         .query_map([], |r| {
             Ok((
                 (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?),
                 (r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?, r.get(13)?),
+                (r.get(14)?, r.get(15)?),
             ))
         })?
         .collect::<Result<_, _>>()?;
     for (
         (oid, uuid, order, placed, name, named, color, colored),
         (archived, archived_ms, symbol, symbol_ms, note, noted),
+        (in_total, total_ms),
     ) in rows
     {
         let Some(&id) = acc_map.get(&oid) else {
@@ -595,6 +599,14 @@ pub(crate) fn merge_attached(
         changed += tx.execute(
             "UPDATE accounts SET archived_unix = ?2, archived_ms = ?3 WHERE id = ?1 AND (?4 OR archived_ms < ?3)",
             params![id, archived, archived_ms, fresh],
+        )? as u32;
+        // total switch (#337): the one field merge of value and stamp — newer
+        // stamp wins, an equal stamp breaks the tie towards `true` (like the
+        // group flag), inserted accounts take both unconditionally
+        changed += tx.execute(
+            "UPDATE accounts SET include_in_total = ?2, total_ms = ?3
+              WHERE id = ?1 AND (?4 OR total_ms < ?3 OR (total_ms = ?3 AND include_in_total < ?2))",
+            params![id, in_total, total_ms, fresh],
         )? as u32;
         // only a user's choice travels; the type's default stays local
         changed += tx.execute(
@@ -853,6 +865,28 @@ pub(crate) fn excluded_from_total(conn: &Connection) -> CoreResult<HashSet<Strin
         .collect())
 }
 
+/// Accounts that count towards overall money figures (#337): their own switch
+/// on, not archived, their group (or a group that group is in) included, not
+/// deleted. The one set behind `BookingFilter.respect_in_total`,
+/// `selection_flow_for_totals`, the dashboard sums and the cashflow card; the
+/// same rule that derives `Account.in_total`. Takes the caller's connection,
+/// so aggregations never take the vault lock a second time.
+pub(crate) fn total_account_ids(conn: &Connection) -> CoreResult<HashSet<i64>> {
+    let excluded = excluded_from_total(conn)?;
+    let rows: Vec<(i64, Option<String>)> = conn
+        .prepare(
+            "SELECT id, user_group_uuid FROM accounts
+              WHERE deleted_ms IS NULL AND archived_unix IS NULL AND include_in_total != 0",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, g)| g.as_ref().is_none_or(|u| !excluded.contains(u)))
+        .map(|(id, _)| id)
+        .collect())
+}
+
 /// `uuid` and all groups below it.
 fn subtree(parents: &HashMap<String, Option<String>>, uuid: &str) -> HashSet<String> {
     parents
@@ -943,10 +977,20 @@ impl Vault {
             });
             v
         };
-        // archived accounts stay listed but don't count (GiroCrab/GiroCrab#208)
+        // Archived and switched-out accounts stay listed but don't count
+        // (GiroCrab/GiroCrab#208, #337); `in_total` is the effective flag
+        // (own switch, group, archiving). Review point on #1100: an excluded
+        // group's header keeps showing its own balance — the exclusion only
+        // pulls it out of the overview figures, never zeroes its own sum.
         let sum = |v: &[Account]| {
             v.iter()
-                .filter(|a| a.currency == "EUR" && a.archived_unix.is_none())
+                .filter(|a| a.currency == "EUR" && a.in_total)
+                .map(|a| a.balance_cents)
+                .sum()
+        };
+        let sum_own = |v: &[Account]| {
+            v.iter()
+                .filter(|a| a.currency == "EUR" && a.include_in_total && a.archived_unix.is_none())
                 .map(|a| a.balance_cents)
                 .sum()
         };
@@ -973,7 +1017,11 @@ impl Vault {
                 stack.extend(kids.iter().rev().map(|k| (*k, depth + 1)));
             }
             out.push(UserGroup {
-                balance_cents: sum(&accs),
+                balance_cents: if excluded.contains(uuid) {
+                    sum_own(&accs)
+                } else {
+                    sum(&accs)
+                },
                 uuid: uuid.clone(),
                 name: name.clone(),
                 sf_symbol: sf_symbol.clone(),
@@ -1352,7 +1400,7 @@ fn renumber(tx: &Connection, ids: &[i64]) -> CoreResult<()> {
 
 /// [`Vault::set_account_archived`] on a held connection; the number of accounts
 /// changed (0: no such account). Time and stamp come from the same second, and
-/// archiving an archived account keeps both: the #998 repair (schema step 34)
+/// archiving an archived account keeps both: the #998 repair (schema step 35)
 /// tells the old MoneyMoney import's archives by a gap between them.
 pub(crate) fn set_archived_inner(
     conn: &Connection,

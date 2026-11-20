@@ -22,9 +22,9 @@
 //!   file it created itself.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, ErrorKind, PipeReader, PipeWriter, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsFd, BorrowedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -121,8 +121,8 @@ impl Drop for LocalApiServer {
 /// turns (and stays) readable once `stop()` wrote to it.
 struct Stopper {
     stopped: AtomicBool,
-    read_fd: RawFd,
-    write_fd: RawFd,
+    wake_rx: PipeReader,
+    wake_tx: PipeWriter,
 }
 
 enum Wait {
@@ -133,34 +133,24 @@ enum Wait {
 
 impl Stopper {
     fn new() -> std::io::Result<Arc<Self>> {
-        let mut fds = [0 as RawFd; 2];
-        // SAFETY: `fds` is a valid buffer for two descriptors.
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        for fd in fds {
-            // SAFETY: fd was just returned by pipe(2); F_SETFD/F_SETFL take an int.
-            unsafe {
-                libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK);
-            }
-        }
+        // Close-on-exec like every descriptor std opens; closed on drop.
+        let (wake_rx, wake_tx) = std::io::pipe()?;
         Ok(Arc::new(Self {
             stopped: AtomicBool::new(false),
-            read_fd: fds[0],
-            write_fd: fds[1],
+            wake_rx,
+            wake_tx,
         }))
     }
 
     fn stop(&self) {
         if !self.stopped.swap(true, Ordering::SeqCst) {
-            // SAFETY: write_fd is open until drop; one byte from a valid buffer.
-            unsafe { libc::write(self.write_fd, [1u8].as_ptr().cast(), 1) };
+            // The only write, into an empty pipe: it cannot block.
+            let _ = (&self.wake_tx).write(&[1]);
         }
     }
 
     /// Sleeps until `fd` is readable, `stop()` or `timeout` (None = no limit).
-    fn wait_readable(&self, fd: RawFd, timeout: Option<Duration>) -> Wait {
+    fn wait_readable(&self, fd: BorrowedFd<'_>, timeout: Option<Duration>) -> Wait {
         let deadline = timeout.map(|t| Instant::now() + t);
         loop {
             if self.stopped.load(Ordering::SeqCst) {
@@ -173,45 +163,15 @@ impl Stopper {
                     if left.is_zero() {
                         return Wait::TimedOut;
                     }
-                    left.as_millis().clamp(1, i32::MAX as u128) as libc::c_int
+                    left.as_millis().clamp(1, i32::MAX as u128) as i32
                 }
             };
-            let mut fds = [
-                libc::pollfd {
-                    fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-                libc::pollfd {
-                    fd: self.read_fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-            ];
-            // SAFETY: `fds` is a valid array of two pollfd structs.
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, ms) };
-            if n < 0 {
-                if std::io::Error::last_os_error().kind() == ErrorKind::Interrupted {
-                    continue;
-                }
-                return Wait::Stopped;
+            match crate::sys::poll_readable(fd, self.wake_rx.as_fd(), ms) {
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) | Ok((_, true)) => return Wait::Stopped,
+                Ok((true, false)) => return Wait::Ready,
+                Ok((false, false)) => {}
             }
-            if fds[1].revents != 0 {
-                return Wait::Stopped;
-            }
-            if fds[0].revents != 0 {
-                return Wait::Ready;
-            }
-        }
-    }
-}
-
-impl Drop for Stopper {
-    fn drop(&mut self) {
-        // SAFETY: both descriptors belong to this Stopper and are closed once.
-        unsafe {
-            libc::close(self.read_fd);
-            libc::close(self.write_fd);
         }
     }
 }
@@ -246,9 +206,7 @@ fn bind(path: &Path) -> Result<(UnixListener, (u64, u64), File), CoreError> {
         _ => false,
     };
     let meta = std::fs::symlink_metadata(dir).map_err(io_error)?;
-    // SAFETY: getuid has no preconditions.
-    let uid = unsafe { libc::getuid() };
-    if !meta.is_dir() || meta.uid() != uid {
+    if !meta.is_dir() || meta.uid() != crate::sys::getuid() {
         return Err(CoreError::invalid(tr(
             "Der Socket-Ordner gehört nicht diesem Benutzer.",
         )));
@@ -271,15 +229,15 @@ fn bind(path: &Path) -> Result<(UnixListener, (u64, u64), File), CoreError> {
         .mode(0o600)
         .open(lock_path(path))
         .map_err(io_error)?;
-    // SAFETY: the descriptor belongs to `lock`, which outlives the call.
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        let e = std::io::Error::last_os_error();
-        if e.kind() == ErrorKind::WouldBlock {
+    // flock(2) on Unix, held until `lock` closes.
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
             return Err(CoreError::invalid(tr(
                 "Eine andere GiroCrab-Instanz verwendet diesen Socket bereits.",
             )));
         }
-        return Err(io_error(e));
+        Err(std::fs::TryLockError::Error(e)) => return Err(io_error(e)),
     }
     match std::fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_socket() => std::fs::remove_file(path).map_err(io_error)?,
@@ -347,7 +305,7 @@ fn accept_loop(listener: UnixListener, vault: Weak<Vault>, stopper: Arc<Stopper>
     let turn = Arc::new(Mutex::new(Instant::now()));
     loop {
         // No time limit: only `stop()` ends the wait other than a connection.
-        let Wait::Ready = stopper.wait_readable(listener.as_raw_fd(), None) else {
+        let Wait::Ready = stopper.wait_readable(listener.as_fd(), None) else {
             return;
         };
         let Ok((mut stream, _)) = listener.accept() else {
@@ -387,46 +345,8 @@ fn accept_loop(listener: UnixListener, vault: Weak<Vault>, stopper: Arc<Stopper>
 
 /// The peer runs as this user (the socket's mode already keeps others out).
 fn same_user(stream: &UnixStream) -> bool {
-    let fd = stream.as_raw_fd();
-    // SAFETY: getuid has no preconditions.
-    let me = unsafe { libc::getuid() };
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
-    {
-        let (mut uid, mut gid): (libc::uid_t, libc::gid_t) = (0, 0);
-        // SAFETY: fd is a connected Unix socket owned by `stream`; uid/gid are valid out pointers.
-        let ok = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } == 0;
-        ok && uid == me
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let mut cred = libc::ucred {
-            pid: 0,
-            uid: 0,
-            gid: 0,
-        };
-        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-        // SAFETY: fd is a connected Unix socket; `cred`/`len` describe a valid buffer.
-        let ok = unsafe {
-            libc::getsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                &mut cred as *mut libc::ucred as *mut libc::c_void,
-                &mut len,
-            )
-        } == 0;
-        ok && cred.uid == me
-    }
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "linux"
-    )))]
-    {
-        let _ = (fd, me);
-        false
-    }
+    // Unknown (unsupported platform, failed call) counts as someone else.
+    crate::sys::peer_uid(stream).is_ok_and(|uid| uid == crate::sys::getuid())
 }
 
 /// Answers the requests of one connection until EOF, an error, a request over
@@ -435,16 +355,16 @@ fn serve(stream: UnixStream, vault: &Weak<Vault>, stopper: &Stopper, turn: &Mute
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
-    let fd = stream.as_raw_fd();
     let mut reader = BufReader::new(stream);
     let mut line: Vec<u8> = Vec::new();
     // `IDLE` after an answer, `REQUEST_DEADLINE` from a request's first byte.
     let mut deadline = Instant::now() + IDLE;
     loop {
         if reader.buffer().is_empty() {
-            match stopper
-                .wait_readable(fd, Some(deadline.saturating_duration_since(Instant::now())))
-            {
+            match stopper.wait_readable(
+                reader.get_ref().as_fd(),
+                Some(deadline.saturating_duration_since(Instant::now())),
+            ) {
                 Wait::Ready => {}
                 Wait::Stopped => return,
                 Wait::TimedOut => {

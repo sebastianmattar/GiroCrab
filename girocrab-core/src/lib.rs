@@ -72,6 +72,8 @@ pub mod standing_orders;
 pub mod suggestions;
 pub mod sync_log;
 mod sync_merge;
+#[cfg(unix)]
+mod sys;
 pub mod tags;
 pub mod tax_allowance;
 pub mod text;

@@ -51,6 +51,10 @@ case "${1:-}" in
   check-app)
     app="${2:-}"; [ -d "$app" ] || die "check-app: give the path to GiroCrab.app"
     bin="$app/Contents/MacOS/GiroCrabMac"
+    if [ ! -f "$bin" ] && [ -f "$app/Info.plist" ]; then
+      exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist" 2>/dev/null || true)"
+      [ -n "$exe" ] && [ -f "$app/$exe" ] && bin="$app/$exe"
+    fi
     [ -f "$bin" ] || die "no binary at $bin"
     v="$(value)"; [ -n "$v" ] || die "no product ID to check against"
     # The value goes in through the environment, not argv (ps).

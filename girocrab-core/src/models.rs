@@ -70,6 +70,9 @@ pub enum ConnectorKind {
     /// Kontist business account via the official GraphQL API (own OAuth2
     /// client, approval in the Kontist app).
     Kontist,
+    /// Hanseatic Bank credit cards, savings products and Postbox PDFs via the online banking's
+    /// JSON API (approval in the bank's app).
+    HanseaticBank,
 }
 
 impl ConnectorKind {
@@ -103,6 +106,7 @@ impl ConnectorKind {
             ConnectorKind::Bhw => "bhw",
             ConnectorKind::Finpension => "finpension",
             ConnectorKind::Kontist => "kontist",
+            ConnectorKind::HanseaticBank => "hanseatic",
         }
     }
     pub fn from_str(s: &str) -> Option<Self> {
@@ -368,8 +372,13 @@ pub struct Account {
     pub initial_balance_cents: Option<i64>,
     /// User-defined group ("Nach Gruppe" view); `None` = "Ohne Gruppe".
     pub user_group_uuid: Option<String>,
-    /// Counts towards the overall total (false if its user group, or a group
-    /// that one is in, is excluded).
+    /// The account's own switch for the overall money totals (#337): whether
+    /// the user let it count. Order accounts (Amazon) start with `false`.
+    #[uniffi(default = true)]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
+    pub include_in_total: bool,
+    /// Counts towards the overall total: the own switch is on AND its user
+    /// group (or a group that one is in) is included AND it is not archived.
     pub in_total: bool,
     /// Marker colour (`#RRGGBB`): the user's choice or a default derived
     /// from the account's sync identity (same on every device).
@@ -637,11 +646,30 @@ pub struct BookingFilter {
     #[uniffi(default = None)]
     #[cfg_attr(feature = "serde", serde(default))]
     pub amount_max_cents: Option<i64>,
+    /// Overall money figures only (#337): the sums below (`income_cents` …
+    /// `perk_cents`, `flow`) count accounts of the effective total set (own
+    /// switch, group, archiving) — an empty selection after that exclusion
+    /// means "none" (zero sums), never "all accounts". It never touches the
+    /// booking list itself: selection, `total_count`, paging, exports and
+    /// documents are proof views and stay complete. Default `false` keeps the
+    /// proof semantics of every existing caller (single account, category,
+    /// documents, API share, menu bar).
+    #[uniffi(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub respect_in_total: bool,
+}
+
+/// Serde default of [`Account::include_in_total`].
+#[cfg(feature = "serde")]
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BookingPage {
+    /// Proof view: every booking of the filter, regardless of
+    /// `BookingFilter.respect_in_total` — that flag only narrows the sums.
     pub transactions: Vec<Booking>,
     pub total_count: u32,
     /// Sum of `FlowKind::Income` bookings (= `flow.income_cents`).

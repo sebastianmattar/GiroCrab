@@ -6,3 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 description = "Generates girocrab-core's BLZ -> BIC table from the Bundesbank Bankleitzahlendatei"
+
+[lints]
+workspace = true

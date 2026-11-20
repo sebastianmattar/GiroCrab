@@ -93,6 +93,13 @@ module adds its own methods to it and reaches the database through `self.db()`.
 - Free functions for Swift are exported only from `ffi.rs`, as wrappers that forward to the
   feature module (`scripts/lint-ffi-exports.sh`, CI). Elsewhere `#[uniffi::export]` marks only
   `impl` blocks of exported objects and callback traits.
+- `unsafe` code lives only in `sys.rs` (safe wrappers around the libc calls std lacks): the
+  core's `Cargo.toml` denies `unsafe_code` (every other workspace member forbids it) and
+  `scripts/lint-no-obfuscation.sh` (CI) lets only that file lift it. The script also keeps
+  processes, embedded files other than `data/` and dynamic loading out of the core and
+  Base64/hex decoding out of the payment path. Two checks back its text patterns: `clippy.toml`
+  bans process and loader calls by resolved path, and `--compiled` (CI) lists the files and
+  environment variables the compiler read for the library.
 - Modules under `vault/` are children of `vault`, so they see its private fields and helpers
   (`kept_key`, `migrate`). Other modules use `Vault::db()` only.
 - Tests sit in the module whose code they exercise.

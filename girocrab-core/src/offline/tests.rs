@@ -542,6 +542,7 @@ fn category_sums_count_only_eur_across_accounts() {
         &[],
         2026,
         11,
+        false,
     )
     .unwrap();
     assert_eq!(
@@ -556,6 +557,7 @@ fn category_sums_count_only_eur_across_accounts() {
         &[usd],
         2026,
         11,
+        false,
     )
     .unwrap();
     assert_eq!(

@@ -214,19 +214,19 @@ INCLUDE_IOS=$(( MACOS_ONLY == 0 || FORCE_IOS == 1 ))
 INCLUDE_SIM=$(( INCLUDE_IOS == 1 && NO_SIM == 0 ))
 # Fingerprints of the sources the iOS slices in $TARGET_DIR were built from
 # (device + simulator, resp. device only).
+IOS_FP="$(combine_fingerprint "$FINGERPRINT" "$(env_fingerprint)")"
 IOS_STAMP="$TARGET_DIR/ios-slices-$PROFILE.fingerprint"
 IOS_DEVICE_STAMP="$TARGET_DIR/ios-device-$PROFILE.fingerprint"
 if [[ $INCLUDE_SIM -eq 1 ]]; then
-  echo "$FINGERPRINT" > "$IOS_STAMP"
-  echo "$FINGERPRINT" > "$IOS_DEVICE_STAMP"
+  echo "$IOS_FP" > "$IOS_STAMP"
+  echo "$IOS_FP" > "$IOS_DEVICE_STAMP"
 elif [[ $INCLUDE_IOS -eq 1 ]]; then
-  echo "$FINGERPRINT" > "$IOS_DEVICE_STAMP"
-elif [[ -f "$IOS_LIB" && -f "$SIM_LIB" && "$(cat "$IOS_STAMP" 2>/dev/null)" == "$FINGERPRINT" ]]; then
-  # Keep iOS slices from an earlier full build of exactly these sources
-  # (stale slices would fail UniFFI's checksums).
+  echo "$IOS_FP" > "$IOS_DEVICE_STAMP"
+elif [[ -f "$IOS_LIB" && -f "$SIM_LIB" && "$(cat "$IOS_STAMP" 2>/dev/null)" == "$IOS_FP" ]]; then
+  # Keep iOS slices from an earlier full build only when sources AND GIROCRAB_FINTS_PRODUCT_ID match.
   INCLUDE_IOS=1; INCLUDE_SIM=1
   echo "    (keeping up-to-date iOS slices from the last full build)"
-elif [[ -f "$IOS_LIB" && "$(cat "$IOS_DEVICE_STAMP" 2>/dev/null)" == "$FINGERPRINT" ]]; then
+elif [[ -f "$IOS_LIB" && "$(cat "$IOS_DEVICE_STAMP" 2>/dev/null)" == "$IOS_FP" ]]; then
   INCLUDE_IOS=1
   echo "    (keeping up-to-date iOS device slice from the last build)"
 fi

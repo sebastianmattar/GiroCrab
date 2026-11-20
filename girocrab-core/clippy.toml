@@ -3,4 +3,24 @@ disallowed-methods = [
     { path = "reqwest::Response::text", reason = "unbounded body: use connectors::read_text_limited" },
     { path = "reqwest::Response::json", reason = "unbounded body: use connectors::read_json_or_null or read_body_limited + serde_json" },
     { path = "reqwest::Response::chunk", reason = "only connectors::read_body_limited streams a body, so every read has a cap" },
+    # The core starts no processes and loads no code at run time (#948, scripts/lint-no-obfuscation.sh).
+    # Resolved paths, so a `use … as` alias does not get around them; sys.rs is where they could appear.
+    { path = "libc::fork", reason = "the core starts no processes (#948)" },
+    { path = "libc::execv", reason = "the core starts no processes (#948)" },
+    { path = "libc::execve", reason = "the core starts no processes (#948)" },
+    { path = "libc::execvp", reason = "the core starts no processes (#948)" },
+    { path = "libc::execl", reason = "the core starts no processes (#948)" },
+    { path = "libc::execle", reason = "the core starts no processes (#948)" },
+    { path = "libc::execlp", reason = "the core starts no processes (#948)" },
+    { path = "libc::posix_spawn", reason = "the core starts no processes (#948)" },
+    { path = "libc::posix_spawnp", reason = "the core starts no processes (#948)" },
+    { path = "libc::system", reason = "the core starts no processes (#948)" },
+    { path = "libc::popen", reason = "the core starts no processes (#948)" },
+    { path = "libc::dlopen", reason = "the core loads no code at run time (#948)" },
+    { path = "libc::dlsym", reason = "the core loads no code at run time (#948)" },
+]
+disallowed-types = [
+    { path = "std::process::Command", reason = "the core starts no processes (#948)" },
+    # tokio's `process` feature is off, so the path may not resolve.
+    { path = "tokio::process::Command", reason = "the core starts no processes (#948)", allow-invalid = true },
 ]

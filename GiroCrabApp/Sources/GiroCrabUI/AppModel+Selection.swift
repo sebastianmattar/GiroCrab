@@ -232,7 +232,15 @@ extension AppModel {
                 let loaded = try await Self.offMain {
                     let page = try Perf.interval("listTransactions") { try vault.listTransactions(filter: filter) }
                     try Task.checkCancellation()
-                    let flow = listHasFlow ? page.flow : try vault.selectionFlow(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    // fallback in the filter's own calculation context (#337)
+                    let flow: SelectionFlow
+                    if listHasFlow {
+                        flow = page.flow
+                    } else if filter.respectInTotal {
+                        flow = try vault.selectionFlowForTotals(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    } else {
+                        flow = try vault.selectionFlow(accountIds: filter.accountIds, dateFrom: from, dateTo: to)
+                    }
                     try Task.checkCancellation()
                     let recurring = try vault.recurringSnapshot(accountIds: ids, year: Int32(month.year ?? 2026), month: UInt32(month.month ?? 1))
                     let categories = try vault.listCategoriesFilteredAmount(dateFrom: from, dateTo: to, accountIds: sums.accounts, checked: sums.checked, direction: sums.direction, amountMinCents: sums.amount.minCents, amountMaxCents: sums.amount.maxCents)

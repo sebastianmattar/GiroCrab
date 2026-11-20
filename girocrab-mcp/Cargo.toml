@@ -12,3 +12,6 @@ serde_json = "1"
 # End-to-end test against the real socket server only; the adapter itself
 # never links the core (it does not open the vault).
 girocrab-core = { path = "../girocrab-core" }
+
+[lints]
+workspace = true

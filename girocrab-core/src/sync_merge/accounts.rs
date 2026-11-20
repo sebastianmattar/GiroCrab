@@ -305,10 +305,11 @@ pub(crate) fn merge_accounts(
                     conn.execute(
                         "INSERT INTO accounts(connection_id, group_id, external_ref, name, bank_name, owner,
                              iban, account_number, currency, kind, balance_cents, balance_date, sf_symbol,
-                             sort_order, initial_balance_cents, balance_derived, created_ms, deleted_ms)
+                             sort_order, initial_balance_cents, balance_derived, include_in_total, total_ms,
+                             created_ms, deleted_ms)
                          SELECT ?2, ?3, external_ref, name, bank_name, owner, iban, account_number, currency,
                              kind, balance_cents, balance_date, sf_symbol, sort_order, initial_balance_cents,
-                             balance_derived, created_ms, deleted_ms
+                             balance_derived, include_in_total, total_ms, created_ms, deleted_ms
                            FROM other.accounts WHERE id = ?1",
                         params![oid, con, grp],
                     )?;

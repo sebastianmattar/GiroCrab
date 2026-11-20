@@ -618,9 +618,12 @@ fn refresh_dashboard(win: &MainWindow, vault: Arc<Vault>) {
     let weak = win.as_weak();
     std::thread::spawn(move || {
         // One account: sum its loaded bookings; everything else: the core's all-account figures.
+        // The overview is an overall money figure (#337): effective total set only.
         let flow = match account_flow {
             Some(f) => f,
-            None => vault.cashflow_by_period(gran, 6, None).unwrap_or_default(),
+            None => vault
+                .cashflow_by_period(gran, 6, None, true)
+                .unwrap_or_default(),
         };
         let status = vault
             .list_category_budget_progress(year, month)

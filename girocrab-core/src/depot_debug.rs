@@ -52,8 +52,7 @@ fn open_private(path: &Path) -> std::io::Result<File> {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         let meta = f.metadata()?;
         // a hard link to someone else's file, or a file of another user
-        // SAFETY: getuid has no preconditions and cannot fail.
-        if meta.nlink() > 1 || meta.uid() != unsafe { libc::getuid() } {
+        if meta.nlink() > 1 || meta.uid() != crate::sys::getuid() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "debug log is not a private file",

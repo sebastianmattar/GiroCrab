@@ -16,3 +16,6 @@ uniffi = { version = "0.32", features = ["cli"] }
 [[bin]]
 name = "uniffi-bindgen-swift"
 path = "src/swift.rs"
+
+[lints]
+workspace = true

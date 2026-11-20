@@ -5,6 +5,8 @@ use std::io::Read;
 use girocrab_core::connectors::fints::keyfile::{KeyFile, MAX_FILE_SIZE};
 use zeroize::Zeroizing;
 
+// A developer tool outside the app: it may start osascript (#948 bans processes in the core).
+#[allow(clippy::disallowed_types)]
 fn password() -> Result<Zeroizing<String>, &'static str> {
     // Static AppleScript only: no filename or password is put on the command line.
     // Capture the hidden dialog's result in memory, never forward its stdout.
