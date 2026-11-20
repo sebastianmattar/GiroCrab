@@ -855,6 +855,17 @@
         }
       }
     },
+    "%lld Dokumente konnten keinem Konto zugeordnet werden." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld documents could not be assigned to an account."
+          }
+        }
+      }
+    },
     "%lld Kategorien: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10596,6 +10607,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asset classes show gross assets. Liabilities are currently not deducted above."
+          }
+        }
+      }
+    },
+    "Die Anmeldedaten werden nur für diesen Abruf verwendet und nie gespeichert." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sign-in details are used for this sync only and never stored."
+          }
+        }
+      }
+    },
+    "Die Anmeldedaten werden verschlüsselt im Tresor gespeichert." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sign-in details are stored encrypted in the vault."
           }
         }
       }
@@ -30894,6 +30927,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pending transactions could not be discarded"
+          }
+        }
+      }
+    },
+    "Vorname;TT.MM.JJJJ;PLZ" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First name;DD.MM.YYYY;postcode"
           }
         }
       }

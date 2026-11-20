@@ -210,6 +210,7 @@ Kurz: `girocrab-core` (Rust, per UniFFI) enthält Tresor, Regeln, Händler-Erken
 | Advanzia Bank | Web-Portal | ✓ | ✓ | – | – | – | – | – | 🧪 Test gesucht [#177](https://github.com/GiroCrab/GiroCrab/issues/177) |
 | Alte Leipziger (Bausparen) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | ✅ Verifiziert |
 | Amazon Bestellungen | Web-Portal | ✓ | – | – | – | – | – | – | 🧪 Test gesucht |
+| BHW Bausparkasse | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht |
 | easybank (ehem. Barclays) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Test gesucht |
 | EquatePlus | Web-Portal | – | ✓ | ✓ | – | – | – | – | 🧪 Test gesucht |
 | FFB (FIL Fondsbank) | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | 🧪 Test gesucht |
@@ -449,6 +450,7 @@ your bank directly. Optional iCloud sync exchanges an encrypted snapshot via you
 | Advanzia Bank | Web-Portal | ✓ | ✓ | – | – | – | – | – | 🧪 Testing wanted [#177](https://github.com/GiroCrab/GiroCrab/issues/177) |
 | Alte Leipziger (Bausparen) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | ✅ Verified |
 | Amazon orders | Web-Portal | ✓ | – | – | – | – | – | – | 🧪 Testing wanted |
+| BHW Bausparkasse | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted |
 | easybank (ehem. Barclays) | Web-Portal | ✓ | ✓ | – | – | – | – | ✓ | 🧪 Testing wanted |
 | EquatePlus | Web-Portal | – | ✓ | ✓ | – | – | – | – | 🧪 Testing wanted |
 | FFB (FIL Fondsbank) | Web-Portal | ✓ | ✓ | ✓ | ✓ | – | – | ✓ | 🧪 Testing wanted |

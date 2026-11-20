@@ -1158,6 +1158,61 @@ fn english(de: &str) -> Option<&'static str> {
         "Uberspace: Keine Asteroids gefunden (Dashboard geändert?)." => {
             "Uberspace: No Asteroids found (dashboard changed?)."
         }
+        // ------------------------------------------------------------ connectors/bhw.rs
+        "BHW: Antwort nicht erkannt (myBHW geändert?)." => {
+            "BHW: response not recognised (myBHW changed?)."
+        }
+        "BHW: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen." => {
+            "BHW: Incomplete or invalid response. No data was imported."
+        }
+        "BHW: Bitte die 10-stellige Vertragsnummer oder die 11-stellige BHW-ID als Anmeldenamen eintragen." => {
+            "BHW: Please enter the 10-digit contract number or the 11-digit BHW ID as the login name."
+        }
+        "BHW: Bitte Vorname, Geburtsdatum und Postleitzahl getrennt durch Semikolon eintragen, z. B. „Erika;31.12.1970;12345“." => {
+            "BHW: Please enter first name, date of birth and postcode separated by semicolons, e.g. “Erika;31.12.1970;12345”."
+        }
+        "BHW: Anmeldung fehlgeschlagen. Bitte Vertragsnummer oder BHW-ID, Vorname, Geburtsdatum und Postleitzahl prüfen." => {
+            "BHW: Login failed. Please check contract number or BHW ID, first name, date of birth and postcode."
+        }
+        "BHW: Für den Einmal-Code ist weder eine E-Mail-Adresse noch eine Mobilnummer hinterlegt." => {
+            "BHW: Neither an email address nor a mobile number is registered for the one-time code."
+        }
+        "BHW: Bitte einmal im Browser bei myBHW anmelden und den Nutzungsbedingungen zustimmen." => {
+            "BHW: Please log in to myBHW once in the browser and accept the terms of use."
+        }
+        "BHW: Der Einmal-Code konnte nicht angefordert werden." => {
+            "BHW: The one-time code could not be requested."
+        }
+        "BHW: Der Einmal-Code wurde nicht akzeptiert. Bitte den Abruf erneut starten." => {
+            "BHW: The one-time code was not accepted. Please start the sync again."
+        }
+        "BHW: Die Sitzung wurde beendet. Bitte den Abruf erneut starten." => {
+            "BHW: The session has ended. Please start the sync again."
+        }
+        "BHW: Die Anfrage wurde abgelehnt." => "BHW: The request was rejected.",
+        "BHW: Nicht alle Dokumente konnten geladen werden. Sie folgen mit dem nächsten Abruf." => {
+            "BHW: Not all documents could be downloaded. They follow with the next fetch."
+        }
+        "BHW: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen." => {
+            "BHW: Unexpected redirect to another address – aborted."
+        }
+        "Die BHW hat einen Einmal-Code an die hinterlegte E-Mail-Adresse geschickt. Bitte hier eingeben." => {
+            "BHW has sent a one-time code to your registered email address. Please enter it here."
+        }
+        "Die BHW hat einen Einmal-Code per SMS an die hinterlegte Mobilnummer geschickt. Bitte hier eingeben." => {
+            "BHW has sent a one-time code by SMS to your registered mobile number. Please enter it here."
+        }
+        "Einmal-Code per E-Mail" => "One-time code by email",
+        "Einmal-Code per SMS" => "One-time code by SMS",
+        "Einmal-Code per E-Mail (Demo)" => "One-time code by email (demo)",
+        "myBHW-Portal (Direkt-Login, Einmal-Code per E-Mail oder SMS)" => {
+            "myBHW portal (direct login, one-time code by email or SMS)"
+        }
+        "Vertragsnummer oder BHW-ID" => "Contract number or BHW ID",
+        "Vorname;TT.MM.JJJJ;PLZ" => "First name;DD.MM.YYYY;postcode",
+        "BHW Bausparkasse: Bausparverträge und Darlehen mit Saldo und Umsätzen. Anmeldung mit der 10-stelligen Vertragsnummer oder der 11-stelligen BHW-ID; statt eines Passworts kommen Vorname, Geburtsdatum und Postleitzahl getrennt durch Semikolon in das zweite Feld (z. B. „Erika;31.12.1970;12345“). Jede Anmeldung wird mit einem Einmal-Code per E-Mail oder SMS bestätigt. Dokumente aus dem myBHW-Postfach lassen sich abrufen. Inoffiziell: nutzt die Schnittstelle des myBHW-Portals, Änderungen sind möglich." => {
+            "BHW Bausparkasse: building savings contracts and loans with balance and transactions. Log in with the 10-digit contract number or the 11-digit BHW ID; instead of a password, first name, date of birth and postcode go into the second field, separated by semicolons (e.g. “Erika;31.12.1970;12345”). Every login is confirmed with a one-time code by email or SMS. Documents from the myBHW mailbox can be fetched. Unofficial: uses the interface of the myBHW portal, changes are possible."
+        }
         // ------------------------------------------------------------ connectors/opel.rs
         "Online-Banking (Direkt-Login, TwoVerify-App)" => {
             "Online banking (direct login, TwoVerify app)"

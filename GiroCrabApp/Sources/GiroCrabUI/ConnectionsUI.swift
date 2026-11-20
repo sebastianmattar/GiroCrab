@@ -20,6 +20,8 @@ struct PinSheet: View {
     private var secretLabel: String { isRah10 ? "Passwort der Schlüsseldatei" : (bankCatalog().first { $0.kind == connection.connector }?.secretLabel ?? String(localized: "PIN")) }
 
     private var isTR: Bool { connection.connector == .tradeRepublic }
+    /// BHW: the secret is first name, date of birth and postcode, not a PIN.
+    private var isBhw: Bool { connection.connector == .bhw }
 
     var body: some View {
         let d = bankCatalog().first { $0.kind == connection.connector }
@@ -54,12 +56,14 @@ struct PinSheet: View {
                 SecureField(secretLabel, text: $secret)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(start)
-                Toggle(isRah10 ? "Passwort im Tresor speichern" : "PIN im Tresor speichern", isOn: $savePin)
+                Toggle(isRah10 ? "Passwort im Tresor speichern" : isBhw ? "Anmeldedaten im Tresor speichern" : "PIN im Tresor speichern", isOn: $savePin)
                     .appFont(.caption)
                     .help("Verschlüsselt in der SQLCipher-Datenbank; beim nächsten Abruf wird nicht mehr gefragt.")
             }
             Text(isRah10
                  ? (savePin ? "Das Passwort wird verschlüsselt im Tresor gespeichert." : "Das Passwort wird nur für diesen Abruf verwendet.")
+                 : isBhw
+                 ? (savePin ? "Die Anmeldedaten werden verschlüsselt im Tresor gespeichert." : "Die Anmeldedaten werden nur für diesen Abruf verwendet und nie gespeichert.")
                  : (savePin ? "Die PIN wird verschlüsselt im Tresor gespeichert." : "Die PIN wird nur für diesen Abruf verwendet und nie gespeichert."))
                 .appFont(.caption).foregroundStyle(Theme.secondary)
             if isTR {
@@ -184,7 +188,7 @@ struct ConnectionEditSheet: View {
         case .americanExpress, .amazonVisa, .advanzia: return []
         case .bunq: return ["bunq.environment"]
         case .enableBanking: return ["enablebanking.application_id", "enablebanking.private_key_pem", "enablebanking.redirect_url"]
-        case .scalableCapital, .amazonOrders, .fnz, .ibkr, .quirion, .easybank, .alteLeipziger, .volkswagenBank, .uberspace, .schwaebischHall, .equatePlus, .ffb, .fordMoney, .opelDirektbank, .finpension: return []
+        case .scalableCapital, .amazonOrders, .fnz, .ibkr, .quirion, .easybank, .alteLeipziger, .volkswagenBank, .uberspace, .schwaebischHall, .equatePlus, .ffb, .fordMoney, .opelDirektbank, .bhw, .finpension: return []
         }
     }
 
@@ -262,7 +266,7 @@ struct ConnectionEditSheet: View {
     }
     @State private var showAdvanced = false
 
-    private var usesPin: Bool { [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .comdirect, .tradeRepublic, .bunq, .ibkr, .easybank, .alteLeipziger, .volkswagenBank, .uberspace, .ffb, .fordMoney, .opelDirektbank].contains(connection.connector) }
+    private var usesPin: Bool { [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .comdirect, .tradeRepublic, .bunq, .ibkr, .easybank, .alteLeipziger, .volkswagenBank, .uberspace, .ffb, .fordMoney, .opelDirektbank, .bhw].contains(connection.connector) }
     private var isTR: Bool { connection.connector == .tradeRepublic }
     /// Amex: user name and password for the portal login, kept in the vault and
     /// filled into the login form of the portal window.
@@ -298,9 +302,9 @@ struct ConnectionEditSheet: View {
                         LabeledContent("BLZ", value: blz)
                     }
                     if usesPin {
-                        Toggle(isRah10 ? "Passwort im Tresor speichern" : connection.connector == .bunq ? "API-Schlüssel im Tresor speichern" : connection.connector == .ibkr ? "Flex-Query-ID im Tresor speichern" : [.easybank, .alteLeipziger, .uberspace, .fordMoney, .opelDirektbank].contains(connection.connector) ? "Passwort im Tresor speichern" : "PIN im Tresor speichern", isOn: $storePin)
+                        Toggle(isRah10 ? "Passwort im Tresor speichern" : connection.connector == .bunq ? "API-Schlüssel im Tresor speichern" : connection.connector == .ibkr ? "Flex-Query-ID im Tresor speichern" : connection.connector == .bhw ? "Anmeldedaten im Tresor speichern" : [.easybank, .alteLeipziger, .uberspace, .fordMoney, .opelDirektbank].contains(connection.connector) ? "Passwort im Tresor speichern" : "PIN im Tresor speichern", isOn: $storePin)
                         if storePin {
-                            SecureField(isRah10 ? "Passwort der Schlüsseldatei (leer = unverändert)" : status?.hasPin == true ? "Gespeicherte PIN (leer = unverändert)" : (connection.connector == .ibkr ? "Flex-Query-ID" : [.easybank, .alteLeipziger, .uberspace, .fordMoney, .opelDirektbank].contains(connection.connector) ? "Passwort" : "PIN"), text: $pin)
+                            SecureField(isRah10 ? "Passwort der Schlüsseldatei (leer = unverändert)" : status?.hasPin == true ? "Gespeicherte PIN (leer = unverändert)" : (connection.connector == .ibkr ? "Flex-Query-ID" : connection.connector == .bhw ? "Vorname;TT.MM.JJJJ;PLZ" : [.easybank, .alteLeipziger, .uberspace, .fordMoney, .opelDirektbank].contains(connection.connector) ? "Passwort" : "PIN"), text: $pin)
                         }
                     }
                     if isFinTs {

@@ -19,6 +19,7 @@ use crate::i18n::trf;
 pub mod advanzia;
 pub mod amazon_documents;
 pub mod bank_directory;
+pub mod bhw;
 pub mod broker_documents;
 pub mod bunq;
 pub mod comdirect;

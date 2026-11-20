@@ -168,6 +168,17 @@ pub fn descriptor(kind: ConnectorKind) -> BankDescriptor {
             required_settings: vec![],
             note: tr("Uberspace-Hosting: Guthaben und Buchungen aller Asteroids, die zur E-Mail-Adresse des Dashboards gehören. Inoffiziell: liest die Seiten des Dashboards, Änderungen sind möglich.").into(),
         },
+        ConnectorKind::Bhw => BankDescriptor {
+            kind,
+            name: "BHW Bausparkasse".into(),
+            protocol: tr("myBHW-Portal (Direkt-Login, Einmal-Code per E-Mail oder SMS)").into(),
+            bank_code: "25410200".into(),
+            sf_symbol: "house".into(),
+            login_label: tr("Vertragsnummer oder BHW-ID").into(),
+            secret_label: tr("Vorname;TT.MM.JJJJ;PLZ").into(),
+            required_settings: vec![],
+            note: tr("BHW Bausparkasse: Bausparverträge und Darlehen mit Saldo und Umsätzen. Anmeldung mit der 10-stelligen Vertragsnummer oder der 11-stelligen BHW-ID; statt eines Passworts kommen Vorname, Geburtsdatum und Postleitzahl getrennt durch Semikolon in das zweite Feld (z. B. „Erika;31.12.1970;12345“). Jede Anmeldung wird mit einem Einmal-Code per E-Mail oder SMS bestätigt. Dokumente aus dem myBHW-Postfach lassen sich abrufen. Inoffiziell: nutzt die Schnittstelle des myBHW-Portals, Änderungen sind möglich.").into(),
+        },
         ConnectorKind::OpelDirektbank => BankDescriptor {
             kind,
             name: "Opel Direktbank".into(),
@@ -663,6 +674,19 @@ pub const BANK_MATRIX: &[MatrixEntry] = &[
         issues: &[300],
     },
     MatrixEntry {
+        name: "BHW Bausparkasse",
+        kind: Some(ConnectorKind::Bhw),
+        interface: Interface::WebPortal,
+        official: Some(false),
+        capabilities: &[
+            Capability::Transactions,
+            Capability::Balances,
+            Capability::Documents,
+        ],
+        status: Status::TestingWanted,
+        issues: &[],
+    },
+    MatrixEntry {
         name: "Opel Direktbank",
         kind: Some(ConnectorKind::OpelDirektbank),
         interface: Interface::WebPortal,
@@ -787,6 +811,7 @@ pub fn make_connector_for(kind: ConnectorKind, key: &str, demo: bool) -> Box<dyn
         ConnectorKind::Ffb => Box::new(ffb::FfbConnector::new()),
         ConnectorKind::FordMoney => Box::new(fordmoney::FordMoneyConnector::new()),
         ConnectorKind::OpelDirektbank => Box::new(opel::OpelDirektbankConnector::new()),
+        ConnectorKind::Bhw => Box::new(bhw::BhwConnector::new()),
         ConnectorKind::Finpension => Box::new(finpension::FinpensionConnector),
         ConnectorKind::ScalableCapital => Box::new(scalable::ScalableConnector::new()),
         ConnectorKind::EnableBanking => {

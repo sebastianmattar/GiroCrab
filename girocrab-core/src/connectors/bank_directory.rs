@@ -167,6 +167,11 @@ fn own_api() -> Vec<(ConnectorKind, &'static str, &'static str)> {
             "ford money fordmoney fordbank tagesgeld festgeld",
         ),
         (
+            ConnectorKind::Bhw,
+            "BHW (Bausparen)",
+            "bhw mybhw bausparvertrag bausparen baufinanzierung darlehen",
+        ),
+        (
             ConnectorKind::OpelDirektbank,
             "Opel Direktbank",
             "opel direktbank opelbank opel-direktbank stellantis tagesgeld festgeld",
@@ -269,6 +274,8 @@ const FORD_BANK_BLZ: &str = "37021548";
 /// Opel Direktbank: its FinTS server offers no statements; served by its own web connector.
 const OPEL_DIREKTBANK_BLZ: &str = "50025000";
 const SCHWAEBISCH_HALL_BLZ: &str = "62220000";
+/// BHW Bausparkasse, no public FinTS: served by its own connector (myBHW portal).
+const BHW_BLZ: &str = "25410200";
 
 fn own_result(kind: ConnectorKind, name: &str) -> BankSearchResult {
     BankSearchResult {
@@ -345,6 +352,8 @@ pub fn search(
             out.push(fints_result(b));
         } else if blz == "70013000" {
             out.push(own_result(ConnectorKind::Fnz, "FNZ Bank"));
+        } else if blz == BHW_BLZ {
+            out.push(own_result(ConnectorKind::Bhw, "BHW (Bausparen)"));
         } else if blz == OPEL_DIREKTBANK_BLZ {
             out.push(own_result(ConnectorKind::OpelDirektbank, "Opel Direktbank"));
         } else if blz == FORD_BANK_BLZ {

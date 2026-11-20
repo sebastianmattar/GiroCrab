@@ -62,6 +62,9 @@ pub enum ConnectorKind {
     FordMoney,
     /// Opel Direktbank savings accounts and Postbox PDFs via the web banking (TwoVerify approval).
     OpelDirektbank,
+    /// BHW Bausparkasse: building-savings contracts, loans and mailbox PDFs via the
+    /// myBHW portal's JSON API (one-time code by e-mail or SMS).
+    Bhw,
     /// Finpension (CH): Säule 3a, Freizügigkeit, 1e – import of the CSV/JSON export (#300).
     Finpension,
 }
@@ -94,6 +97,7 @@ impl ConnectorKind {
             ConnectorKind::Ffb => "ffb",
             ConnectorKind::FordMoney => "fordmoney",
             ConnectorKind::OpelDirektbank => "opeldirektbank",
+            ConnectorKind::Bhw => "bhw",
             ConnectorKind::Finpension => "finpension",
         }
     }
@@ -154,6 +158,7 @@ impl ConnectorKind {
             ConnectorKind::Ffb,
             ConnectorKind::FordMoney,
             ConnectorKind::OpelDirektbank,
+            ConnectorKind::Bhw,
             ConnectorKind::Finpension,
         ]
     }

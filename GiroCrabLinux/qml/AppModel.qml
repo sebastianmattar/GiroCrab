@@ -2523,7 +2523,7 @@ QtObject {
         next(0)
     }
     function canFetchStatements(a) {
-        return a && a.connector && a.kind !== "Loan" && ["VolksbankKasselGoettingen", "Direkt1822", "FinTsGeneric", "Easybank", "FordMoney", "OpelDirektbank"].indexOf(a.connector) >= 0
+        return a && a.connector && (a.kind !== "Loan" || a.connector === "Bhw") && ["VolksbankKasselGoettingen", "Direkt1822", "FinTsGeneric", "Easybank", "FordMoney", "OpelDirektbank", "Bhw"].indexOf(a.connector) >= 0
     }
     function fetchStatements(a) {
         if (syncingConnectionID !== null) return
