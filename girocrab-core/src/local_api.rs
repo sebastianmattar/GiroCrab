@@ -30,11 +30,11 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::CoreError;
 use crate::merchants::FlowKind;
-use crate::models::{kpi_side, Booking, BookingDirection, BookingFilter, KpiSide};
+use crate::models::{Booking, BookingDirection, BookingFilter, KpiSide, kpi_side};
 use crate::vault::Vault;
 
 /// Version of the request/response format; a breaking change bumps it.
@@ -372,9 +372,7 @@ impl Vault {
         let mut scope = stored_scope(&db)?;
         change(&mut scope);
         scope.account_ids = live_account_ids(&db, &scope.account_ids)?;
-        let json = serde_json::to_string(&scope).map_err(|e| CoreError::InvalidInput {
-            message: e.to_string(),
-        })?;
+        let json = serde_json::to_string(&scope).map_err(|e| CoreError::invalid(e.to_string()))?;
         Vault::set_setting_inner(&db, SCOPE_SETTING, &json)
     }
 
@@ -435,7 +433,7 @@ impl Vault {
                 return Err(ApiError::new(
                     ApiErrorCode::UnknownMethod,
                     format!("unknown method: {other}"),
-                ))
+                ));
             }
         };
         Ok(value)
@@ -615,13 +613,13 @@ impl Vault {
         }
         // The totals enrich every booking of the range while holding the vault:
         // a bounded range keeps one request short (~2 ms per year on 31k bookings).
-        let day = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
-        if let (Some(f), Some(t)) = (day(&from), day(&to)) {
-            if (t - f).num_days() > MAX_SUMMARY_DAYS {
-                return Err(ApiError::invalid(format!(
-                    "at most {MAX_SUMMARY_DAYS} days per summary"
-                )));
-            }
+        let day = |d: &str| jiff::civil::Date::strptime("%Y-%m-%d", d).ok();
+        if let (Some(f), Some(t)) = (day(&from), day(&to))
+            && crate::dates::days_between(f, t) > MAX_SUMMARY_DAYS
+        {
+            return Err(ApiError::invalid(format!(
+                "at most {MAX_SUMMARY_DAYS} days per summary"
+            )));
         }
         // One lock for both reads, so totals and categories see the same vault.
         let db = self.db()?;
@@ -781,10 +779,10 @@ fn flow_str(flow: FlowKind) -> &'static str {
 fn check_date(date: Option<String>, name: &str) -> ApiResult<Option<String>> {
     match date.filter(|d| !d.is_empty()) {
         None => Ok(None),
-        Some(d) => chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d")
+        Some(d) => jiff::civil::Date::strptime("%Y-%m-%d", &d)
             .ok()
-            .filter(|day| (1000..=9999).contains(&chrono::Datelike::year(day)))
-            .map(|day| Some(day.format("%Y-%m-%d").to_string()))
+            .filter(|day| (1000..=9999).contains(&day.year()))
+            .map(|day| Some(crate::dates::iso(day)))
             .ok_or_else(|| ApiError::invalid(format!("{name} must be YYYY-MM-DD"))),
     }
 }
@@ -849,8 +847,8 @@ fn shared_text(scope: &ShareScope, on: bool, text: &str) -> Option<String> {
 fn is_calendar_date(s: &str) -> bool {
     ["%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y"]
         .iter()
-        .filter_map(|f| chrono::NaiveDate::parse_from_str(s, f).ok())
-        .any(|d| (1900..=2100).contains(&chrono::Datelike::year(&d)))
+        .filter_map(|f| jiff::civil::Date::strptime(f, s).ok())
+        .any(|d| (1900..=2100).contains(&d.year()))
 }
 
 fn api_transaction(scope: &ShareScope, t: &Booking) -> ApiTransaction {

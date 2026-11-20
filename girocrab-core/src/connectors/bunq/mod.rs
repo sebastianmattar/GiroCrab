@@ -24,15 +24,16 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    http_client_same_host, BankConnector, CancelOutcome, Challenge, ChallengeKind,
-    ChallengeResponse, ConnectContext, FetchResult, Phase, RemoteAccount, RemoteTransaction,
-    TransferJob, TransferResult,
+    BankConnector, CancelOutcome, Challenge, ChallengeKind, ChallengeResponse, ConnectContext,
+    FetchResult, Phase, RemoteAccount, RemoteTransaction, TransferJob, TransferResult,
+    http_client_same_host,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
+use crate::secret::{SecretJson, SecretString};
 
 use parse::*;
 use protocol::*;
@@ -70,11 +71,11 @@ struct BunqState {
     env: String,
     /// SHA-256 prefix of the API key – a new key starts over.
     key_fp: String,
-    private_key_pem: String,
-    installation_token: String,
+    private_key_pem: SecretString,
+    installation_token: SecretString,
     server_public_key: String,
     device_registered: bool,
-    session_token: String,
+    session_token: SecretString,
     user_id: i64,
     /// Payment id -> `updated` timestamp when its receipts were last checked.
     receipts_checked: BTreeMap<i64, String>,
@@ -261,13 +262,13 @@ impl BunqConnector {
         payments: &[Value],
         window_days: i64,
     ) -> (Vec<crate::documents::RemoteDocument>, bool) {
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         let days_ago = |p: &Value| {
             p["created"]
                 .as_str()
                 .and_then(local_date)
-                .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-                .map(|d| (today - d).num_days())
+                .and_then(|d| jiff::civil::Date::strptime("%Y-%m-%d", &d).ok())
+                .map(|d| crate::dates::days_between(d, today))
                 .unwrap_or(i64::MAX)
         };
         // Receipt lookups cost one call each: never-checked payments first,
@@ -476,7 +477,7 @@ impl BunqConnector {
         account: &RemoteAccount,
     ) -> Vec<crate::documents::RemoteDocument> {
         let mut docs = Vec::new();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::dates::today();
         let mut created = 0;
         for (first, last) in completed_months(today, STATEMENT_MONTHS) {
             if created >= MAX_STATEMENTS_PER_SYNC {
@@ -488,10 +489,10 @@ impl BunqConnector {
                 .get(&account_id)
                 .cloned()
                 .unwrap_or_default();
-            if last.format("%Y-%m-%d").to_string() < opened {
+            if crate::dates::iso(last) < opened {
                 break; // older months are earlier still
             }
-            let key = format!("{account_id}:{}", first.format("%Y-%m"));
+            let key = format!("{account_id}:{}", first.strftime("%Y-%m"));
             if self.state.statements_done.contains(&key) {
                 continue;
             }
@@ -515,22 +516,21 @@ impl BunqConnector {
     async fn export_statement(
         &mut self,
         account_id: i64,
-        first: chrono::NaiveDate,
-        last: chrono::NaiveDate,
+        first: jiff::civil::Date,
+        last: jiff::civil::Date,
     ) -> ApiResult<Vec<u8>> {
         let base = format!(
             "/v1/user/{}/monetary-account/{account_id}/customer-statement",
             self.state.user_id
         );
-        let token = self.state.session_token.clone();
         let body = json!({
             "statement_format": "PDF",
-            "date_start": first.format("%Y-%m-%d").to_string(),
-            "date_end": last.format("%Y-%m-%d").to_string(),
+            "date_start": crate::dates::iso(first),
+            "date_end": crate::dates::iso(last),
             "include_attachment": false,
         });
         let v = self
-            .call(reqwest::Method::POST, &base, Some(&body), Some(&token))
+            .call(reqwest::Method::POST, &base, Some(&body), Auth::Session)
             .await?;
         let id = find(&v, "Id")["id"].as_i64().ok_or_else(|| ApiError {
             status: 0,
@@ -563,7 +563,7 @@ impl BunqConnector {
                 reqwest::Method::DELETE,
                 &format!("{base}/{id}"),
                 None,
-                Some(&token),
+                Auth::Session,
             )
             .await;
         result
@@ -608,10 +608,10 @@ impl BunqConnector {
         // Always the full window: an old hold (hotel, rental car) must not
         // vanish just because this sync only asks for recent bookings.
         // Foreign-currency notes are therefore added for recent payments only.
-        let window = chrono::Local::now().date_naive() - chrono::Duration::days(HOLD_WINDOW_DAYS);
-        let window = window.format("%Y-%m-%d").to_string();
+        let window = crate::dates::today() - crate::dates::days(HOLD_WINDOW_DAYS);
+        let window = crate::dates::iso(window);
         let actions = self.card_actions(account_id, &window).await?;
-        let now = chrono::Utc::now().naive_utc();
+        let now = crate::dates::now_utc();
         let mut holds = Vec::new();
         let mut lookups = 0;
         for a in &actions {
@@ -637,14 +637,14 @@ impl BunqConnector {
                 .unwrap_or_default()
             {
                 let ext = format!("bunq-{pid}");
-                if let Some(t) = payments.iter_mut().find(|t| t.external_id == ext) {
-                    if !t.purpose.contains(&note) {
-                        t.purpose = if t.purpose.is_empty() {
-                            note.clone()
-                        } else {
-                            format!("{} · {note}", t.purpose)
-                        };
-                    }
+                if let Some(t) = payments.iter_mut().find(|t| t.external_id == ext)
+                    && !t.purpose.contains(&note)
+                {
+                    t.purpose = if t.purpose.is_empty() {
+                        note.clone()
+                    } else {
+                        format!("{} · {note}", t.purpose)
+                    };
                 }
             }
         }
@@ -683,13 +683,12 @@ impl BunqConnector {
             return CancelOutcome::Cancelled;
         };
         let path = self.draft_path(d.account_id, Some(d.draft_id));
-        let token = self.state.session_token.clone();
         let put = self
             .call(
                 reqwest::Method::PUT,
                 &path,
                 Some(&json!({"status": "REJECTED"})),
-                Some(&token),
+                Auth::Session,
             )
             .await;
         let status = self.draft_status(&d).await;
@@ -764,7 +763,7 @@ impl BankConnector for BunqConnector {
         self.client = Some(http_client_same_host()?);
 
         let fp = key_fingerprint(&api_key);
-        let stored: BunqState = serde_json::from_value(ctx.state.clone()).unwrap_or_default();
+        let stored: BunqState = ctx.state.decode().unwrap_or_default();
         self.state = if stored.env == env && stored.key_fp == fp {
             stored
         } else {
@@ -778,7 +777,7 @@ impl BankConnector for BunqConnector {
         if self.session_alive().await {
             return Ok(Phase::Ready);
         }
-        self.state.session_token.clear();
+        self.state.session_token = SecretString::default();
         if !self.state.installation_token.is_empty()
             && self.state.device_registered
             && self.open_session(&api_key).await.is_ok()
@@ -887,13 +886,12 @@ impl BankConnector for BunqConnector {
             }],
             "number_of_required_accepts": 1,
         });
-        let token = self.state.session_token.clone();
         let path = self.draft_path(account_id, None);
         self.result = TransferResult::default();
         // From here on a dropped connection may have left a draft at bunq.
         self.order_submitted = true;
         let v = match self
-            .call(reqwest::Method::POST, &path, Some(&body), Some(&token))
+            .call(reqwest::Method::POST, &path, Some(&body), Auth::Session)
             .await
         {
             Ok(v) => v,
@@ -967,17 +965,15 @@ impl BankConnector for BunqConnector {
         // After document retrieval was switched on again: reach back to the day it was switched off.
         let mut receipt_window = RECEIPT_WINDOW_DAYS;
         if let Some(day) = ctx
-            .settings
-            .get(super::DOCUMENTS_CATCHUP)
-            .and_then(|d| chrono::NaiveDate::parse_from_str(d.expose(), "%Y-%m-%d").ok())
+            .documents
+            .catchup_since()
+            .and_then(crate::dates::parse_iso)
         {
-            let back = (chrono::Local::now().date_naive() - day).num_days();
+            let back = crate::dates::days_between(day, crate::dates::today());
             receipt_window = receipt_window.max(back);
         }
-        let receipt_since = (chrono::Local::now().date_naive()
-            - chrono::Duration::days(receipt_window))
-        .format("%Y-%m-%d")
-        .to_string();
+        let receipt_since =
+            crate::dates::iso(crate::dates::today() - crate::dates::days(receipt_window));
         let list_since = receipt_since.as_str().min(ctx.since.as_str()).to_string();
         for (id, account) in self.accounts().await? {
             let raw = self.raw_payments(id, &list_since).await?;
@@ -995,7 +991,7 @@ impl BankConnector for BunqConnector {
                 .collect();
             // Receipts and statements are extras: a failure must not break the sync. Switched
             // off for the connection ("Dokumente abrufen"): nothing is asked for.
-            if !ctx.settings.contains_key(super::DOCUMENTS_OFF) {
+            if ctx.documents.enabled() {
                 let (receipts, incomplete) = self
                     .receipts(id, &account.external_ref, &raw, receipt_window)
                     .await;
@@ -1023,7 +1019,7 @@ impl BankConnector for BunqConnector {
         if holds_ok {
             out.hold_prefix = Some(HOLD_PREFIX.into());
         }
-        out.state = Some(serde_json::to_value(&self.state).unwrap_or(Value::Null));
+        out.state = SecretJson::encode(&self.state).ok();
         Ok(out)
     }
 }

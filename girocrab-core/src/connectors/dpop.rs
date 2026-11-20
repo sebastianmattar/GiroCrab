@@ -4,10 +4,10 @@
 //! whose claims bind method, URL, time, a random id, optionally the server
 //! nonce and the SHA-256 hash of the access token (`ath`).
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use p256::ecdsa::{signature::Signer, Signature, SigningKey};
-use serde_json::{json, Value};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use p256::ecdsa::{Signature, SigningKey, signature::Signer};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -33,12 +33,9 @@ impl DpopKey {
     pub fn from_hex(hex_str: &str) -> CoreResult<Self> {
         let bytes = hex::decode(hex_str.trim())
             .map(Zeroizing::new)
-            .map_err(|_| CoreError::Protocol {
-                message: "DPoP key: invalid hex".into(),
-            })?;
-        let key = SigningKey::from_slice(&bytes).map_err(|_| CoreError::Protocol {
-            message: "DPoP key: invalid scalar".into(),
-        })?;
+            .map_err(|_| CoreError::protocol("DPoP key: invalid hex"))?;
+        let key = SigningKey::from_slice(&bytes)
+            .map_err(|_| CoreError::protocol("DPoP key: invalid scalar"))?;
         Ok(DpopKey { key })
     }
 
@@ -70,7 +67,7 @@ impl DpopKey {
         nonce: Option<&str>,
         access_token: Option<&str>,
     ) -> String {
-        let iat = chrono::Utc::now().timestamp();
+        let iat = jiff::Timestamp::now().as_second();
         let jti = uuid::Uuid::new_v4().simple().to_string();
         self.proof_at(method, url, nonce, access_token, iat, &jti)
     }
@@ -116,7 +113,7 @@ fn canonical_htu(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p256::ecdsa::{signature::Verifier, VerifyingKey};
+    use p256::ecdsa::{VerifyingKey, signature::Verifier};
 
     fn decode(part: &str) -> Value {
         serde_json::from_slice(&URL_SAFE_NO_PAD.decode(part).unwrap()).unwrap()

@@ -7,14 +7,14 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use girocrab_core::planned::{PlannedPayment, PlannedTotals};
-use girocrab_core::recurring::{series_matches, RecurringSeries, RecurringSnapshot};
+use girocrab_core::recurring::{RecurringSeries, RecurringSnapshot, series_matches};
 use girocrab_core::salary::SalaryCycle;
 use girocrab_core::standing_orders::StandingOrderInfo;
 use girocrab_core::{BookingFilter, StandingOrderAction, Vault};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::recurring_view::{self as view, Line};
-use crate::{german_date, money, privacy_on, reload, with_state, MainWindow, RecLine};
+use crate::{MainWindow, RecLine, german_date, money, privacy_on, reload, with_state};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 

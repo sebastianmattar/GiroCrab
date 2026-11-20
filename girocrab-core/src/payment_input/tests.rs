@@ -171,7 +171,9 @@ fn payload_follows_epc069() {
     );
     assert_eq!(
         p.as_deref(),
-        Some("BCD\n002\n1\nSCT\nBYLADEM1001\nStadtwerke Kassel\nDE02120300000000202051\nEUR123.45\n\n\nAbschlag November")
+        Some(
+            "BCD\n002\n1\nSCT\nBYLADEM1001\nStadtwerke Kassel\nDE02120300000000202051\nEUR123.45\n\n\nAbschlag November"
+        )
     );
 }
 

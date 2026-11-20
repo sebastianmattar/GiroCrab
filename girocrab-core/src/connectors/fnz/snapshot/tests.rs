@@ -86,20 +86,36 @@ fn imports_both_owners_depots_and_cash_with_stable_ids_and_correct_currencies() 
 
 #[test]
 fn rejects_incomplete_wrong_account_and_duplicate_transactions() {
-    for (pointer,value) in [
-        ("/details/0/transactions",Value::Null),
-        ("/details/0/accountRef",json!("UNKNOWN")),
-        ("/details/0/transactions/0/depotId/id",json!("OTHER")),
-        ("/details/1/cashAccountId/subDepotNumber",json!("OTHER")),
-        ("/details/1/transactions/0/orderOrTransactionId/transactionId/belegNummer",Value::Null),
-        ("/details/0/inventory/investmentDepotInventories/0/currentExchangeRate/value",json!("0")),
-        ("/details/0/inventory/investmentDepotInventories/0/currentExchangeRate/targetCurrencyId",json!("GBP")),
-        ("/details/0/inventory/investmentDepotInventories/0/inventory/value",json!("999")),
-        ("/details/0/transactions/0/paymentAmount",Value::Null),
-        ("/details/0/historicalTransactions/0/paymentAmount",Value::Null),
+    for (pointer, value) in [
+        ("/details/0/transactions", Value::Null),
+        ("/details/0/accountRef", json!("UNKNOWN")),
+        ("/details/0/transactions/0/depotId/id", json!("OTHER")),
+        ("/details/1/cashAccountId/subDepotNumber", json!("OTHER")),
+        (
+            "/details/1/transactions/0/orderOrTransactionId/transactionId/belegNummer",
+            Value::Null,
+        ),
+        (
+            "/details/0/inventory/investmentDepotInventories/0/currentExchangeRate/value",
+            json!("0"),
+        ),
+        (
+            "/details/0/inventory/investmentDepotInventories/0/currentExchangeRate/targetCurrencyId",
+            json!("GBP"),
+        ),
+        (
+            "/details/0/inventory/investmentDepotInventories/0/inventory/value",
+            json!("999"),
+        ),
+        ("/details/0/transactions/0/paymentAmount", Value::Null),
+        (
+            "/details/0/historicalTransactions/0/paymentAmount",
+            Value::Null,
+        ),
     ] {
-        let mut v=fixture();*v.pointer_mut(pointer).unwrap()=value;
-        assert!(snapshot(&v.to_string()).is_err(),"{pointer}");
+        let mut v = fixture();
+        *v.pointer_mut(pointer).unwrap() = value;
+        assert!(snapshot(&v.to_string()).is_err(), "{pointer}");
     }
     let mut v = fixture();
     let row = v["details"][0]["transactions"][0].clone();
@@ -113,8 +129,8 @@ fn rejects_incomplete_wrong_account_and_duplicate_transactions() {
     assert!(snapshot(&v.to_string()).is_err());
     // Missing account IDs on every side must not pass as null == null.
     let mut v = fixture();
-    v["overview"]["ownerGroups"][0]["cashAccounts"][0]["depotOrCashAccount"]
-        ["depotOrCashAccountId"]["subDepotId"] = Value::Null;
+    v["overview"]["ownerGroups"][0]["cashAccounts"][0]["depotOrCashAccount"]["depotOrCashAccountId"]
+        ["subDepotId"] = Value::Null;
     v["details"][1]["cashAccountId"] = Value::Null;
     v["details"][1]["transactions"][0]["cashAccountId"] = Value::Null;
     assert!(snapshot(&v.to_string()).is_err());
@@ -195,14 +211,16 @@ fn repeated_sync_is_idempotent_and_empty_inventory_clears_positions() {
     assert_eq!(vault.list_holdings(depot.id).unwrap().len(), 1);
     let mut broken = fixture();
     broken["details"][0]["transactions"] = Value::Null;
-    assert!(vault
-        .clone()
-        .import_fnz_snapshot(connection, broken.to_string())
-        .is_err());
+    assert!(
+        vault
+            .clone()
+            .import_fnz_snapshot(connection, broken.to_string())
+            .is_err()
+    );
     assert_eq!(vault.list_holdings(depot.id).unwrap().len(), 1);
     let mut empty = fixture();
-    empty["overview"]["ownerGroups"][0]["investmentDepots"][0]
-        ["depotInventorySumAccountCurrency"]["value"] = json!("0.00");
+    empty["overview"]["ownerGroups"][0]["investmentDepots"][0]["depotInventorySumAccountCurrency"]
+        ["value"] = json!("0.00");
     empty["details"][0]["inventory"]["totalInventoryValueAccountCurrency"]["value"] = json!("0.00");
     empty["details"][0]["inventory"]["investmentDepotInventories"] = json!([]);
     vault
@@ -305,9 +323,10 @@ fn depot_transactions_become_security_transactions_with_direction_and_units() {
         .iter()
         .filter(|t| t.account_ref == "D1")
         .collect();
-    assert!(d1
-        .iter()
-        .all(|s| bookings.iter().any(|b| b.external_id == s.external_id)));
+    assert!(
+        d1.iter()
+            .all(|s| bookings.iter().any(|b| b.external_id == s.external_id))
+    );
 }
 
 #[test]

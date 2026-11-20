@@ -64,7 +64,7 @@ public enum AppUpdateChannel: String, CaseIterable, Sendable {
 
     /// The user's explicit choice, else the channel of the running build.
     public static var current: AppUpdateChannel {
-        if let raw = UserDefaults.standard.string(forKey: defaultsKey),
+        if let raw = AppDefaults.store.string(forKey: defaultsKey),
            let channel = AppUpdateChannel(rawValue: raw) {
             return channel
         }
@@ -109,7 +109,7 @@ public final class AppUpdates {
 
     /// Stores an explicit choice – also "stable" on a beta/nightly build.
     public func setChannel(_ newValue: AppUpdateChannel) {
-        UserDefaults.standard.set(newValue.rawValue, forKey: AppUpdateChannel.defaultsKey)
+        AppDefaults.store.set(newValue.rawValue, forKey: AppUpdateChannel.defaultsKey)
         guard newValue != channel else { return }
         channel = newValue
         backend?.updateChannelDidChange()

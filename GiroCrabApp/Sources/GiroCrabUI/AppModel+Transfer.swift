@@ -122,8 +122,22 @@ extension AppModel {
         p.apply(to: &transferDraft, onlyEmpty: onlyEmpty)
     }
 
+    /// One per IBAN, newest first, hidden ones left out. Synchronous on purpose (every
+    /// keystroke): the core keeps the list until the data changes (~11 ms to rebuild on
+    /// 36,000 outgoing bookings with an IBAN, `category_perf`).
     func suggestRecipients(_ query: String) -> [KnownRecipient] {
-        (try? vault?.suggestRecipients(query: query, limit: 6)) ?? []
+        (try? vault?.suggestRecipients(query: query, limit: 5)) ?? []
+    }
+
+    /// Every known recipient, hidden ones included ("Empfänger verwalten", #978). Nil when the
+    /// vault was locked or swapped meanwhile; a failed read throws, so it never reads as "none".
+    func knownRecipients(_ query: String) async throws -> [KnownRecipient]? {
+        try await vaultOffMain { try $0.listKnownRecipients(query: query) }
+    }
+
+    /// "Nicht mehr vorschlagen" or show again; the bookings stay. A failure ends up in the alert.
+    func setRecipientHidden(_ iban: String, _ hidden: Bool) {
+        runCore { try vault?.setRecipientHidden(iban: iban, hidden: hidden) }
     }
 
     func startTransfer() {

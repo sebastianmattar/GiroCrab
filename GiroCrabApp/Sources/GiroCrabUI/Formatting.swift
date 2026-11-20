@@ -99,6 +99,8 @@ enum Theme {
     /// sees the brand blue; if someone picks another accent in System Settings ›
     /// Appearance, macOS applies that one app-wide instead.
     static let accent = Color.accentColor
+    /// Fill under a value line (balance history, depot value): the accent fading out downwards.
+    static let chartAreaFill = LinearGradient(colors: [accent.opacity(0.14), accent.opacity(0.01)], startPoint: .top, endPoint: .bottom)
     /// Soft selection/highlight fill in the current accent colour – brand blue by
     /// default, and it follows a user-chosen system accent.
     static let selection: Color = {
@@ -159,9 +161,15 @@ enum Money {
 
     /// i64 cents -> "1.234,56 €" / "€1,234.56" in the user's locale (Decimal, never Double).
     static func format(_ cents: Int64, currency code: String = "EUR") -> String {
-        currency.currencyCode = code
+        currency.currencyCode = code.isEmpty ? "EUR" : code.uppercased()
         let s = currency.string(from: (Decimal(cents) / 100) as NSDecimalNumber) ?? "\(cents)"
         return s.replacingOccurrences(of: "-", with: "−")
+    }
+
+    /// "$" / "€" / "CHF": the symbol of `code` in the user's locale (chart axes).
+    static func symbol(_ code: String) -> String {
+        currency.currencyCode = code
+        return currency.currencySymbol ?? code
     }
 
     /// "+1.234,56 €" for inflows.
@@ -184,7 +192,7 @@ enum Money {
     /// kind present: it is a grouping separator if it is the locale's grouping
     /// separator and every group after it has exactly three digits.
     static func parseCents(_ input: String) -> Int64? {
-        let t = input.filter { !($0 == "€" || $0.isWhitespace || $0 == "'") }
+        let t = input.filter { !($0.isCurrencySymbol || $0.isWhitespace || $0 == "'") }
         guard !t.isEmpty else { return nil }
         let seps: Set<Character> = [".", ","]
         let used = Set(t.filter { seps.contains($0) })

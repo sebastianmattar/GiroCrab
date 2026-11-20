@@ -151,12 +151,13 @@ Rectangle {
                         SFIcon { symbol: AppModel.docSymbol(modelData); size: 18; color: Theme.accent; Layout.preferredWidth: 22 }
                         ColumnLayout { id: rowCol; spacing: 2; Layout.fillWidth: true
                             Text { text: modelData.title; font.pixelSize: Theme.body + 1; font.weight: Font.Medium; color: Theme.text
-                                   wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
+                                   wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; Layout.fillWidth: true
+                                   Sensitive { amounts: true } }   // DocumentsUI.swift: [.personal, .amounts]
                             Text { text: DocumentsScope.originTitle(modelData) + " · " + (modelData.account_name || qsTr("Ohne Konto"))
                                    font.pixelSize: Theme.caption; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
                             Text { text: modelData.booking_label || qsTr("Ohne zugeordneten Umsatz"); font.pixelSize: Theme.caption
                                    color: !modelData.booking_label && !docRow.bank ? Theme.warning : Theme.secondary
-                                   elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} } }
+                                   elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true } } }   // "merchant · amount"
                         Text { text: Fmt.medium(modelData.doc_date); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary }
                     }
                     MouseArea {

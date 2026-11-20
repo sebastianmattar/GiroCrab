@@ -3,10 +3,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // AccountEditSheet.swift: "Konto bearbeiten …" (#639, #605) – name, owner, account type and
-// note in one place. The note is the vault setting `account.note.<id>` (SidebarModel).
+// note in one place.
 Sheet {
     id: sheet
     property var accountID: null
+    /// The account when the sheet opened: what a sync changes meanwhile is no edit here (#980).
+    property var original: null
     readonly property var account: accountID === null ? null : (AppModel.accountsByID[accountID] || null)
     sheetWidth: 440
     onClosed: accountID = null
@@ -15,16 +17,17 @@ Sheet {
         const a = AppModel.accountsByID[id]
         if (!a) return
         accountID = id
+        original = a
         nameField.text = a.name
         ownerField.text = a.owner || ""
         kindBox.currentIndex = Math.max(0, AppModel.accountKindChoices.findIndex(k => k.id === a.kind))
-        noteField.text = SidebarModel.accountNote(id)
+        noteField.text = a.note || ""
         open()
         nameField.forceActiveFocus()
     }
     function save() {
-        const a = account
-        if (!a) return
+        const a = original
+        if (!a || !account) return
         const newName = nameField.text.trim()
         if (newName === "") return
         const owner = ownerField.text.trim()
@@ -34,7 +37,7 @@ Sheet {
         if (newName !== a.name) AppModel.renameAccount(a.id, newName)
         if (owner !== (a.owner || "")) AppModel.setAccountOwner(a.id, owner)
         if (kind !== a.kind) AppModel.setAccountKind(a.id, kind)
-        if (note !== SidebarModel.accountNote(a.id)) SidebarModel.setAccountNote(a.id, note)
+        if (note !== (a.note || "")) AppModel.setAccountNote(a.id, note)
     }
 
     ColumnLayout {

@@ -182,24 +182,31 @@ extension AppModel {
     /// Belege (there the list would silently mean every account).
     var canMarkAllChecked: Bool { vault != nil && newCount > 0 && sidebarSelection != .documents }
 
-    func markAllChecked(accountIDs: [Int64]? = nil) {
+    func markAllChecked(accountIDs: [Int64]? = nil, quietWhenEmpty: Bool = false) {
         guard let vault else { return }
         if accountIDs == nil, sidebarSelection == .documents { return }
-        var f = currentFilter
+        var f: BookingFilter
         if let accountIDs {
-            f.accountIds = accountIDs; f.categoryId = nil; f.uncategorizedOnly = false
-            f.search = nil; f.dateFrom = nil; f.dateTo = nil; f.direction = .all
-            f.scope = .all; f.merchantKey = nil; f.tagIds = []; f.untaggedOnly = false
+            guard !accountIDs.isEmpty else { return }
+            f = BookingFilter(accountIds: accountIDs, categoryId: nil, includeSubcategories: false,
+                              uncategorizedOnly: false, search: nil, dateFrom: nil, dateTo: nil,
+                              limit: 0, offset: 0, scope: .all, merchantKey: nil, direction: .all,
+                              checked: false, wholeDays: false)
+        } else {
+            f = currentFilter
+            f.checked = false; f.limit = 0; f.offset = 0; f.wholeDays = false
         }
-        f.checked = false; f.limit = 0; f.offset = 0; f.wholeDays = false
         let filter = f
-        Task { [weak self] in
+        let previous = checkedWriteTask
+        checkedWriteTask = Task { [weak self] in
+            await previous?.value
+            guard let self, self.vault === vault else { return }
             do {
                 let ids = try await Self.offMain { try vault.setCheckedForFilter(filter: filter, checked: true) }
-                guard let self, self.vault === vault else { return }
+                guard self.vault === vault, !ids.isEmpty || !quietWhenEmpty else { return }
                 self.finishMarkChecked(ids)
             } catch {
-                self?.errorMessage = describe(error)
+                if self.vault === vault { self.errorMessage = describe(error) }
             }
         }
     }
@@ -274,9 +281,11 @@ extension AppModel {
     /// Select the booking and put the cursor into its note field in the inspector.
     func editNote(for booking: Booking) {
         #if os(macOS)
-        // the note lives in the inspector: show it if it was hidden (the field claims the focus when it appears)
-        UserDefaults.standard.set(true, forKey: ViewLayout.inspectorKey)
+        AppDefaults.store.set(true, forKey: ViewLayout.inspectorKey)
+        #else
+        showBookingSheet = true
         #endif
+        selectedBookingIDs = [booking.id]
         selectedBookingID = booking.id
         pendingNoteFocus = booking.id
     }

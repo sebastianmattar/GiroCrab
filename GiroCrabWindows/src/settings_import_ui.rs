@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use girocrab_core::export::{
-    export_csv, Camt053Request, CamtVersion, ExportCsvBalanceLine, ExportCsvColumns,
+    Camt053Request, CamtVersion, ExportCsvBalanceLine, ExportCsvColumns, export_csv,
 };
 use girocrab_core::importers::moneymoney_db::{
     MoneyMoneyDbAccountChoice, MoneyMoneyDbImportOptions, MoneyMoneyDbImportProgress,
@@ -22,7 +22,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::announcements::{self, Announcement};
 use crate::settings_import::{self as view, Line};
-use crate::{german_date, money, privacy_on, MainWindow, SettingsImportState, SiRow};
+use crate::{MainWindow, SettingsImportState, SiRow, german_date, money, privacy_on};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 
@@ -410,11 +410,11 @@ fn wire_import(win: &MainWindow) {
             "Datenbank wird gelesen …",
             move || {
                 let path = pick_file(
-                    "MoneyMoney-Datenbank wählen",
+                    "Datenbank wählen",
                     "Datenbank",
                     &["moneymoney", "sqlite", "db"],
                 )
-                .or_else(|| pick_dir("MoneyMoney-Ordner wählen"))
+                .or_else(|| pick_dir("Ordner mit Datenbank wählen"))
                 .ok_or("Import abgebrochen.".to_string())?;
                 let location = path.display().to_string();
                 let p = v
@@ -1038,12 +1038,11 @@ fn wire_news(win: &MainWindow) {
         let link = usize::try_from(sel)
             .ok()
             .and_then(|i| with_ui(|u| u.news.get(i).map(|a| a.link.clone())));
-        if let Some(link) = link {
-            if let Err(e) =
+        if let Some(link) = link
+            && let Err(e) =
                 crate::sync_flow::safe_https_url(&link).and_then(crate::sync_flow::open_in_browser)
-            {
-                set_status(&win, e);
-            }
+        {
+            set_status(&win, e);
         }
     });
 

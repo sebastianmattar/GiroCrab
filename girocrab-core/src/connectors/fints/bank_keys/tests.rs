@@ -206,9 +206,11 @@ fn bootstrap_is_anonymous_and_returns_only_untrusted_candidates() {
     let parsed = syntax::parse(&request).unwrap();
     assert_eq!(parsed.iter().filter(|s| s.id() == "HKISA").count(), 2);
     assert_eq!(parsed[1].get(2, 0), "9999999999");
-    assert!(!parsed
-        .iter()
-        .any(|s| matches!(s.id(), "HNSHK" | "HNSHA" | "HNVSD")));
+    assert!(
+        !parsed
+            .iter()
+            .any(|s| matches!(s.id(), "HNSHK" | "HNSHA" | "HNVSD"))
+    );
     let a = candidate("S");
     let b = candidate("V");
     let raw = message(&[key_segment(&a, 2), key_segment(&b, 3)], "dialog", 1);
@@ -220,11 +222,27 @@ fn bootstrap_is_anonymous_and_returns_only_untrusted_candidates() {
         assert!(parse_candidates(&raw[..end], "12345678").is_err());
     }
     assert!(parse_candidates(&message(&[key_segment(&a, 2)], "dialog", 1), "12345678").is_err());
-    assert!(parse_candidates(
-        &message(&[key_segment(&a, 2), key_segment(&a, 3)], "dialog", 1),
-        "12345678"
-    )
-    .is_err());
+    assert!(
+        parse_candidates(
+            &message(&[key_segment(&a, 2), key_segment(&a, 3)], "dialog", 1),
+            "12345678"
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn errors_follow_the_ui_language() {
+    use crate::i18n::{Lang, with_language};
+    let keys = vec![candidate("S"), candidate("V")];
+    let result = with_language(Lang::En, || confirmed_keys("12345678", &keys, &[]));
+    let Err(CoreError::InvalidInput { message }) = result else {
+        panic!("expected InvalidInput");
+    };
+    assert_eq!(
+        message,
+        "The signature and encryption keys must be confirmed separately."
+    );
 }
 
 #[test]

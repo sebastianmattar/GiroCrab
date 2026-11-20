@@ -81,6 +81,19 @@ final class BalanceBarsTests: XCTestCase {
         XCTAssertEqual(BalanceChart.axisStride(units: 30, width: 150, labelWidth: 48, steps: steps), 10)
     }
 
+    /// The spacing the chart keeps as its only width-driven state (#1131): years, weekly days or months by span.
+    func testXAxisStrideFollowsSpanAndWidth() {
+        // 10 years: years, 64 pt each (12 fit in 800 pt, 6 in 400 pt)
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 3_653, width: 800, textScale: 1), 1)
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 3_653, width: 400, textScale: 1), 2)
+        // a month: weekly day labels, every second week when narrow
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 30, width: 600, textScale: 1), 7)
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 30, width: 200, textScale: 1), 14)
+        // a year: months, 44 pt each; larger text needs more room per label
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 365, width: 600, textScale: 1), 1)
+        XCTAssertEqual(BalanceChart.xAxisStride(span: 365, width: 600, textScale: 1.3), 2)
+    }
+
     /// The bar the scrolled list follows (#593): the bar containing the day, else the nearest start.
     func testBarAtDateFindsContainingOrNearestBar() {
         // January and March 2026: February has no data, so no bar

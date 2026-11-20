@@ -5,6 +5,10 @@
 //! evaluation only reads `(date, amount, flag)` triples, so booking categories
 //! stay untouched.
 
+use jiff::civil::Date;
+
+use crate::dates::{clamped_ymd, iso, parse_iso};
+
 /// One payday period with its income and living expenses (all in cents).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaydayPeriod {
@@ -20,62 +24,9 @@ pub struct PaydayPeriod {
     pub surplus_cents: i64,
 }
 
-fn days_in_month(y: i32, m: u32) -> u32 {
-    match m {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        _ if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
-        _ => 28,
-    }
-}
-
-fn parse_ymd(s: &str) -> Option<(i32, u32, u32)> {
-    let mut it = s.get(..10)?.split('-');
-    let y: i32 = it.next()?.parse().ok()?;
-    let m: u32 = it.next()?.parse().ok()?;
-    let d: u32 = it.next()?.parse().ok()?;
-    if it.next().is_some() || !(1..=12).contains(&m) || d == 0 || d > days_in_month(y, m) {
-        return None;
-    }
-    Some((y, m, d))
-}
-
-fn next_month(y: i32, m: u32) -> (i32, u32) {
-    if m == 12 {
-        (y + 1, 1)
-    } else {
-        (y, m + 1)
-    }
-}
-
-/// Month in which the period containing `(y, m, d)` starts.
-fn period_month(payday: u32, y: i32, m: u32, d: u32) -> (i32, u32) {
-    if d >= payday.min(days_in_month(y, m)) {
-        (y, m)
-    } else if m == 1 {
-        (y - 1, 12)
-    } else {
-        (y, m - 1)
-    }
-}
-
-fn start_day(payday: u32, y: i32, m: u32) -> u32 {
-    payday.min(days_in_month(y, m))
-}
-
-/// Day before `(y, m, d)`.
-fn day_before(y: i32, m: u32, d: u32) -> (i32, u32, u32) {
-    if d > 1 {
-        (y, m, d - 1)
-    } else if m == 1 {
-        (y - 1, 12, 31)
-    } else {
-        (y, m - 1, days_in_month(y, m - 1))
-    }
-}
-
-fn fmt(y: i32, m: u32, d: u32) -> String {
-    format!("{y:04}-{m:02}-{d:02}")
+/// The payday in the month of `day`, or the month's last day when it is shorter.
+fn payday_in(payday: u32, day: Date) -> Date {
+    clamped_ymd(day.year().into(), day.month() as u32, payday).unwrap_or(day)
 }
 
 /// Groups bookings into consecutive payday periods, oldest first.
@@ -92,12 +43,20 @@ pub fn evaluate_payday_periods(
     bookings: &[(String, i64, bool)],
 ) -> Vec<PaydayPeriod> {
     let payday = u32::from(payday_day.clamp(1, 31));
-    let mut sums: std::collections::BTreeMap<(i32, u32), (i64, i64)> = Default::default();
+    // keyed by the period's first day
+    let mut sums: std::collections::BTreeMap<Date, (i64, i64)> = Default::default();
     for (date, cents, living) in bookings {
-        let Some((y, m, d)) = parse_ymd(date) else {
+        let Some(day) = parse_iso(date) else {
             continue;
         };
-        let entry = sums.entry(period_month(payday, y, m, d)).or_default();
+        let mut start = payday_in(payday, day);
+        if day < start {
+            let Ok(previous) = day.first_of_month().yesterday() else {
+                continue;
+            };
+            start = payday_in(payday, previous);
+        }
+        let entry = sums.entry(start).or_default();
         if *cents > 0 {
             entry.0 += cents;
         } else if *cents < 0 && *living {
@@ -111,19 +70,24 @@ pub fn evaluate_payday_periods(
     let mut cur = first;
     loop {
         let (income, expense) = sums.get(&cur).copied().unwrap_or((0, 0));
-        let next = next_month(cur.0, cur.1);
-        let end = day_before(next.0, next.1, start_day(payday, next.0, next.1));
+        // jiff stops at 9999-12-31: a period running past it ends there
+        let next = cur
+            .last_of_month()
+            .tomorrow()
+            .ok()
+            .map(|d| payday_in(payday, d));
+        let end = next.and_then(|n| n.yesterday().ok()).unwrap_or(Date::MAX);
         out.push(PaydayPeriod {
-            start_ymd: fmt(cur.0, cur.1, start_day(payday, cur.0, cur.1)),
-            end_ymd: fmt(end.0, end.1, end.2),
+            start_ymd: iso(cur),
+            end_ymd: iso(end),
             income_cents: income,
             expense_cents: expense,
             surplus_cents: income - expense,
         });
-        if cur == last {
-            break;
+        match next {
+            Some(n) if cur != last => cur = n,
+            _ => break,
         }
-        cur = next;
     }
     out
 }
@@ -203,6 +167,15 @@ mod tests {
         assert_eq!(r[1].expense_cents, 0);
         assert_eq!(r[2].expense_cents, 7);
         assert_eq!(r[2].surplus_cents, -7);
+    }
+
+    #[test]
+    fn a_period_at_the_end_of_the_calendar_ends_there() {
+        let r = evaluate_payday_periods(15, &[b("9999-12-20", 1, false)]);
+        assert_eq!(
+            (r[0].start_ymd.as_str(), r[0].end_ymd.as_str()),
+            ("9999-12-15", "9999-12-31")
+        );
     }
 
     #[test]

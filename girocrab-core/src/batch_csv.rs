@@ -66,21 +66,21 @@ pub fn parse_batch_csv(text: String) -> BatchCsvImport {
         purpose: Some(3),
     };
     let mut had_header = false;
-    if let Some((_, first)) = iter.peek() {
-        if let Some(c) = header_columns(first) {
-            had_header = true;
-            for (missing, label) in [
-                (c.name.is_none(), "Name"),
-                (c.iban.is_none(), "IBAN"),
-                (c.amount.is_none(), "Betrag"),
-            ] {
-                if missing {
-                    problems.push(trf("In der Kopfzeile fehlt die Spalte „{0}“.", &[&label]));
-                }
+    if let Some((_, first)) = iter.peek()
+        && let Some(c) = header_columns(first)
+    {
+        had_header = true;
+        for (missing, label) in [
+            (c.name.is_none(), "Name"),
+            (c.iban.is_none(), "IBAN"),
+            (c.amount.is_none(), "Betrag"),
+        ] {
+            if missing {
+                problems.push(trf("In der Kopfzeile fehlt die Spalte „{0}“.", &[&label]));
             }
-            cols = c;
-            iter.next();
         }
+        cols = c;
+        iter.next();
     }
     let rows: Vec<BatchCsvRow> = if problems.is_empty() {
         iter.map(|(line, f)| to_row(line, &f, cols)).collect()
@@ -114,10 +114,8 @@ pub(crate) fn detect_delimiter(text: &str) -> char {
             if counts.iter().any(|(_, n)| *n > 0) {
                 break;
             }
-        } else if !quoted {
-            if let Some(slot) = counts.iter_mut().find(|(d, _)| *d == c) {
-                slot.1 += 1;
-            }
+        } else if !quoted && let Some(slot) = counts.iter_mut().find(|(d, _)| *d == c) {
+            slot.1 += 1;
         }
     }
     counts

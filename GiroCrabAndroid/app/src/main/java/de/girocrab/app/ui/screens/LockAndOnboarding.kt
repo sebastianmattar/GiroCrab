@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -182,16 +183,24 @@ fun DemoBanner(
     // Swift DemoBanner: Theme.selection fill (accent 0.15), 1 px accent 0.18 border, accent icon, Theme.text title.
     val accent = MaterialTheme.colorScheme.primary
     Surface(
-        modifier.fillMaxWidth().height(34.dp),
+        modifier.fillMaxWidth().heightIn(min = 34.dp),
         color = accent.copy(alpha = GiroColors.SelectionAlpha).compositeOver(MaterialTheme.colorScheme.surface),
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = GiroColors.DemoBorderAlpha)),
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Science, null, Modifier.size(16.dp), tint = accent)
             Spacer(Modifier.width(6.dp))
-            Text("Demo-Daten", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("Demo-Daten", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                // Swift DemoBanner.resetNote (#952): the demo snapshot is rebuilt on every start.
+                Text(
+                    "Änderungen werden beim Beenden zurückgesetzt.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             val compactPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
             if (!vaultMayHoldRealData) {
                 TextButton(onClick = onCreateOwnAccount, contentPadding = compactPadding, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = accent)) {

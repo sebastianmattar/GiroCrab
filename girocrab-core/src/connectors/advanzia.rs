@@ -9,9 +9,10 @@ use crate::{
     error::{CoreError, CoreResult},
     i18n::tr,
     models::{AccountKind, ConnectorKind},
-    vault::Vault,
+    secret::SecretJson,
+    vault::{Vault, connections::store_state},
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -33,9 +34,7 @@ mod tests;
 pub(crate) const HOLD_PREFIX: &str = "pending-hold-portal-advanzia-";
 
 fn invalid(message: &'static str) -> CoreError {
-    CoreError::InvalidInput {
-        message: format!("Advanzia: {}", tr(message)),
-    }
+    CoreError::invalid(format!("Advanzia: {}", tr(message)))
 }
 fn account_ref(id: &str) -> String {
     format!("advanzia:{id}")
@@ -106,7 +105,7 @@ struct State {
     import_aliases: HashMap<String, String>,
 }
 fn connection(db: &Connection, id: i64) -> CoreResult<(String, State)> {
-    let row: Option<(String, String, String)> = db.query_row(
+    let row: Option<(String, String, SecretJson)> = db.query_row(
         "SELECT connector,display_name,state_json FROM bank_connections WHERE id=?1 AND deleted_ms IS NULL",
         [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
     let Some((kind, name, raw)) = row else {
@@ -115,10 +114,11 @@ fn connection(db: &Connection, id: i64) -> CoreResult<(String, State)> {
     if kind != "advanzia" {
         return Err(invalid("Falscher Bankzugang."));
     }
-    let state = if raw == "{}" || raw == "null" || raw.is_empty() {
+    let state = if raw.is_empty() {
         State::default()
     } else {
-        serde_json::from_str(&raw).map_err(|_| invalid("Ungültiger Sitzungszustand."))?
+        raw.decode()
+            .map_err(|_| invalid("Ungültiger Sitzungszustand."))?
     };
     Ok((name, state))
 }
@@ -131,15 +131,20 @@ fn login_scope(db: &Connection, id: i64) -> CoreResult<String> {
     )?;
     Ok(hex::encode(Sha256::digest(login.as_bytes())))
 }
-fn serialize(state: &State) -> CoreResult<Value> {
-    serde_json::to_value(state).map_err(|_| invalid("Ungültiger Sitzungszustand."))
+fn encode_state(state: &State) -> CoreResult<SecretJson> {
+    SecretJson::encode(state).map_err(|_| invalid("Ungültiger Sitzungszustand."))
+}
+
+fn decode_state(state: Option<&SecretJson>) -> CoreResult<State> {
+    state
+        .and_then(|s| s.decode().ok())
+        .ok_or_else(|| invalid("Ungültiger Sitzungszustand."))
 }
 
 /// Runs inside store_fetch's transaction, before any adoption or account selection.
 pub(crate) fn prepare_import(db: &Connection, id: i64, data: &mut FetchResult) -> CoreResult<()> {
     let (_, stored) = connection(db, id)?;
-    let next: State = serde_json::from_value(data.state.clone().unwrap_or(Value::Null))
-        .map_err(|_| invalid("Ungültiger Sitzungszustand."))?;
+    let next = decode_state(data.state.as_ref())?;
     if stored.login_scope != login_scope(db, id)?
         || stored.profile_id.is_empty()
         || stored.profile_id != next.profile_id
@@ -166,8 +171,9 @@ pub(crate) fn prepare_import(db: &Connection, id: i64, data: &mut FetchResult) -
     {
         let eligible: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1 AND connection_id IS NULL AND kind='credit_card' AND currency='EUR' AND deleted_ms IS NULL AND archived_unix IS NULL)", [target], |r| r.get(0))?;
         let existing: i64 = db.query_row(
-            "SELECT count(*) FROM accounts WHERE connection_id=?1",
-            [id],
+            "SELECT count(*) FROM accounts
+              WHERE connection_id=?1 AND (deleted_ms IS NULL OR external_ref=?2)",
+            params![id, ref_id],
             |r| r.get(0),
         )?;
         if !eligible || existing != 0 {
@@ -180,8 +186,11 @@ pub(crate) fn prepare_import(db: &Connection, id: i64, data: &mut FetchResult) -
             params![id, ref_id, target],
         )?;
     }
+    // Re-adding a login can reuse a connection with deleted accounts. A
+    // different deleted reference must not block the newly verified card.
     let conflict: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM accounts WHERE connection_id=?1 AND external_ref<>?2)",
+        "SELECT EXISTS(SELECT 1 FROM accounts
+                        WHERE connection_id=?1 AND deleted_ms IS NULL AND external_ref<>?2)",
         params![id, ref_id],
         |r| r.get(0),
     )?;
@@ -208,13 +217,13 @@ impl Vault {
         if state.profile_id.is_empty() || state.login_scope != scope {
             state.login_scope = scope;
             state.profile_id = uuid::Uuid::new_v4().to_string();
-            db.execute(
-                "UPDATE bank_connections SET state_json=?1 WHERE id=?2",
-                params![serialize(&state)?.to_string(), connection_id],
-            )?;
+            store_state(&db, connection_id, &encode_state(&state)?)?;
         }
         let has_account = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM accounts WHERE connection_id=?1)",
+            // Canonical references can be revived by store_fetch after re-adding
+            // the login. Deleted legacy references do not identify a bank card.
+            "SELECT EXISTS(SELECT 1 FROM accounts
+                            WHERE connection_id=?1 AND (deleted_ms IS NULL OR external_ref LIKE 'advanzia:%'))",
             [connection_id],
             |r| r.get(0),
         )?;
@@ -278,7 +287,7 @@ impl Vault {
             }],
             transactions: entries.into_iter().map(|e| e.remote(&reference)).collect(),
             balances_reported: vec![reference],
-            state: Some(serialize(&state)?),
+            state: Some(encode_state(&state)?),
             // A truncated transaction window is NOT a complete open-hold inventory.
             hold_prefix: None,
             ..Default::default()

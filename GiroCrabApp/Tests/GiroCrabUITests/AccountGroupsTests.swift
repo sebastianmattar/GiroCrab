@@ -25,7 +25,7 @@ final class AccountGroupsTests: XCTestCase {
     }
 
     private static func clearDefaults() {
-        for k in defaultsKeys { UserDefaults.standard.removeObject(forKey: k) }
+        for k in defaultsKeys { AppDefaults.store.removeObject(forKey: k) }
     }
 
     // MARK: helpers
@@ -470,7 +470,7 @@ final class AccountGroupsTests: XCTestCase {
         XCTAssertEqual(next.accountView, .byKind)
         XCTAssertEqual(next.accountViewChoice, .byKind)
         // the demo vault is recreated with new uuids, so compare the persisted set
-        XCTAssertEqual(UserDefaults.standard.stringArray(forKey: "sidebar.collapsedUserGroups"), [g.uuid])
+        XCTAssertEqual(AppDefaults.store.stringArray(forKey: "sidebar.collapsedUserGroups"), [g.uuid])
 
         model.toggleCollapsed(g)
         XCTAssertFalse(model.collapsedUserGroups.contains(g.uuid))
@@ -628,7 +628,7 @@ final class AccountGroupsTests: XCTestCase {
         XCTAssertTrue(orphan.accounts.contains(where: { $0.name == "Autokredit" }), "manual loan has no bank name")
 
         let giro = try account(.checking)
-        model.interactiveSidebarSelection = .bank(muster.id)
+        model.sidebarSelection = .bank(muster.id) // synchronous: the title follows the loaded data (#1396)
         XCTAssertEqual(model.sidebarSelection, .bank("Musterbank"))
         XCTAssertEqual(Set(model.selectionAccountIDs), Set(muster.accounts.map(\.id)))
         XCTAssertEqual(model.title, "Musterbank")

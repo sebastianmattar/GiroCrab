@@ -25,7 +25,7 @@ use serde_json::Value;
 use super::comdirect::ComdirectConnector;
 use super::{
     BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, FetchResult, Phase,
-    RemoteAccount, SKIPPED_ACCOUNTS,
+    RemoteAccount,
 };
 use crate::documents::RemoteDocument;
 use crate::error::CoreResult;
@@ -45,6 +45,28 @@ pub(crate) trait PostboxSource: Send {
     /// downloaded: a stored copy still gets its account.
     fn stub(&self, entry: &Value) -> Option<RemoteDocument>;
     async fn finish(&mut self, ctx: &ConnectContext);
+    /// Name of the document source in the app's steps ("PostBox", "Online-Archiv").
+    fn label(&self) -> String {
+        tr("PostBox").into()
+    }
+    /// The account a downloaded document belongs to; `None` leaves it without
+    /// one. comdirect: the account whose IBAN or number is in the PDF text,
+    /// else the login's first Girokonto.
+    fn assign<'a>(
+        &self,
+        doc: &RemoteDocument,
+        accounts: &[&'a RemoteAccount],
+    ) -> Option<&'a RemoteAccount> {
+        let text = crate::documents::extract_pdf_text(&doc.bytes);
+        let found = assign_account(&doc.title, &text, accounts);
+        crate::depot_debug::log(&format!(
+            "comdirect postbox: {} text={} chars -> {}",
+            doc.doc_type,
+            text.len(),
+            found.map_or("default account", |a| kind_name(a.kind))
+        ));
+        found.or_else(|| default_account(accounts))
+    }
 }
 
 #[async_trait]
@@ -99,7 +121,7 @@ impl FintsWithPostbox {
         Self::with_source(fints, Box::new(ComdirectConnector::new()), since)
     }
 
-    fn with_source(
+    pub(crate) fn with_source(
         fints: Box<dyn BankConnector>,
         rest: Box<dyn PostboxSource>,
         since: String,
@@ -124,17 +146,17 @@ impl FintsWithPostbox {
     ) -> CoreResult<Phase> {
         match rest {
             Ok(Phase::Challenge(mut c)) => {
-                c.title = trf("PostBox: {0}", &[&c.title]);
+                c.title = trf("{0}: {1}", &[&self.rest.label(), &c.title]);
                 return Ok(Phase::Challenge(c));
             }
             Ok(Phase::Pending(mut c)) => {
-                c.title = trf("PostBox: {0}", &[&c.title]);
+                c.title = trf("{0}: {1}", &[&self.rest.label(), &c.title]);
                 return Ok(Phase::Pending(c));
             }
             Ok(Phase::Ready) => match self.rest.list(&self.since).await {
                 Some(entries) => {
                     crate::depot_debug::log(&format!(
-                        "comdirect postbox: {} documents since '{}'",
+                        "postbox: {} documents since '{}'",
                         entries.len(),
                         self.since
                     ));
@@ -142,16 +164,16 @@ impl FintsWithPostbox {
                     if !entries.is_empty() {
                         let total = entries.len();
                         self.stage = Stage::Download { entries, next: 0 };
-                        return Ok(progress(0, total));
+                        return Ok(progress(&self.rest.label(), 0, total));
                     }
                 }
-                None => crate::depot_debug::log("comdirect postbox: listing failed"),
+                None => crate::depot_debug::log("postbox: listing failed"),
             },
             Ok(Phase::ConfirmPayee(_)) => {
-                crate::depot_debug::log("comdirect postbox: unexpected payee check")
+                crate::depot_debug::log("postbox: unexpected payee check")
             }
             Err(e) => crate::depot_debug::log(&format!(
-                "comdirect postbox: login failed ({})",
+                "postbox: login failed ({})",
                 e.to_string().chars().take(60).collect::<String>()
             )),
         }
@@ -174,10 +196,10 @@ impl FintsWithPostbox {
             n += 1;
         }
         if *next < entries.len() {
-            return Ok(progress(*next, entries.len()));
+            return Ok(progress(&self.rest.label(), *next, entries.len()));
         }
         crate::depot_debug::log(&format!(
-            "comdirect postbox: {} of {} documents downloaded",
+            "postbox: {} of {} documents downloaded",
             self.docs.iter().filter(|d| !d.bytes.is_empty()).count(),
             entries.len()
         ));
@@ -192,10 +214,10 @@ impl FintsWithPostbox {
 }
 
 /// The step the app shows while the PostBox downloads run.
-fn progress(done: usize, total: usize) -> Phase {
+fn progress(label: &str, done: usize, total: usize) -> Phase {
     Phase::Pending(Challenge {
         kind: ChallengeKind::Progress,
-        title: tr("PostBox wird geladen").into(),
+        title: trf("{0} wird geladen", &[&label]),
         message: trf(
             "Freigabe erhalten. {0} von {1} Dokumenten geladen, danach folgt der Abruf der Konten.",
             &[&done, &total],
@@ -233,35 +255,21 @@ impl BankConnector for FintsWithPostbox {
 
     async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult> {
         let mut out = self.fints.fetch(ctx).await?;
-        let skipped: Vec<&str> = ctx
-            .settings
-            .get(SKIPPED_ACCOUNTS)
-            .map(|s| s.expose().lines().collect())
-            .unwrap_or_default();
         let accounts: Vec<&RemoteAccount> = out
             .accounts
             .iter()
-            .filter(|a| !skipped.contains(&a.external_ref.as_str()))
+            .filter(|a| !ctx.skipped_accounts.contains(&a.external_ref))
             .collect();
-        let fallback = default_account(&accounts);
         let mut matched = 0usize;
         let mut docs = std::mem::take(&mut self.docs);
         for d in &mut docs {
-            let text = crate::documents::extract_pdf_text(&d.bytes);
-            let found = assign_account(&d.title, &text, &accounts);
-            crate::depot_debug::log(&format!(
-                "comdirect postbox: {} text={} chars -> {}",
-                d.doc_type,
-                text.len(),
-                found.map_or("default account", |a| kind_name(a.kind))
-            ));
-            matched += found.is_some() as usize;
-            if let Some(a) = found.or(fallback) {
+            if let Some(a) = self.rest.assign(d, &accounts) {
                 d.account_ref = a.external_ref.clone();
+                matched += 1;
             }
         }
         crate::depot_debug::log(&format!(
-            "comdirect postbox: {matched} of {} documents matched an account, the others went to the default account",
+            "postbox: {matched} of {} documents got an account",
             docs.len()
         ));
         out.documents.extend(docs);
@@ -315,6 +323,13 @@ const SECURITIES_WORDS: &[&str] = &[
     "kosteninformation",
     "kostenausweis",
     "verlust",
+    "optionsschein",
+    "fälligkeit",
+    "faelligkeit",
+    "zertifikat",
+    "anleihe",
+    "einlösung",
+    "einloesung",
 ];
 
 /// The account a PostBox document belongs to: the one whose IBAN or account
@@ -519,20 +534,12 @@ mod tests {
         }
     }
 
-    fn ctx(skipped: &str) -> ConnectContext {
-        let mut settings = std::collections::HashMap::new();
-        settings.insert(
-            SKIPPED_ACCOUNTS.to_string(),
-            SecretString::new(skipped.into()),
-        );
+    fn ctx(skipped: &[&str]) -> ConnectContext {
         ConnectContext {
             connection_id: 1,
-            login_name: String::new(),
             secret: SecretString::new("pin".into()),
-            settings,
-            state: serde_json::Value::Null,
-            since: String::new(),
-            since_by_account: Default::default(),
+            skipped_accounts: skipped.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
         }
     }
 
@@ -655,7 +662,7 @@ mod tests {
             ),
         ];
         let (mut w, log) = wrapped(false, Some(docs));
-        let c = ctx("");
+        let c = ctx(&[]);
         let Phase::Challenge(ch) = w.begin(&c).await.unwrap() else {
             panic!("expected the PostBox approval")
         };
@@ -708,7 +715,7 @@ mod tests {
     #[tokio::test]
     async fn failed_postbox_login_does_not_stop_the_fints_sync() {
         let (mut w, log) = wrapped(true, None);
-        let c = ctx("");
+        let c = ctx(&[]);
         assert!(matches!(w.begin(&c).await.unwrap(), Phase::Ready));
         let out = w.fetch(&c).await.unwrap();
         assert!(!out.postbox_fetched, "the PostBox stays due");
@@ -726,7 +733,7 @@ mod tests {
             .map(|i| doc(&format!("Information {i}"), "Neue Bedingungen"))
             .collect();
         let (mut w, _) = wrapped(false, Some(docs));
-        let c = ctx("");
+        let c = ctx(&[]);
         w.begin(&c).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
         let mut seen = Vec::new();
@@ -753,7 +760,7 @@ mod tests {
             doc("Finanzreport", "x"),
         ];
         let (mut w, _) = wrapped(false, Some(docs));
-        let c = ctx("");
+        let c = ctx(&[]);
         w.begin(&c).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
@@ -770,7 +777,7 @@ mod tests {
     #[tokio::test]
     async fn empty_postbox_goes_straight_to_fints() {
         let (mut w, log) = wrapped(false, Some(Vec::new()));
-        let c = ctx("");
+        let c = ctx(&[]);
         w.begin(&c).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
         assert!(matches!(
@@ -787,7 +794,7 @@ mod tests {
     #[tokio::test]
     async fn failed_postbox_listing_keeps_the_postbox_due() {
         let (mut w, _) = wrapped(false, None);
-        let c = ctx("");
+        let c = ctx(&[]);
         w.begin(&c).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
@@ -797,7 +804,7 @@ mod tests {
     #[tokio::test]
     async fn cancelled_postbox_approval_never_opens_the_fints_dialog() {
         let (mut w, log) = wrapped(false, Some(Vec::new()));
-        let c = ctx("");
+        let c = ctx(&[]);
         w.begin(&c).await.unwrap();
         w.finish(&c).await;
         assert_eq!(*log.lock().unwrap(), ["rest begin", "rest finish"]);
@@ -807,7 +814,7 @@ mod tests {
     async fn documents_of_skipped_accounts_go_to_the_default_account() {
         let docs = vec![doc("Kontoauszug", "IBAN DE75 2004 1155 0765 4321 00")];
         let (mut w, _) = wrapped(false, Some(docs));
-        let c = ctx(JOINT_IBAN);
+        let c = ctx(&[JOINT_IBAN]);
         w.begin(&c).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();
         w.respond(&c, ChallengeResponse::Poll).await.unwrap();

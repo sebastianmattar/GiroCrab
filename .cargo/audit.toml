@@ -4,7 +4,4 @@ ignore = [
     # (UniFFI build-time code generation) and no fixed upgrade exists yet.
     # Re-check when UniFFI/askama is upgraded and remove this entry.
     "RUSTSEC-2026-0374",
-    # chrono 0.4 is flagged unmaintained (2026-09-14); it is a direct dependency of girocrab-core
-    # and no fixed upgrade exists. Re-check periodically and remove once a replacement is chosen.
-    "RUSTSEC-2026-0543",
 ]

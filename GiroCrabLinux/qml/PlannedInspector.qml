@@ -32,7 +32,7 @@ ColumnLayout {
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: insp.p ? insp.p.counterparty : ""
                    font.pixelSize: Theme.title3; font.weight: Font.DemiBold; color: Theme.text; Sensitive {} }
             Text { text: insp.p ? Fmt.money(insp.p.amount_cents) : ""; font.pixelSize: Theme.title; font.weight: Font.DemiBold
-                   font.features: { "tnum": 1 }; color: insp.p && insp.p.amount_cents < 0 ? Theme.negative : Theme.invest; Sensitive {} }
+                   font.features: { "tnum": 1 }; color: insp.p && insp.p.amount_cents < 0 ? Theme.negative : Theme.invest; Sensitive { amounts: true } }
             Text { text: insp.p ? Planned.kindText(insp.p) : ""; font.pixelSize: Theme.callout; color: Theme.secondary }
         }
     }

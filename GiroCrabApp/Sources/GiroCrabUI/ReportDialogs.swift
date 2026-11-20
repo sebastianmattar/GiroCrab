@@ -53,7 +53,7 @@ final class ReportRedactionState {
 private struct ReportDialogContent: ViewModifier {
     /// Privacy mode applies to dialogs too: this modifier replaces the environment of what it wraps.
     @AppStorage(PrivacyMode.enabledKey) private var privacyEnabled = false
-    @AppStorage(PrivacyMode.scopeKey) private var privacyScope = PrivacyMode.Scope.amounts
+    @AppStorage(PrivacyMode.scopeKey) private var privacyScope = PrivacyMode.defaultScope
 
     func body(content: Content) -> some View {
         content

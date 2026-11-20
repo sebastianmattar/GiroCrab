@@ -58,11 +58,15 @@ public final class AppModel {
     /// Lookups for booking rows (see `rebuildAccountIndex`).
     var accountsByID: [Int64: Account] = [:]
     var accountMarkers: [Int64: AccountMarker] = [:] { didSet { refreshAccountMarkerVisibility() } }
-    /// Account notes (vault setting `account.note.<id>`), loaded with the account index.
-    var accountNotes: [Int64: String] = [:]
     /// Custom label for „Ohne Kategorie“ (vault setting `ui.uncategorized_name`, #597); empty = default.
     var uncategorizedName = ""
-    var categories: [GiroCrabCore.Category] = []
+    var categories: [GiroCrabCore.Category] = [] { didSet { refreshOtherCurrencies() } }
+    /// "Zusätzlich" next to the sidebar totals (#1049): per category (with subcategories) what it holds in
+    /// currencies other than EUR, which its total leaves out. Empty when no booking has another currency.
+    var categoryOtherTotals: [Int64: [CurrencyAmount]] = [:]
+    /// "Zusätzlich" in the KPI tiles (#1049): the same tiles for each currency other than EUR.
+    var otherCurrencyFlows: [CurrencyFlow] = []
+    @ObservationIgnored var otherCurrenciesTask: Task<Void, Never>?
     /// Live tags in list order with their booking counts (#228).
     var tags: [GiroCrabCore.Tag] = []
     var categoryTree: [CategoryNode] = []
@@ -87,7 +91,7 @@ public final class AppModel {
     /// Watches Ansicht › Saldo anzeigen, which the settings window can change too.
     @ObservationIgnored private var runningBalanceObserver: NSKeyValueObservation?
     /// Flows of the selected account/group in the selected period; nil = not loaded yet.
-    var selectionFlow: (consumption: Int64, invested: Int64, income: Int64)?
+    var selectionFlow: (consumption: Int64, invested: Int64, income: Int64)? { didSet { refreshOtherCurrencies() } }
     /// „Ohne Kategorie“ badge while list filters narrow the sums; nil = the accounts' own counts (#357).
     var uncategorizedFilteredCount: Int?
     var dashboard: InvestmentDashboard?
@@ -102,6 +106,8 @@ public final class AppModel {
     var history: [DailyBalance] = []
     /// Monthly sums of the selected category incl. subcategories (chart above its bookings, #502).
     var categoryHistory: [CategoryPeriodSum] = []
+    /// What the selected category holds in currencies other than EUR (#1049): "Zusätzlich: …" in the header.
+    var categoryOtherCurrencies: [CurrencyAmount] = []
     /// Bar width of the category chart (#557); `.automatic` follows the global setting (months if that is automatic too).
     var categoryBarUnit: BalanceBarUnit = .automatic
     var advanziaWorkflow: AdvanziaWorkflow?
@@ -125,7 +131,8 @@ public final class AppModel {
     // UI state
     var sidebarSelection: SidebarItem? = .allAccounts {
         didSet {
-            mainColumn = MainColumn(sidebarSelection)
+            // Without a background load the column follows at once; otherwise when the load publishes.
+            defer { if selectionLoadTask == nil { showSelection() } }
             if oldValue != sidebarSelection {
                 oldValue.flatMap { sidebarRowSelections[$0] }?.isSelected = false
                 sidebarSelection.flatMap { sidebarRowSelections[$0] }?.isSelected = true
@@ -135,19 +142,56 @@ public final class AppModel {
             if !appliesMerchantFocus { merchantFocus = nil; merchantFocusReturn = nil }
             listLimit = Self.defaultListLimit
             // A category with its own default period switches to it; that load covers the selection too (#425).
-            if case .category(let id)? = sidebarSelection, let saved = categoryPeriod(id), saved != period {
+            if !keepsPeriodOnCategorySelection, case .category(let id)? = sidebarSelection,
+               let saved = categoryPeriod(id), saved != period {
                 period = saved
                 return
             }
             guard !resetsSelectionBeforeReloadAll else { return }
+            // Geplant, Lastschriften, Belege and Vermögen show no booking list: loading it for
+            // all accounts only replaced the list the column shows next (#1396).
+            guard MainColumn(sidebarSelection) == .bookings else {
+                let cancelsLoad = selectionLoadTask != nil
+                if cancelsLoad { endSelectionLoad() }
+                // The sidebar sums drop the account filter of a category view (#406): one shown, or one
+                // whose sums are still in because the cancelled load would have replaced them.
+                let sumsMayBeFiltered: Bool
+                switch shownSelection {
+                case .category?, .uncategorized?: sumsMayBeFiltered = true
+                default: sumsMayBeFiltered = cancelsLoad
+                }
+                if sumsMayBeFiltered, !categoryAccountFilter.isEmpty { reloadCategories() }
+                // the recurring data and salary cycle follow the selection (all accounts here)
+                refreshSalaryCycle()
+                refreshRecurring()
+                return
+            }
             reloadSelection(periodChanged: false)
         }
     }
-    /// The kind of view the booking column shows; follows `sidebarSelection`. The split view
+    /// The selection the booking column shows: `sidebarSelection` once its data is in, so a new
+    /// title never stands over the old figures (#1396). Views read this; loads `sidebarSelection`.
+    private(set) var shownSelection: SidebarItem? = .allAccounts {
+        didSet {
+            mainColumn = MainColumn(shownSelection)
+            showsOverview = shownSelection == .allAccounts
+            showsNewBookings = shownSelection == .newBookings
+            // „Neue Umsätze“ orders the stream by account card (`visibleBookings`)
+            if (oldValue == .newBookings) != showsNewBookings { rebuildDayGroups() }
+            refreshAccountMarkerVisibility()
+        }
+    }
+    /// The kind of view the booking column shows; follows `shownSelection`. The split view
     /// and other window-level views read this instead of the selection: assigning an equal
     /// value does not notify, so a switch between accounts or categories leaves them alone
     /// (re-running them re-created and re-laid out every column of the window).
     private(set) var mainColumn: MainColumn = .bookings
+    /// The column shows „Alle Konten“ / „Neue Umsätze“: flags instead of `shownSelection`, so a
+    /// switch between categories leaves the views reading them alone.
+    private(set) var showsOverview = true
+    private(set) var showsNewBookings = false
+    /// The column now shows `sidebarSelection` (its data is in, or the placeholder stands in).
+    func showSelection() { shownSelection = sidebarSelection }
     /// Per sidebar row: is it the selected one (`sidebarRowSelection(for:)`), kept in step by
     /// `sidebarSelection`.
     @ObservationIgnored var sidebarRowSelections: [SidebarItem: SidebarRowSelection] = [:]
@@ -162,6 +206,9 @@ public final class AppModel {
     /// Set while a vault is adopted: `reloadAll()` follows at once, so the selection's own
     /// reload (the same queries again, on the main thread) is skipped.
     @ObservationIgnored var resetsSelectionBeforeReloadAll = false
+    /// Set while a natural-language reading without a period selects its category: the category's
+    /// default period must not replace the current one.
+    @ObservationIgnored var keepsPeriodOnCategorySelection = false
     /// Selects "Alle Konten" for a vault that is just being shown; the caller reloads everything.
     func selectAllAccountsForReloadAll() {
         resetsSelectionBeforeReloadAll = true
@@ -196,8 +243,8 @@ public final class AppModel {
         }
     }
     /// Start/end of the `.custom` period (ISO, inclusive); remembered across launches.
-    var customPeriodFrom: String = UserDefaults.standard.string(forKey: "period.customFrom") ?? AppModel.defaultCustomPeriod.from
-    var customPeriodTo: String = UserDefaults.standard.string(forKey: "period.customTo") ?? AppModel.defaultCustomPeriod.to
+    var customPeriodFrom: String = AppDefaults.store.string(forKey: "period.customFrom") ?? AppModel.defaultCustomPeriod.from
+    var customPeriodTo: String = AppDefaults.store.string(forKey: "period.customTo") ?? AppModel.defaultCustomPeriod.to
     /// Shows the start/end date dialog of the period filter.
     var showCustomPeriod = false
     /// Shows the tag filter popover of the stream header (#228).
@@ -333,12 +380,26 @@ public final class AppModel {
     /// empty = all accounts. Kept while the app runs.
     var categoryAccountFilter: Set<Int64> = [] {
         didSet {
-            guard categoryAccountFilter != oldValue, showsAccountFilter, !suspendsFilterReloads else { return }
+            guard categoryAccountFilter != oldValue, Self.offersAccountFilter(sidebarSelection), !suspendsFilterReloads else { return }
             listLimit = Self.defaultListLimit
             reloadSelection(periodChanged: true) // also the sidebar sums (#621)
         }
     }
-    var searchText: String = "" { didSet { if !suspendsFilterReloads { scheduleSearch() } } }
+    /// What the user typed into the search field; never rewritten by the natural-language search.
+    var searchText: String = "" {
+        didSet {
+            // Typing on or clearing the field ends the natural reading of the previous phrase.
+            if let natural = naturalSearch, natural.query != searchText { revertNaturalSearch() }
+            if !suspendsFilterReloads { scheduleSearch() }
+        }
+    }
+    /// The natural-language reading of `searchText` the list uses (`effectiveSearchText`, filters);
+    /// nil = the typed text is searched literally. Only the search code in `AppModel+Selection` sets it.
+    var naturalSearch: NaturalSearchOverride?
+    /// Whether a typed phrase is read as natural language (Einstellungen › Allgemein); tests inject it.
+    /// A phrase the user wants searched literally (chip „wörtlich suchen“); not read as natural language again.
+    @ObservationIgnored var literalSearchQuery: String?
+    @ObservationIgnored var naturalSearchEnabled: () -> Bool = { NaturalSearch.isEnabled }
     /// Filters the accounts section of the sidebar (name, owner, IBAN / account number).
     var sidebarAccountSearch: String = ""
     var selectedBookingID: Booking.ID? {
@@ -368,8 +429,15 @@ public final class AppModel {
         }
     }
     var autoReviewDelay: AutoReviewDelay = .stored {
-        didSet { UserDefaults.standard.set(autoReviewDelay.rawValue, forKey: AutoReviewDelay.defaultsKey) }
-    }
+        didSet {
+            AppDefaults.store.set(autoReviewDelay.rawValue, forKey: AutoReviewDelay.defaultsKey)
+            #if os(macOS)
+            if autoReviewDelay == .onAccountSwitch {
+                autoReviewTask?.cancel()
+                autoReviewTask = nil
+            }
+            #endif
+        }    }
     @ObservationIgnored var autoReviewTask: Task<Void, Never>?
 
     /// All selected bookings (⌘-click adds/removes, ⇧-click selects a range,
@@ -386,30 +454,30 @@ public final class AppModel {
     var lingeringBookingID: Booking.ID?
     /// iPhone: set by a tap on a booking row, presents the detail sheet.
     var showBookingSheet = false
-    var collapsedGroups: Set<Int64> = Set(UserDefaults.standard.array(forKey: "sidebar.collapsedKindGroups") as? [Int64] ?? []) {
-        didSet { UserDefaults.standard.set(Array(collapsedGroups), forKey: "sidebar.collapsedKindGroups") }
+    var collapsedGroups: Set<Int64> = Set(AppDefaults.store.array(forKey: "sidebar.collapsedKindGroups") as? [Int64] ?? []) {
+        didSet { AppDefaults.store.set(Array(collapsedGroups), forKey: "sidebar.collapsedKindGroups") }
     }
     /// „Alle Konten“ (the sidebar's root row) folded away with every group.
-    var allAccountsCollapsed: Bool = UserDefaults.standard.bool(forKey: AppModel.allAccountsCollapsedKey) {
-        didSet { UserDefaults.standard.set(allAccountsCollapsed, forKey: AppModel.allAccountsCollapsedKey) }
+    var allAccountsCollapsed: Bool = AppDefaults.store.bool(forKey: AppModel.allAccountsCollapsedKey) {
+        didSet { AppDefaults.store.set(allAccountsCollapsed, forKey: AppModel.allAccountsCollapsedKey) }
     }
     /// The sidebar's category tree, „Ohne Kategorie“ included, folded away under its header.
-    var categoriesCollapsed: Bool = UserDefaults.standard.bool(forKey: "sidebar.categoriesCollapsed") {
-        didSet { UserDefaults.standard.set(categoriesCollapsed, forKey: "sidebar.categoriesCollapsed") }
+    var categoriesCollapsed: Bool = AppDefaults.store.bool(forKey: "sidebar.categoriesCollapsed") {
+        didSet { AppDefaults.store.set(categoriesCollapsed, forKey: "sidebar.categoriesCollapsed") }
     }
-    var collapsedUserGroups: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "sidebar.collapsedUserGroups") ?? []) {
-        didSet { UserDefaults.standard.set(Array(collapsedUserGroups), forKey: "sidebar.collapsedUserGroups") }
+    var collapsedUserGroups: Set<String> = Set(AppDefaults.store.stringArray(forKey: "sidebar.collapsedUserGroups") ?? []) {
+        didSet { AppDefaults.store.set(Array(collapsedUserGroups), forKey: "sidebar.collapsedUserGroups") }
     }
-    var collapsedBankGroups: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "sidebar.collapsedBankGroups") ?? []) {
-        didSet { UserDefaults.standard.set(Array(collapsedBankGroups), forKey: "sidebar.collapsedBankGroups") }
+    var collapsedBankGroups: Set<String> = Set(AppDefaults.store.stringArray(forKey: "sidebar.collapsedBankGroups") ?? []) {
+        didSet { AppDefaults.store.set(Array(collapsedBankGroups), forKey: "sidebar.collapsedBankGroups") }
     }
     /// Archived accounts stay in their group; this hides their sidebar rows.
-    var showArchivedAccounts: Bool = UserDefaults.standard.object(forKey: "sidebar.showArchived") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showArchivedAccounts, forKey: "sidebar.showArchived") }
+    var showArchivedAccounts: Bool = AppDefaults.store.object(forKey: "sidebar.showArchived") as? Bool ?? true {
+        didSet { AppDefaults.store.set(showArchivedAccounts, forKey: "sidebar.showArchived") }
     }
     /// Explicit per-device choice; `nil` = "Nach Gruppe" once groups exist.
-    var accountViewChoice: AccountSidebarMode? = UserDefaults.standard.string(forKey: "sidebar.accountView").flatMap(AccountSidebarMode.init) {
-        didSet { UserDefaults.standard.set(accountViewChoice?.rawValue, forKey: "sidebar.accountView") }
+    var accountViewChoice: AccountSidebarMode? = AppDefaults.store.string(forKey: "sidebar.accountView").flatMap(AccountSidebarMode.init) {
+        didSet { AppDefaults.store.set(accountViewChoice?.rawValue, forKey: "sidebar.accountView") }
     }
     /// Settings tab on screen (set to `.groups` by "Gruppen bearbeiten …").
     var settingsTab: SettingsTab = .general
@@ -435,6 +503,9 @@ public final class AppModel {
     /// `documentsWithoutAccount` = documents without an account (e.g. PostBox, #838).
     var documentsScope: DocumentsScope = .all
     var documentsAccountFilter: Int64?
+    /// "Belege & PostBox" filtered to one bank connection (#1042); nil = all, `documentsWithoutAccount` =
+    /// documents without an account (they have no bank connection). Set it with `selectDocumentsConnection`.
+    var documentsConnectionFilter: Int64?
     static let documentsWithoutAccount: Int64 = -1
     /// „Geplant“ (#240): payments with a bank order, the filters and a reload
     /// marker (set by everything that can change them: transfers, syncs).
@@ -479,7 +550,7 @@ public final class AppModel {
     /// in by `demoActive`). Deleted categories are only soft-deleted, so a stale
     /// id never opens another category of the same vault.
     var expandedCategories = AppModel.storedExpandedCategories(demo: false) {
-        didSet { UserDefaults.standard.set(Array(expandedCategories), forKey: Self.expandedCategoriesKey(demo: demoActive)) }
+        didSet { AppDefaults.store.set(Array(expandedCategories), forKey: Self.expandedCategoriesKey(demo: demoActive)) }
     }
     var showRuleEditor = false {
         didSet { if showRuleEditor, rulesStale { reloadRules() } }
@@ -584,8 +655,19 @@ public final class AppModel {
     var toast: String?
     /// Text of the error alert. Clearing it also clears title and retry.
     var errorMessage: String? {
-        didSet { if errorMessage == nil { errorTitle = nil; errorRetry = nil; errorAlternatives = [] } }
+        didSet {
+            guard errorMessage == nil else { return }
+            let onClose = errorOnClose
+            errorTitle = nil; errorRetry = nil; errorAlternatives = []
+            errorCloseTitle = nil; errorOnClose = nil
+            onClose?()
+        }
     }
+    /// Title of the closing button (nil = "OK").
+    var errorCloseTitle: String?
+    /// Runs when the alert is closed with that button (not with retry or an alternative):
+    /// "Alle abrufen" goes on with the next login only once the error was closed (#1041).
+    @ObservationIgnored var errorOnClose: (@MainActor () -> Void)?
     /// Alert title naming what failed (HIG: specific, not "something went wrong").
     var errorTitle: String?
     /// Optional "Erneut versuchen" action of the error alert.
@@ -729,7 +811,7 @@ public final class AppModel {
     // MARK: State used by AppModel+Documents.swift
 
     /// Folder that receives a copy of every document (nil = off). Per Mac, not per vault.
-    var documentMirrorPath: String? = UserDefaults.standard.string(forKey: "documents.mirrorDir")
+    var documentMirrorPath: String? = AppDefaults.store.string(forKey: "documents.mirrorDir")
     /// Result of the latest mirror run, for the settings.
     var documentMirrorStatus: String?
     var mirrorRunning = false
@@ -739,6 +821,10 @@ public final class AppModel {
     var statementsCountBefore = 0
     /// comdirect FinTS login whose PostBox is fetched now ("PostBox jetzt abrufen", #838).
     var postboxConnectionID: Int64?
+    /// Account whose login syncs only it ("<Konto> abrufen", #1124). Set by
+    /// `requestSyncAccount`, kept through prompts and retries, cleared by a
+    /// finished or cancelled sync and by `requestFullSync`.
+    var syncAccountID: Int64?
     /// Decrypted copy shown in QuickLook; removed again as soon as the
     /// preview closes or shows another document (and on lock / quit).
     var quickLookURL: URL? {
@@ -785,13 +871,13 @@ public final class AppModel {
     public init(options: LaunchOptions = .current) {
         self.options = options
         StartupClock.mark("AppModel.init begin")
-        runningBalanceObserver = UserDefaults.standard.observe(\.showRunningBalance, options: [.old, .new]) { [weak self] _, change in
+        runningBalanceObserver = AppDefaults.store.observe(\.showRunningBalance, options: [.old, .new]) { [weak self] _, change in
             guard let on = change.newValue, on != change.oldValue else { return }
             Task { @MainActor in self?.runningBalanceSettingChanged(on: on) }
         }
         if options.freshVault || options.demoSeed {
             // Developer switches only (screenshots): synchronous, not the normal start path.
-            GiroCrabCore.setLanguage(code: Bundle.main.preferredLocalizations.first ?? "de")
+            GiroCrabCore.setLanguage(code: options.simulateSystemLanguage ?? Bundle.main.preferredLocalizations.first ?? "de")
         }
         if options.freshVault {
             openFreshVault()
@@ -937,7 +1023,8 @@ public final class AppModel {
             standingDraft.purpose = "Abschlag Strom Kd-Nr 482910"
             standingDraft.execDay = 3
             standingDraft.syncDate(to: nil)
-        case "transfer", "transfer-confirm", "transfer-girocode", "transfer-clipboard":
+        case "transfer", "transfer-confirm", "transfer-girocode", "transfer-clipboard", "transfer-recipients",
+             "transfer-suggestions":
             if let a = transferAccounts.first { sidebarSelection = .account(a.id) }
             openTransfer()
             // transfer-clipboard: empty form, the sheet offers the payment in its clipboard banner (#663)
@@ -1263,7 +1350,7 @@ public final class AppModel {
         pendingOwnVaultAction = nil
         if isEmpty && pending == nil {
             // Nothing synced yet: show demo bookings so the UI can be judged.
-            UserDefaults.standard.set(false, forKey: Self.realDataKey)
+            AppDefaults.store.set(false, forKey: Self.realDataKey)
             await hop.value
             await openDemoVaultAsync()
             toast = String(localized: "Ihr Tresor ist noch leer – Sie sehen Demo-Daten")
@@ -1414,10 +1501,10 @@ public final class AppModel {
         sidebarSelection = .allAccounts
         vault = v
         demoActive = false
-        UserDefaults.standard.set(true, forKey: Self.realDataKey)
+        AppDefaults.store.set(true, forKey: Self.realDataKey)
         logoCache = [:]
         // nothing of the vault shown before (demo) may appear under the new one
-        page = nil; bookings = []; history = []; listBalances = ListBalances()
+        page = nil; bookings = []; history = []; categoryOtherCurrencies = []; listBalances = ListBalances()
         assetClassificationVersion += 1
         // cheap, indexed calls; everything that scans bookings goes off the main thread
         reloadAccounts()
@@ -1442,7 +1529,7 @@ public final class AppModel {
     func useVault(_ v: Vault, demo: Bool) {
         vault = v
         demoActive = demo
-        if !demo { UserDefaults.standard.set(true, forKey: Self.realDataKey) }
+        if !demo { AppDefaults.store.set(true, forKey: Self.realDataKey) }
         vaultState = .open
         selectedBookingID = nil
         selectAllAccountsForReloadAll()
@@ -1491,7 +1578,7 @@ public final class AppModel {
     /// Real data may exist in the (encrypted, hence unreadable while locked) vault.
     /// Without a stored answer, an existing vault file counts as real data.
     nonisolated static var vaultMayHoldRealData: Bool {
-        if let v = UserDefaults.standard.object(forKey: realDataKey) as? Bool { return v }
+        if let v = AppDefaults.store.object(forKey: realDataKey) as? Bool { return v }
         return FileManager.default.fileExists(atPath: vaultURL.path)
     }
 
@@ -1569,8 +1656,7 @@ public final class AppModel {
         quietSyncConnectionID = nil
         // the failure text may name a bank: gone with the vault
         autoSyncStatus = AutoSyncStatus()
-        statementsAccountID = nil
-        postboxConnectionID = nil
+        clearSyncTargets()
         syncGeneration &+= 1
         resetSyncBatch()
         transferBusy = false
@@ -1689,17 +1775,15 @@ extension AppModel {
         }
     }
 
-    /// Free-text note for an account stored in vault settings (GitHub #512).
+    /// Free-text note for an account (GitHub #512); synced like the account name (#980).
     func accountNote(for accountID: Int64) -> String {
-        accountNotes[accountID] ?? ""
+        accountsByID[accountID]?.note ?? ""
     }
 
-    /// `list_settings` only returns known keys, so the note is read with `getSetting`.
     func setAccountNote(_ note: String, for accountID: Int64) {
         guard let vault else { return }
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        runCore { try vault.setSetting(key: "account.note.\(accountID)", value: trimmed) }
-        accountNotes[accountID] = trimmed.isEmpty ? nil : trimmed
+        runCore { try vault.setAccountNote(accountId: accountID, note: note) }
+        reloadAccounts()
     }
 
     /// Label of the uncategorized row, list chips and title (#597).

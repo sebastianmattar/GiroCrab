@@ -13,18 +13,19 @@
 //! and transaction ids are the same, so switching keeps the stored bookings.
 
 use async_trait::async_trait;
-use chrono::{Duration, NaiveDate, Utc};
+use jiff::civil::Date;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::paypal_nvp::{NvpClient, NvpCredentials};
 use super::{
-    http_client, BankConnector, ChallengeResponse, ConnectContext, FetchResult, Phase,
-    RemoteAccount, RemoteTransaction,
+    BankConnector, ChallengeResponse, ConnectContext, FetchResult, Phase, RemoteAccount,
+    RemoteTransaction, http_client_same_host,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::models::AccountKind;
 use crate::money::json_number_to_cents;
-use crate::secret::SecretString;
+use crate::secret::{SecretJson, SecretString};
 
 pub struct PayPalConnector {
     client: Option<reqwest::Client>,
@@ -33,8 +34,13 @@ pub struct PayPalConnector {
     nvp: Option<NvpClient>,
 }
 
-/// Connector state key: ids whose GetTransactionDetails were already looked up.
-const DETAILS_DONE_KEY: &str = "nvp_details_done";
+/// Connector state of the classic NVP API.
+#[derive(Default, Serialize, Deserialize)]
+struct NvpState {
+    /// Ids whose GetTransactionDetails were already looked up.
+    #[serde(default)]
+    nvp_details_done: Vec<String>,
+}
 
 /// True when the classic NVP API (API signature) is configured.
 pub(crate) fn nvp_configured(settings: &std::collections::HashMap<String, SecretString>) -> bool {
@@ -108,7 +114,7 @@ impl BankConnector for PayPalConnector {
         } else {
             "https://api-m.paypal.com".into()
         };
-        let client = http_client()?;
+        let client = http_client_same_host()?;
         let resp = client
             .post(format!("{}/v1/oauth2/token", self.base))
             .basic_auth(
@@ -149,24 +155,23 @@ impl BankConnector for PayPalConnector {
             // Every search succeeded: the holds listed are all that are open in the period.
             out.hold_prefix = Some(super::paypal_nvp::HOLD_PREFIX.into());
             retain_known(&mut out);
+            // One account (#1124): no details for bookings the vault drops,
+            // their ids would count as done.
+            let refs: Vec<String> = out
+                .accounts
+                .iter()
+                .map(|a| a.external_ref.clone())
+                .collect();
+            if let Some(only) = ctx.only_among(&refs) {
+                out.transactions.retain(|t| t.account_ref == only);
+            }
             // Purpose from GetTransactionDetails, once per booking (ids kept in the state).
-            let mut done: Vec<String> = ctx.state[DETAILS_DONE_KEY]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            nvp.fill_details(&mut out.transactions, &mut done).await;
-            let keep_from = done.len().saturating_sub(super::paypal_nvp::MAX_DONE_IDS);
-            let mut state = if ctx.state.is_object() {
-                ctx.state.clone()
-            } else {
-                serde_json::json!({})
-            };
-            state[DETAILS_DONE_KEY] = serde_json::json!(done[keep_from..]);
-            out.state = Some(state);
+            let mut state: NvpState = ctx.state.decode().unwrap_or_default();
+            nvp.fill_details(&mut out.transactions, &mut state.nvp_details_done)
+                .await;
+            let done = &mut state.nvp_details_done;
+            done.drain(..done.len().saturating_sub(super::paypal_nvp::MAX_DONE_IDS));
+            out.state = SecretJson::encode(&state).ok();
             return Ok(out);
         }
         let balances = self.get("/v1/reporting/balances?currency_code=ALL").await?;
@@ -192,9 +197,9 @@ impl BankConnector for PayPalConnector {
             out.accounts.push(fallback_account(ctx));
         }
         let mut start = since_date(ctx);
-        let end_all = Utc::now().date_naive();
+        let end_all = crate::dates::utc_date(jiff::Timestamp::now());
         while start <= end_all {
-            let end = (start + Duration::days(30)).min(end_all);
+            let end = (start + crate::dates::days(30)).min(end_all);
             let mut page = 1;
             loop {
                 let q = format!(
@@ -269,16 +274,16 @@ impl BankConnector for PayPalConnector {
                 }
                 page += 1;
             }
-            start = end + Duration::days(1);
+            start = end + crate::dates::days(1);
         }
         retain_known(&mut out);
         Ok(out)
     }
 }
 
-fn since_date(ctx: &ConnectContext) -> NaiveDate {
-    NaiveDate::parse_from_str(&ctx.since, "%Y-%m-%d")
-        .unwrap_or_else(|_| Utc::now().date_naive() - Duration::days(90))
+fn since_date(ctx: &ConnectContext) -> Date {
+    Date::strptime("%Y-%m-%d", &ctx.since)
+        .unwrap_or_else(|_| crate::dates::utc_date(jiff::Timestamp::now()) - crate::dates::days(90))
 }
 
 fn fallback_account(ctx: &ConnectContext) -> RemoteAccount {
@@ -295,12 +300,91 @@ fn fallback_account(ctx: &ConnectContext) -> RemoteAccount {
     }
 }
 
-/// Only keep transactions for accounts we know.
+/// Ensure every currency present in fetched transactions has a PayPal account
+/// (even when its balance is 0 and omitted by GetBalance / /balances, #1110),
+/// then keep only transactions belonging to known accounts.
 fn retain_known(out: &mut FetchResult) {
+    let owner = out
+        .accounts
+        .first()
+        .map(|a| a.owner.clone())
+        .unwrap_or_default();
+    let account_number = out
+        .accounts
+        .first()
+        .map(|a| a.account_number.clone())
+        .unwrap_or_else(|| owner.clone());
+    let balance_date = out
+        .accounts
+        .first()
+        .map(|a| a.balance_date.clone())
+        .unwrap_or_else(super::today);
+
+    for t in &out.transactions {
+        let Some(cur) = t.account_ref.strip_prefix("paypal:") else {
+            continue;
+        };
+        let cur = cur.trim();
+        if cur.is_empty() || out.accounts.iter().any(|a| a.external_ref == t.account_ref) {
+            continue;
+        }
+        out.accounts.push(RemoteAccount {
+            external_ref: t.account_ref.clone(),
+            name: format!("PayPal {cur}"),
+            owner: owner.clone(),
+            iban: String::new(),
+            account_number: account_number.clone(),
+            currency: cur.to_string(),
+            kind: AccountKind::PaymentService,
+            balance_cents: 0,
+            balance_date: balance_date.clone(),
+        });
+    }
+
     let known: Vec<String> = out
         .accounts
         .iter()
         .map(|a| a.external_ref.clone())
         .collect();
     out.transactions.retain(|t| known.contains(&t.account_ref));
+}
+
+#[cfg(test)]
+mod currency_tests {
+    use super::*;
+
+    #[test]
+    fn retain_known_creates_zero_balance_account_for_foreign_currency_transactions() {
+        let mut out = FetchResult::default();
+        out.accounts.push(RemoteAccount {
+            external_ref: "paypal:EUR".into(),
+            name: "PayPal".into(),
+            owner: "alice@example.com".into(),
+            iban: String::new(),
+            account_number: "alice@example.com".into(),
+            currency: "EUR".into(),
+            kind: AccountKind::PaymentService,
+            balance_cents: 50_00,
+            balance_date: "2026-11-19".into(),
+        });
+        out.transactions.push(RemoteTransaction {
+            account_ref: "paypal:USD".into(),
+            external_id: "USD-PURCHASE-1".into(),
+            booking_date: "2026-11-19".into(),
+            value_date: "2026-11-19".into(),
+            amount_cents: -11_90,
+            currency: "USD".into(),
+            counterparty: "US Merchant".into(),
+            ..Default::default()
+        });
+        retain_known(&mut out);
+        assert_eq!(out.transactions.len(), 1);
+        let usd = out
+            .accounts
+            .iter()
+            .find(|a| a.external_ref == "paypal:USD")
+            .unwrap();
+        assert_eq!(usd.currency, "USD");
+        assert_eq!(usd.balance_cents, 0);
+    }
 }

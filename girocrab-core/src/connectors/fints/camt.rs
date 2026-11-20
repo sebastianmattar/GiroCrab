@@ -195,7 +195,7 @@ fn card_timestamp_date(text: &str) -> Option<String> {
             continue;
         }
         let d: String = s[i - 10..i].iter().collect();
-        if chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").is_ok() {
+        if jiff::civil::Date::strptime("%Y-%m-%d", &d).is_ok() {
             return Some(d);
         }
     }
@@ -265,20 +265,19 @@ fn parse_doc(
                 stack.push(name);
             }
             Tok::End(name) => {
-                if name == "Ntry" {
-                    if let Some(e) = cur.take() {
-                        entries.push(e);
-                    }
+                if name == "Ntry"
+                    && let Some(e) = cur.take()
+                {
+                    entries.push(e);
                 }
                 if name == "Bal"
                     && matches!(bal_type.as_str(), "CLBD" | "ITBD" | "CLAV" | "ITAV")
                     && report.closing_balance_cents.is_none()
+                    && let Ok(c) = parse_cents(&bal_amt)
                 {
-                    if let Ok(c) = parse_cents(&bal_amt) {
-                        report.closing_balance_cents = Some(if bal_ind == "DBIT" { -c } else { c });
-                        report.closing_date = Some(bal_date.chars().take(10).collect());
-                        report.currency = Some(bal_ccy.clone()).filter(|c| !c.is_empty());
-                    }
+                    report.closing_balance_cents = Some(if bal_ind == "DBIT" { -c } else { c });
+                    report.closing_date = Some(bal_date.chars().take(10).collect());
+                    report.currency = Some(bal_ccy.clone()).filter(|c| !c.is_empty());
                 }
                 // tolerate sloppy nesting
                 if let Some(pos) = stack.iter().rposition(|s| *s == name) {

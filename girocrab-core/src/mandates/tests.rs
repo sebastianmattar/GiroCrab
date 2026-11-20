@@ -177,16 +177,19 @@ fn collection_files_are_grouped_by_scheme_and_sequence() {
     };
 
     // no creditor ID yet
-    assert!(v
-        .build_collection_files(acc, items(&[a.id]), "2026-12-01".into())
-        .is_err());
+    assert!(
+        v.build_collection_files(acc, items(&[a.id]), "2026-12-01".into())
+            .is_err()
+    );
     v.set_creditor_id(acc, "DE98ZZZ09999999999".into()).unwrap();
-    assert!(v
-        .build_collection_files(acc, vec![], "2026-12-01".into())
-        .is_err());
-    assert!(v
-        .build_collection_files(acc, items(&[a.id]), "01.12.2026".into())
-        .is_err());
+    assert!(
+        v.build_collection_files(acc, vec![], "2026-12-01".into())
+            .is_err()
+    );
+    assert!(
+        v.build_collection_files(acc, items(&[a.id]), "01.12.2026".into())
+            .is_err()
+    );
 
     let files = v
         .build_collection_files(acc, items(&[a.id, b.id, c.id]), "2026-12-01".into())
@@ -219,12 +222,14 @@ fn collection_files_are_grouped_by_scheme_and_sequence() {
     let mut off = input(acc, "M-D");
     off.active = false;
     let d = v.save_mandate(None, off).unwrap();
-    assert!(v
-        .build_collection_files(acc, items(&[d.id]), "2027-01-02".into())
-        .is_err());
-    assert!(v
-        .build_collection_files(acc + 1, items(&[a.id]), "2027-01-02".into())
-        .is_err());
+    assert!(
+        v.build_collection_files(acc, items(&[d.id]), "2027-01-02".into())
+            .is_err()
+    );
+    assert!(
+        v.build_collection_files(acc + 1, items(&[a.id]), "2027-01-02".into())
+            .is_err()
+    );
 }
 
 #[test]
@@ -245,9 +250,10 @@ fn a_pain008_file_is_imported_as_mandates_with_their_sequence() {
         )
     };
     // a file of another creditor account is refused
-    assert!(v
-        .import_pain008(acc, xml("RCUR", "DE02120300000000202051"))
-        .is_err());
+    assert!(
+        v.import_pain008(acc, xml("RCUR", "DE02120300000000202051"))
+            .is_err()
+    );
     assert!(v.import_pain008(acc, "<Document/>".into()).is_err());
 
     let r = v.import_pain008(acc, xml("RCUR", &iban)).unwrap();
@@ -393,11 +399,12 @@ fn returns_flag_the_mandate_until_acknowledged() {
     assert!(all[0].is_return && !all[0].acknowledged);
     assert_eq!(all[0].reason_code, "MS03");
     assert!(!all[1].is_return);
-    assert!(v
-        .mandate_bookings(other.id)
-        .unwrap()
-        .iter()
-        .all(|b| !b.is_return));
+    assert!(
+        v.mandate_bookings(other.id)
+            .unwrap()
+            .iter()
+            .all(|b| !b.is_return)
+    );
 
     let open = v.open_mandate_returns(Some(acc)).unwrap();
     assert_eq!(open.len(), 1);
@@ -505,13 +512,15 @@ fn a_run_rejects_duplicates_and_collected_one_off_mandates() {
     let mut one = input(acc, "M-ONE");
     one.one_off = true;
     let o = v.save_mandate(None, one).unwrap();
-    assert!(v
-        .build_collection_files(acc, vec![item(o.id)], date.clone())
-        .is_ok());
+    assert!(
+        v.build_collection_files(acc, vec![item(o.id)], date.clone())
+            .is_ok()
+    );
     v.mark_collected(vec![o.id], date.clone()).unwrap();
-    assert!(v
-        .build_collection_files(acc, vec![item(o.id)], date)
-        .is_err());
+    assert!(
+        v.build_collection_files(acc, vec![item(o.id)], date)
+            .is_err()
+    );
 }
 
 #[test]

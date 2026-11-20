@@ -49,6 +49,9 @@ extern "C" void girocrab_create_app(int argc, char **argv, const char *version)
     // Wayland: ties the window to de.girocrab.GiroCrab.desktop (icon, task bar entry)
     QGuiApplication::setDesktopFileName(QStringLiteral("de.girocrab.GiroCrab"));
     QGuiApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("de.girocrab.GiroCrab")));
+    // SF.qml maps SF Symbols to Breeze icon names. Other themes (GNOME's Adwaita)
+    // lack most of them, so Breeze fills the gaps; the desktop's theme stays first.
+    QIcon::setFallbackThemeName(QStringLiteral("breeze"));
     // LaunchOptions.swift `--dark` / `--light`: force the appearance (README screenshots).
     const QStringList args = QCoreApplication::arguments();
     // Qt Quick Controls get their palette from Theme.forcedPalette (the KDE colour

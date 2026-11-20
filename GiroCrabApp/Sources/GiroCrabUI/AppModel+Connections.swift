@@ -7,14 +7,13 @@ extension AppModel {
     /// registration; users who already entered their own are asked once.
     func reloadProductIDState(_ vault: Vault) {
         var mode = (try? vault.fintsProductIdMode()) ?? ""
-        let hasOwn = settingEntry("fints.product_id")?.hasValue == true
-        if fintsBuiltinAvailable, mode.isEmpty, !hasOwn, !isDemo {
+        if fintsBuiltinAvailable, mode != "builtin", !isDemo {
             try? vault.setFintsProductIdMode(mode: "builtin")
             mode = "builtin"
         }
         fintsProductIDMode = mode
         fintsProductIDSource = (try? vault.fintsProductIdSource()) ?? ""
-        offerProductIDChoice = fintsBuiltinAvailable && mode.isEmpty && hasOwn && !isDemo
+        offerProductIDChoice = false
     }
 
     /// Stores the choice. The user's own ID always stays in the vault.
@@ -246,6 +245,9 @@ extension AppModel {
     /// After a rejected registration: switch to the own one, open Settings › Banks (FinTS registration)
     /// and put the cursor into its field (no extra field in the alert).
     func enterOwnProductID() {
+        // Off to Settings: a waiting "Alle abrufen" ends here instead of stalling (#1041);
+        // the login is fetched again by hand once the registration is in.
+        resetSyncBatch()
         // Mode `own` only once an ID is stored (`OwnProductIDField.commit`), or an existing one is replaced:
         // an empty field must not leave the user in a mode without a registration.
         if settingEntry("fints.product_id")?.hasValue == true { setFintsProductIDMode("own") }

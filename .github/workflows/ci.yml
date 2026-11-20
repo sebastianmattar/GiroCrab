@@ -174,7 +174,7 @@ jobs:
       - name: Test AI provenance classifier
         run: python3 -m unittest tools/test_export_ai_provenance.py
       - name: Test FNZ portal browser scripts
-        run: node --test scripts/test-fnz-portal.cjs scripts/test-quirion-portal.cjs scripts/test-schwaebisch-hall-portal.cjs scripts/test-advanzia-portal.cjs
+        run: node --test scripts/test-fnz-portal.cjs scripts/test-quirion-portal.cjs scripts/test-schwaebisch-hall-portal.cjs scripts/test-advanzia-portal.cjs scripts/test-equateplus-linux.cjs
       - name: FFI types carry the optional serde derive (front ends without UniFFI)
         run: scripts/lint-serde-feature.sh
       - name: Free functions are exported to UniFFI only from ffi.rs
@@ -275,7 +275,9 @@ jobs:
         if: needs.changes.outputs.swift == 'true' && steps.xcf-cache.outputs.cache-hit != 'true'
         run: ./build-xcframework.sh --macos-only
       - name: Stale-bindings check (build-xcframework.sh --check)
-        if: needs.changes.outputs.rust == 'true'
+        # Needs the bindings built above, which only exist when the Swift part runs
+        # (a change only to girocrab-mcp/ or tools/ sets `rust` alone).
+        if: needs.changes.outputs.swift == 'true' && needs.changes.outputs.rust == 'true'
         run: |
           ./build-xcframework.sh --check
           echo '// stale' >> girocrab-core/src/text.rs

@@ -10,7 +10,7 @@ struct DockBadge {
     static let defaultsKey = "dock.uncheckedCount"
     let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    init(defaults: UserDefaults = AppDefaults.store) { self.defaults = defaults }
 
     /// Last known count of unchecked bookings.
     var count: Int { defaults.integer(forKey: Self.defaultsKey) }

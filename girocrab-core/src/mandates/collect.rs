@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::connectors::fints::pain008::{
-    build_pain008, Collection, DebitVersion, Pain008, SequenceType,
+    Collection, DebitVersion, Pain008, SequenceType, build_pain008,
 };
 use crate::connectors::fints::sepa::PainHeader;
 use crate::error::{CoreError, CoreResult};
@@ -61,7 +61,7 @@ pub struct DebitFile {
 }
 
 fn check_date(d: &str) -> CoreResult<()> {
-    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+    jiff::civil::Date::strptime("%Y-%m-%d", d)
         .map(|_| ())
         .map_err(|_| CoreError::invalid(tr("Das Fälligkeitsdatum ist ungültig.")))
 }

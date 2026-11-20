@@ -3,12 +3,12 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection};
+use jiff::civil::Date;
+use rusqlite::{Connection, params};
 
 use super::observations::{
-    self, day_key, day_text, day_values, position_key, source_of, source_rank, Observed,
-    KIND_POSITION,
+    self, KIND_POSITION, Observed, day_key, day_text, day_values, position_key, source_of,
+    source_rank,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::models::DepotValuePoint;
@@ -79,10 +79,10 @@ fn position_currency(
 }
 
 /// Days from `first` to `end` with the last known value carried on.
-fn carried(values: &[(u32, i64)], end: NaiveDate) -> Vec<DepotValuePoint> {
+fn carried(values: &[(u32, i64)], end: Date) -> Vec<DepotValuePoint> {
     let Some(first) = values
         .first()
-        .and_then(|(d, _)| NaiveDate::parse_from_str(&day_text(*d), "%Y-%m-%d").ok())
+        .and_then(|(d, _)| Date::strptime("%Y-%m-%d", day_text(*d)).ok())
     else {
         return vec![];
     };
@@ -91,7 +91,7 @@ fn carried(values: &[(u32, i64)], end: NaiveDate) -> Vec<DepotValuePoint> {
     let mut current = 0;
     let mut day = first;
     while day <= end {
-        let date = day.format("%Y-%m-%d").to_string();
+        let date = crate::dates::iso(day);
         let key = day_key(&date);
         while next < values.len() && values[next].0 <= key {
             current = values[next].1;
@@ -103,7 +103,8 @@ fn carried(values: &[(u32, i64)], end: NaiveDate) -> Vec<DepotValuePoint> {
             covered_depots: 1,
             total_depots: 1,
         });
-        day += chrono::Duration::days(1);
+        let Ok(next) = day.tomorrow() else { break };
+        day = next;
     }
     out
 }
@@ -220,12 +221,12 @@ pub(crate) fn history(
     };
     let rows = observations::observed(conn, account_id, KIND_POSITION, position, &currency, None)?;
     let days = best_per_day(&rows);
-    let today = chrono::Local::now().date_naive();
+    let today = crate::dates::today();
     // A held position carries on to today. A sold one ends with its sale (a 0), one no longer held
     // with the last day a source reported it (its value after that is unknown).
     let end = match days.last() {
         Some((d, v)) if *v == 0 || !held_keys(conn, account_id)?.contains(position) => {
-            NaiveDate::parse_from_str(&day_text(*d), "%Y-%m-%d").unwrap_or(today)
+            Date::strptime("%Y-%m-%d", day_text(*d)).unwrap_or(today)
         }
         _ => today,
     };

@@ -33,7 +33,9 @@ and `migrate` runs the missing ones in a single transaction.
 | 29 | `depot_values`: value history of securities depots |
 | 30 | `tx_date_id` also covers `deleted_ms`, `account_id` and `category_id` (counts and period sums from the index) |
 | 31 | `booking_documents.seen_at`: read status of documents; the document list index carries the column, a partial index finds the unread ones |
-| 32+ | future changes; the tables of securities depots are described in `docs/DEPOT_DATENMODELL.md` |
+| 32 | `accounts.note` / `note_ms`: the account note syncs like the name (#980); moves the setting `account.note.<id>` onto the account |
+| 33 | `hidden_recipients`: IBANs left out of the transfer suggestions (#978); index `tx_recipients` over the outgoing bookings with an IBAN |
+| 34+ | future changes; the tables of securities depots are described in `docs/DEPOT_DATENMODELL.md` |
 
 **Changing the schema**
 

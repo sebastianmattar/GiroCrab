@@ -258,9 +258,9 @@ Sheet {
         if (!accountIDs.length && o.scope !== "selection") { previewCount = 0; previewName = null; return }
         previewCount = null
         const preset = o.scope === "selection" ? "current" : o.periodPreset
-        BookingExport.loadExportBookings(accountIDs.length ? accountIDs : null, preset, bookingIDs, o, BookingExport.isCamt(o.format), bookings => {
+        BookingExport.loadExportBookings(accountIDs.length ? accountIDs : null, preset, bookingIDs, o, BookingExport.isCamt(o.format), (bookings, tagNote) => {
             if (gen !== previewGeneration) return
-            const report = BookingExport.exportReport(bookings, accountIDs, preset, bookingIDs, o)
+            const report = BookingExport.exportReport(bookings, accountIDs, preset, bookingIDs, o, tagNote)
             previewCount = report.rows.length
             const range = BookingExport.camtRange(accountIDs, preset, bookingIDs, o)
             previewName = BookingExport.defaultFilename(report.accounts, report.rows, o.format, fallbackTitle,

@@ -160,7 +160,7 @@ fn reads_independent_rdhx_and_rejects_authenticated_invalid_crt() {
 
 #[test]
 fn vault_import_is_atomic_and_reserves_counters_before_sync() {
-    use crate::{test_support::TempDir, Vault};
+    use crate::{Vault, test_support::TempDir};
     let directory = TempDir::new("rah-import");
     let vault = Vault::open(
         directory.join("vault.girocrab").to_string_lossy().into(),
@@ -168,9 +168,11 @@ fn vault_import_is_atomic_and_reserves_counters_before_sync() {
     )
     .unwrap();
     let bytes = fixture();
-    assert!(vault
-        .add_rah10_connection(bytes.clone(), "wrong".into(), "Demo".into())
-        .is_err());
+    assert!(
+        vault
+            .add_rah10_connection(bytes.clone(), "wrong".into(), "Demo".into())
+            .is_err()
+    );
     assert!(vault.list_bank_connections().unwrap().is_empty());
     let id = vault
         .add_rah10_connection(
@@ -180,9 +182,11 @@ fn vault_import_is_atomic_and_reserves_counters_before_sync() {
         )
         .unwrap();
     assert!(vault.is_rah10_connection(id).unwrap());
-    assert!(vault
-        .add_rah10_connection(bytes, "invented-test-password".into(), "Demo".into())
-        .is_err());
+    assert!(
+        vault
+            .add_rah10_connection(bytes, "invented-test-password".into(), "Demo".into())
+            .is_err()
+    );
     let counter = format!("fints.rah10.counter.{id}");
     assert_eq!(
         vault.get_setting(counter.clone()).unwrap().as_deref(),
@@ -214,12 +218,12 @@ fn vault_import_is_atomic_and_reserves_counters_before_sync() {
 #[tokio::test]
 async fn separately_confirmed_bank_keys_are_persisted_and_revalidated() {
     use crate::{
+        Vault,
         connectors::{
-            fints::{bank_keys, FinTsConnector},
             BankConnector,
+            fints::{FinTsConnector, bank_keys},
         },
         test_support::TempDir,
-        Vault,
     };
     let directory = TempDir::new("rah-pins");
     let vault = Vault::open(
@@ -236,15 +240,17 @@ async fn separately_confirmed_bank_keys_are_persisted_and_revalidated() {
         .map(|key| bank_keys::key_candidate(key).unwrap())
         .collect();
     let expected: Vec<_> = candidates.iter().map(|c| c.fingerprint.clone()).collect();
-    assert!(vault
-        .add_rah10_connection_with_bank_keys(
-            bytes.clone(),
-            secret.into(),
-            "Demo".into(),
-            candidates.clone(),
-            vec!["00".repeat(32); 2]
-        )
-        .is_err());
+    assert!(
+        vault
+            .add_rah10_connection_with_bank_keys(
+                bytes.clone(),
+                secret.into(),
+                "Demo".into(),
+                candidates.clone(),
+                vec!["00".repeat(32); 2]
+            )
+            .is_err()
+    );
     assert!(vault.list_bank_connections().unwrap().is_empty());
     let id = vault
         .add_rah10_connection_with_bank_keys(

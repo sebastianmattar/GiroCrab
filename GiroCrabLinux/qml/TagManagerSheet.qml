@@ -269,7 +269,7 @@ Sheet {
                 }
                 Text {
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
-                    text: qsTr("Strg+N Neuer Tag · ↩ Umbenennen · Entf Löschen · Esc Auswahl aufheben")
+                    text: qsTr("Strg+N Neuer Tag · ↩ Umbenennen · Entf Löschen · Esc Auswahl aufheben · Zahl: je Konto")
                     font.pixelSize: Theme.caption2; color: Theme.tertiary
                 }
             }
@@ -324,10 +324,36 @@ Sheet {
                 wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                 Sensitive {}
             }
-            Text {
-                text: Fmt.count(row.modelData.booking_count)
-                font.pixelSize: Theme.callout; font.features: { "tnum": 1 }
-                color: row.modelData.booking_count === 0 ? Theme.tertiary : Theme.secondary
+            // TagBookingCount (#228, part 3): hovering (or clicking) it shows the bookings per account
+            Item {
+                id: countItem
+                readonly property bool active: row.modelData.booking_count > 0
+                implicitWidth: countText.implicitWidth + 8; implicitHeight: countText.implicitHeight + 2
+                Text {
+                    id: countText
+                    anchors.centerIn: parent
+                    text: Fmt.count(row.modelData.booking_count)
+                    font.pixelSize: Theme.callout; font.features: { "tnum": 1 }
+                    color: row.modelData.booking_count === 0 ? Theme.tertiary : Theme.secondary
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: countItem.active
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onContainsMouseChanged: sheet.countHovered(containsMouse, row.modelData, countItem)
+                    onClicked: accountsPopover.toggleFor(row.modelData, countItem)
+                }
+                ToolTip.visible: countItem.active && countItemHover.hovered && !accountsPopover.visible
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("Buchungen nach Konten")
+                HoverHandler { id: countItemHover }
+                // screenshots: --demo-sheet tags-accounts (once the sheet stands)
+                Timer {
+                    running: AppModel.demoSheet === "tags-accounts" && row.index === 0 && countItem.active
+                    interval: 800
+                    onTriggered: accountsPopover.openFor(row.modelData, countItem)
+                }
             }
         }
         TapHandler {
@@ -364,6 +390,146 @@ Sheet {
                 if (to !== row.index) sheet.moveTag(row.index, to)
             }
         }
+    }
+
+    // MARK: - bookings per account (TagManagerView.swift › TagBookingCount / TagAccountsPopover, #228 part 3)
+    property bool overCount: false
+    property bool overPopover: false
+    /// The count the pointer rests on: { tag, anchor }.
+    property var hoverTarget: null
+    /// Opens after a short rest on the count; closes once the pointer has left both the count
+    /// and the popover (the gap between them takes a moment to cross).
+    function countHovered(inside, tag, anchor) {
+        overCount = inside
+        if (inside) hoverTarget = { tag: tag, anchor: anchor }
+        hoverChanged()
+    }
+    function hoverChanged() {
+        hoverTimer.stop()
+        const open = overCount || overPopover
+        const showing = accountsPopover.visible && (!overCount || (hoverTarget && accountsPopover.tag && accountsPopover.tag.id === hoverTarget.tag.id))
+        if (open === showing) return
+        hoverTimer.opening = open
+        hoverTimer.interval = open ? 350 : 300
+        hoverTimer.start()
+    }
+    Timer {
+        id: hoverTimer
+        property bool opening: false
+        onTriggered: {
+            if ((sheet.overCount || sheet.overPopover) !== opening) return
+            if (opening && sheet.overCount && sheet.hoverTarget) accountsPopover.openFor(sheet.hoverTarget.tag, sheet.hoverTarget.anchor)
+            else if (!opening) accountsPopover.close()
+        }
+    }
+    Popup {
+        id: accountsPopover
+        property var tag: null
+        /// [TagAccountCount] or null while loading.
+        property var rows: null
+        readonly property var own: rows ? rows.filter(r => !r.linked) : []
+        readonly property var linked: rows ? rows.filter(r => r.linked) : []
+        function openFor(t, anchor) {
+            tag = t
+            rows = null
+            parent = anchor
+            // to the left, over the list: the count sits at the sheet's right edge
+            x = -width - 6
+            place()
+            open()
+            const id = t.id
+            TagFilter.loadAccountCounts(id, r => { if (accountsPopover.tag && accountsPopover.tag.id === id) accountsPopover.rows = r || [] })
+        }
+        /// Keeps the popover inside the sheet, also once the rows have arrived.
+        function place() {
+            if (!parent || !parent.mapToItem) return
+            const top = parent.mapToItem(sheet.contentItem, 0, 0).y
+            y = Math.max(-top + 12, Math.min(0, sheet.height - top - implicitHeight - 24))
+        }
+        onImplicitHeightChanged: if (visible) place()
+        function toggleFor(t, anchor) {
+            hoverTimer.stop()
+            if (visible && tag && tag.id === t.id) close(); else openFor(t, anchor)
+        }
+        width: 280 * Theme.textScale
+        padding: 12
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        background: Rectangle { radius: 9; color: Theme.card; border.color: Theme.border }
+        onClosed: sheet.overPopover = false
+        contentItem: ColumnLayout {
+            spacing: 6
+            HoverHandler { onHoveredChanged: { sheet.overPopover = hovered; sheet.hoverChanged() } }
+            Text { text: qsTr("Buchungen nach Konten"); font.pixelSize: Theme.body; font.weight: Font.DemiBold; color: Theme.text }
+            Spinner { visible: accountsPopover.rows === null; size: 16 }
+            // many accounts: the rows scroll, the popover stays inside the sheet
+            Flickable {
+                id: accountFlick
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(accountRows.implicitHeight, Math.max(80, sheet.height - 160))
+                contentHeight: accountRows.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: accountRows.implicitHeight > accountFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                ColumnLayout {
+                    id: accountRows
+                    width: accountFlick.width
+                    spacing: 6
+                    // each booking once, at its own account (adds up to the tag's count) …
+                    Repeater { model: accountsPopover.own; AccountCountRow { required property var modelData; Layout.fillWidth: true; entry: modelData } }
+                    // … then loans whose view shows some of them too (rates linked from the Girokonto)
+                    Rectangle { visible: accountsPopover.linked.length > 0; Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+                    Repeater { model: accountsPopover.linked; AccountCountRow { required property var modelData; Layout.fillWidth: true; entry: modelData } }
+                }
+            }
+            Text {
+                visible: accountsPopover.linked.length > 0
+                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                text: qsTr("Raten von anderen Konten, die mit dem Kredit verknüpft sind.")
+                font.pixelSize: Theme.caption; color: Theme.secondary
+            }
+            Text {
+                visible: accountsPopover.rows !== null
+                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                text: qsTr("Klick auf ein Konto zeigt seine Buchungen mit diesem Tag.")
+                font.pixelSize: Theme.caption; color: Theme.secondary
+            }
+        }
+    }
+    /// TagAccountsPopover.accountRow: a click closes the sheet and lists the bookings.
+    component AccountCountRow: Item {
+        id: acRow
+        property var entry
+        readonly property var account: entry ? AppModel.account(entry.account_id) : null
+        implicitHeight: acLayout.implicitHeight + 4
+        opacity: account ? 1 : 0.5
+        RowLayout {
+            id: acLayout
+            anchors.fill: parent
+            spacing: 4
+            Text {
+                // the name truncates, the count never
+                Layout.maximumWidth: Math.max(40, acRow.width - linkedText.width - acCount.implicitWidth - 24)
+                text: acRow.account ? acRow.account.name : qsTr("Unbekanntes Konto")
+                font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight
+                Sensitive {}
+            }
+            Text { id: linkedText; visible: acRow.entry && acRow.entry.linked; text: qsTr("(verknüpft)"); font.pixelSize: Theme.body; color: Theme.secondary }
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 12 }
+            Text {
+                id: acCount
+                text: acRow.entry ? Fmt.count(acRow.entry.booking_count) : ""
+                font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.secondary
+            }
+        }
+        MouseArea {
+            id: acMouse
+            anchors.fill: parent
+            enabled: acRow.account !== null
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: { const t = accountsPopover.tag; accountsPopover.close(); TagFilter.showBookings(t.id, acRow.entry.account_id) }
+        }
+        ToolTip.visible: acMouse.containsMouse; ToolTip.delay: 600; ToolTip.text: qsTr("Diese Buchungen in der Liste zeigen")
     }
 
     // .contextMenu(forSelectionType:)

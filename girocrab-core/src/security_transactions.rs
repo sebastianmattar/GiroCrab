@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::dates::now_ms;
 use crate::error::CoreResult;
@@ -178,17 +178,16 @@ pub(crate) fn link_cash_bookings(conn: &Connection) -> CoreResult<u32> {
             let (id, account_id, booking, settle, currency, dir, val, fee, tax, acc) = x?;
             if let Some(expected) =
                 expected_cash(SecurityDirection::from_db(&dir), val, fee, tax, acc)
+                && expected != 0
             {
-                if expected != 0 {
-                    v.push(Row {
-                        id,
-                        account_id,
-                        booking,
-                        settle,
-                        currency,
-                        expected,
-                    });
-                }
+                v.push(Row {
+                    id,
+                    account_id,
+                    booking,
+                    settle,
+                    currency,
+                    expected,
+                });
             }
         }
         v
@@ -352,8 +351,8 @@ pub(crate) fn merge_attached(conn: &Connection, acc_map: &HashMap<i64, i64>) -> 
 mod tests {
     use super::*;
     use crate::connectors::{
-        store_fetch, FetchResult, RemoteAccount, RemoteHolding, RemoteSecurityTransaction,
-        RemoteTransaction,
+        FetchResult, RemoteAccount, RemoteHolding, RemoteSecurityTransaction, RemoteTransaction,
+        store_fetch,
     };
     use crate::models::{AccountKind, BookingFilter, BookingScope, ConnectorKind, Holding};
     use crate::vault::Vault;

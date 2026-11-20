@@ -267,7 +267,7 @@ struct ExportOptions: Codable, Equatable {
 
     private static let defaults = ExportOptions()
 
-    static func load(_ defaults: UserDefaults = .standard) -> ExportOptions {
+    static func load(_ defaults: UserDefaults = AppDefaults.store) -> ExportOptions {
         guard let data = defaults.data(forKey: key) else { return ExportOptions() }
         do {
             return try JSONDecoder().decode(ExportOptions.self, from: data)
@@ -307,7 +307,7 @@ struct ExportOptions: Codable, Equatable {
         return o
     }
 
-    func save(_ defaults: UserDefaults = .standard) {
+    func save(_ defaults: UserDefaults = AppDefaults.store) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.key)
         defaults.synchronize()
@@ -350,7 +350,7 @@ enum ExportDirectory {
     private static let key = "export.lastDirectory"
 
     static var preferred: URL {
-        if let path = UserDefaults.standard.string(forKey: key) {
+        if let path = AppDefaults.store.string(forKey: key) {
             let url = URL(fileURLWithPath: path, isDirectory: true)
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
@@ -379,7 +379,7 @@ enum ExportDirectory {
     }
 
     static func remember(fileURL: URL) {
-        UserDefaults.standard.set(fileURL.deletingLastPathComponent().path, forKey: key)
+        AppDefaults.store.set(fileURL.deletingLastPathComponent().path, forKey: key)
     }
 }
 

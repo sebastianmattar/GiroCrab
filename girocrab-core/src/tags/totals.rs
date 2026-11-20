@@ -10,8 +10,8 @@ use rusqlite::params_from_iter;
 
 use crate::error::CoreError;
 use crate::models::BookingFilter;
-use crate::vault::bookings::filters_by_class;
 use crate::vault::Vault;
+use crate::vault::bookings::filters_by_class;
 
 /// Bookings and their sum for one tag (or for the untagged bookings).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]

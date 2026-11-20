@@ -13,7 +13,9 @@
 //!  POST contentForm + submitLogin         -> login_2fa.jsf (approval in the Security-App)
 //!                                            or the login page again = wrong credentials
 //!  POST login_2fa.jsf (JSF ajax, click on `…:btnConfirm2FA`)
-//!                                         -> waits for the approval; `btnConfirmed1` = approved
+//!                                         -> the bank holds the answer, for some customers for
+//!                                            minutes; `btnConfirmed1` = approved. It runs in the
+//!                                            background and is never sent twice at the same time
 //!  POST login_2fa.jsf + `…:btnConfirmed1` -> account-overview_08.jsf
 //!  GET  …/pages/konten/account-overview_08.jsf
 //!                                         -> one `section.accordion` per account (IBAN, balance)
@@ -30,17 +32,21 @@
 //! have no ids either: they are remembered by date, subject and product.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{json, Value};
+use tokio::task::JoinHandle;
 use zeroize::Zeroize;
 
-use super::uberspace::{attr, attrs, parse_date, text, INPUT};
+use super::html::{
+    Form, INPUT, attr, attrs, de_date, form_by_id, parse_amount, parse_date, partial_updates, text,
+};
 use super::{
     BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, ContentIds,
-    FetchResult, Phase, RemoteAccount, RemoteTransaction,
+    Documents, FetchResult, KnownDocuments, Phase, RemoteAccount, RemoteTransaction,
 };
 use crate::documents::RemoteDocument;
 use crate::error::{CoreError, CoreResult};
@@ -53,17 +59,14 @@ const LOGIN: &str = "/eBankingClient/pages/login/login.jsf";
 const OVERVIEW: &str = "/eBankingClient/pages/konten/account-overview_08.jsf";
 /// Account external refs: `fordmoney:<IBAN>`.
 pub(crate) const REF_PREFIX: &str = "fordmoney:";
+/// How long the bank may hold the approval request. A shorter limit would drop
+/// a request the bank is still answering and lose the approval with it.
+const APPROVAL_POLL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Rows requested when the transaction list is expanded.
 const LIST_LIMIT: u32 = 1000;
 /// Start of the date range for the read Postbox documents.
 const ARCHIVE_START: &str = "01.01.2010";
-/// Documents remembered in the connector state (newest kept).
-const KNOWN_DOCUMENTS_MAX: usize = 1000;
 
-static FORM_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<form\b([^>]*)>").unwrap());
-static SELECT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<select\b([^>]*)>(.*?)</select\s*>").unwrap());
-static OPTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<option\b([^>]*)>").unwrap());
 static A_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<a\b([^>]*)>").unwrap());
 static SPAN_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<span\b([^>]*)>").unwrap());
 /// First parameter of `mojarra.jsfcljs(form, {'<name>':'<name>'}, …)` (quotes
@@ -96,23 +99,17 @@ static PRODUCT_COL: LazyLock<Regex> =
 static ROW_LINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(contentForm:[A-Za-z0-9_]+:\d+:[A-Za-z0-9_]+)").unwrap());
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(\d{6,})\b").unwrap());
-static CDATA_UPDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)<update id="([^"]+)"><!\[CDATA\[(.*?)\]\]></update>"#).unwrap()
-});
 
 fn page_changed() -> CoreError {
-    CoreError::Protocol {
-        message: tr("Ford Money: Seite nicht erkannt (Online-Banking geändert?).").into(),
-    }
+    CoreError::protocol(tr(
+        "Ford Money: Seite nicht erkannt (Online-Banking geändert?).",
+    ))
 }
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput {
-        message: tr(
-            "Ford Money: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.",
-        )
-        .into(),
-    }
+    CoreError::invalid(tr(
+        "Ford Money: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.",
+    ))
 }
 
 fn wrong_credentials() -> CoreError {
@@ -142,12 +139,9 @@ fn ensure_host(url: &url::Url) -> CoreResult<()> {
     if url.scheme() == "https" && url.host_str() == Some(HOST) {
         return Ok(());
     }
-    Err(CoreError::Protocol {
-        message: tr(
-            "Ford Money: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
-        )
-        .into(),
-    })
+    Err(CoreError::protocol(tr(
+        "Ford Money: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
+    )))
 }
 
 fn push_challenge() -> Challenge {
@@ -163,101 +157,7 @@ fn push_challenge() -> Challenge {
     }
 }
 
-// ------------------------------------------------------------------ JSF forms
-
-/// A page form as the browser would submit it.
-#[derive(Debug, Clone, PartialEq)]
-struct Form {
-    /// Absolute path the form posts to.
-    action: String,
-    /// Hidden fields, text fields and selects with their current values.
-    fields: Vec<(String, String)>,
-}
-
-impl Form {
-    fn set(&mut self, name: &str, value: &str) {
-        match self.fields.iter_mut().find(|(n, _)| n == name) {
-            Some((_, v)) => *v = value.to_string(),
-            None => self.fields.push((name.to_string(), value.to_string())),
-        }
-    }
-
-    fn get(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    }
-
-    /// The fields plus the "clicked" link (`name=name`).
-    fn clicked(&self, name: &str) -> Vec<(String, String)> {
-        let mut out = self.fields.clone();
-        out.push((name.to_string(), name.to_string()));
-        out
-    }
-
-    /// Name of the field ending in `suffix` (generated ids).
-    fn field_ending(&self, suffix: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .map(|(n, _)| n.as_str())
-            .find(|n| n.ends_with(suffix))
-    }
-}
-
-/// The form with `id` (up to its first `</form>`: these forms nest none).
-fn form_by_id(html: &str, id: &str) -> Option<Form> {
-    let open = FORM_TAG
-        .captures_iter(html)
-        .find(|c| attr(&attrs(&c[1]), "id") == Some(id))?;
-    let a = attrs(&open[1]);
-    let action = attr(&a, "action")?.trim().to_string();
-    if !action.starts_with('/') {
-        return None;
-    }
-    let start = open.get(0)?.end();
-    let rest = &html[start..];
-    let end = rest
-        .to_ascii_lowercase()
-        .find("</form")
-        .unwrap_or(rest.len());
-    let body = &rest[..end];
-    let mut fields = Vec::new();
-    for input in INPUT.captures_iter(body) {
-        let a = attrs(&input[1]);
-        let Some(name) = attr(&a, "name").filter(|n| !n.is_empty()) else {
-            continue;
-        };
-        if attr(&a, "disabled").is_some() {
-            continue;
-        }
-        let kind = attr(&a, "type").unwrap_or("text").to_ascii_lowercase();
-        if matches!(kind.as_str(), "hidden" | "text") {
-            fields.push((
-                name.to_string(),
-                attr(&a, "value").unwrap_or("").to_string(),
-            ));
-        }
-    }
-    for select in SELECT.captures_iter(body) {
-        let a = attrs(&select[1]);
-        let Some(name) = attr(&a, "name") else {
-            continue;
-        };
-        let options: Vec<Vec<(String, String)>> = OPTION
-            .captures_iter(&select[2])
-            .map(|o| attrs(&o[1]))
-            .collect();
-        let chosen = options
-            .iter()
-            .find(|o| attr(o, "selected").is_some())
-            .or(options.first())
-            .and_then(|o| attr(o, "value"))
-            .unwrap_or("");
-        fields.push((name.to_string(), chosen.to_string()));
-    }
-    Some(Form { action, fields })
-}
+// ------------------------------------------------------------------ page helpers
 
 /// Link parameter of the first `<a>` whose `data-wt` matches.
 fn link_param(html: &str, data_wt: &str) -> Option<String> {
@@ -295,12 +195,81 @@ fn approval_of(partial: &str) -> Approval {
     }
 }
 
-/// `(update id, content)` of a JSF partial response.
-fn partial_updates(xml: &str) -> Vec<(String, String)> {
-    CDATA_UPDATE
-        .captures_iter(xml)
-        .map(|c| (c[1].to_string(), c[2].to_string()))
-        .collect()
+/// Fields of a JSF ajax request.
+fn ajax_fields(form: &Form, source: &str, render: &str, click: bool) -> Vec<(String, String)> {
+    let mut fields = form.fields.clone();
+    if click {
+        fields.push((source.to_string(), String::new()));
+        fields.push(("javax.faces.behavior.event".into(), "click".into()));
+        fields.push(("javax.faces.partial.event".into(), "click".into()));
+    }
+    fields.push(("javax.faces.source".into(), source.to_string()));
+    fields.push(("javax.faces.partial.execute".into(), source.to_string()));
+    fields.push(("javax.faces.partial.render".into(), render.to_string()));
+    fields.push(("javax.faces.partial.ajax".into(), "true".into()));
+    fields
+}
+
+/// The approval request, which the bank answers only when it has a result.
+async fn approval_request(
+    client: reqwest::Client,
+    form: Form,
+    poll: String,
+    render: String,
+) -> CoreResult<String> {
+    let target = url::Url::parse(&format!("{BASE}{}", form.action)).map_err(|_| page_changed())?;
+    ensure_host(&target)?;
+    let resp = client
+        .post(target)
+        .header("Faces-Request", "partial/ajax")
+        .timeout(APPROVAL_POLL_TIMEOUT)
+        .form(&ajax_fields(&form, &poll, &render, true))
+        .send()
+        .await?;
+    ensure_host(resp.url())?;
+    let status = resp.status();
+    let body = super::read_body_limited(resp, super::MAX_DOC_BYTES).await?;
+    if !status.is_success() {
+        return Err(CoreError::Bank {
+            code: status.as_u16().to_string(),
+            message: tr("Ford Money: Die Anfrage wurde abgelehnt.").into(),
+        });
+    }
+    let xml = crate::text::decode_bank_bytes(&body);
+    if xml.contains("<redirect") && xml.contains("/login/") {
+        return Err(session_ended());
+    }
+    Ok(xml)
+}
+
+/// State of the approval request after one poll of the app.
+#[derive(Debug)]
+enum PollStep {
+    Waiting,
+    Answer(CoreResult<String>),
+}
+
+/// Starts the request if none is open and reports its answer once it is there.
+/// The app polls every few seconds, but the bank sees one request at a time.
+async fn poll_step<F>(
+    open: &mut Option<JoinHandle<CoreResult<String>>>,
+    start: impl FnOnce() -> F,
+) -> PollStep
+where
+    F: Future<Output = CoreResult<String>> + Send + 'static,
+{
+    let running = open.get_or_insert_with(|| tokio::spawn(start()));
+    if !running.is_finished() {
+        return PollStep::Waiting;
+    }
+    let Some(done) = open.take() else {
+        return PollStep::Waiting;
+    };
+    PollStep::Answer(done.await.unwrap_or_else(|e| {
+        Err(CoreError::Network {
+            message: e.to_string(),
+        })
+    }))
 }
 
 /// The approval step of the login: its form and the generated names.
@@ -352,19 +321,6 @@ struct Account {
     balance_cents: i64,
     /// Link parameter of "Umsätze anzeigen".
     bookings_link: Option<String>,
-}
-
-/// "- 0,71 €", "+ 7,02 €", "58.824,77 €" → cents.
-fn parse_amount(s: &str) -> Option<i64> {
-    let cleaned: String = text(s)
-        .replace(['\u{2212}', '\u{2013}'], "-")
-        .chars()
-        .filter(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | ',' | '.'))
-        .collect();
-    if !cleaned.chars().any(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    crate::money::parse_cents(&cleaned).ok()
 }
 
 fn parse_accounts(html: &str) -> CoreResult<Vec<Account>> {
@@ -472,7 +428,7 @@ struct PostboxRow {
     link: String,
     date: String,
     subject: String,
-    /// "Tagesgeld 1010024077", "Info".
+    /// "Tagesgeld 1000000001", "Info".
     product: String,
     /// Account number from `product`, if any.
     account_number: Option<String>,
@@ -541,17 +497,6 @@ fn document_file_name(row: &PostboxRow) -> String {
     format!("{}_{}.pdf", row.date, subject.trim().replace(' ', "_"))
 }
 
-/// Documents already downloaded (connector state `documents`).
-fn known_documents(state: &Value) -> Vec<String> {
-    serde_json::from_value(state["documents"].clone()).unwrap_or_default()
-}
-
-/// `YYYY-MM-DD` → `DD.MM.YYYY`.
-fn site_date(iso: &str) -> Option<String> {
-    let d = chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").ok()?;
-    Some(d.format("%d.%m.%Y").to_string())
-}
-
 // ------------------------------------------------------------------ connector
 
 /// One response: final URL, content type and body.
@@ -571,6 +516,8 @@ impl Page {
 pub struct FordMoneyConnector {
     client: Option<reqwest::Client>,
     two_factor: Option<TwoFactor>,
+    /// The approval request the bank has not answered yet.
+    approval_poll: Option<JoinHandle<CoreResult<String>>>,
     /// ViewState of the last page, for the logout.
     last_view_state: Option<String>,
 }
@@ -588,6 +535,7 @@ fn client() -> CoreResult<reqwest::Client> {
         ))
         .timeout(std::time::Duration::from_secs(60))
         .cookie_provider(jar)
+        .redirect(super::same_host_redirects())
         .build()?)
 }
 
@@ -674,16 +622,7 @@ impl FordMoneyConnector {
         render: &str,
         click: bool,
     ) -> CoreResult<String> {
-        let mut fields = form.fields.clone();
-        if click {
-            fields.push((source.to_string(), String::new()));
-            fields.push(("javax.faces.behavior.event".into(), "click".into()));
-            fields.push(("javax.faces.partial.event".into(), "click".into()));
-        }
-        fields.push(("javax.faces.source".into(), source.to_string()));
-        fields.push(("javax.faces.partial.execute".into(), source.to_string()));
-        fields.push(("javax.faces.partial.render".into(), render.to_string()));
-        fields.push(("javax.faces.partial.ajax".into(), "true".into()));
+        let fields = ajax_fields(form, source, render, click);
         let target =
             url::Url::parse(&format!("{BASE}{}", form.action)).map_err(|_| page_changed())?;
         ensure_host(&target)?;
@@ -722,23 +661,18 @@ impl FordMoneyConnector {
         let mut form = form_by_id(&page, "contentForm").ok_or_else(page_changed)?;
         let start = form
             .field_ending(":inbox-datetimepicker-start")
-            .ok_or_else(page_changed)?
-            .to_string();
+            .ok_or_else(page_changed)?;
         let end = form
             .field_ending(":inbox-datetimepicker-end")
-            .ok_or_else(page_changed)?
-            .to_string();
-        form.set(&start, &site_date(since).ok_or_else(invalid)?);
-        form.set(&end, &site_date(today).ok_or_else(invalid)?);
+            .ok_or_else(page_changed)?;
+        form.set(&start, &de_date(since).ok_or_else(invalid)?);
+        form.set(&end, &de_date(today).ok_or_else(invalid)?);
         let page = self
             .post_page(&form.action, &form.clicked("contentForm:btnLoad"))
             .await?;
 
         let mut form = form_by_id(&page, "contentForm").ok_or_else(page_changed)?;
-        let limit = form
-            .field_ending(":limit")
-            .ok_or_else(page_changed)?
-            .to_string();
+        let limit = form.field_ending(":limit").ok_or_else(page_changed)?;
         let mut wanted = LIST_LIMIT;
         let mut list = String::new();
         for _ in 0..4 {
@@ -793,17 +727,17 @@ impl FordMoneyConnector {
     async fn documents(
         &mut self,
         wanted: &HashMap<String, String>,
-        known: &mut Vec<String>,
+        known: &mut KnownDocuments,
     ) -> CoreResult<Vec<RemoteDocument>> {
         let mut out = Vec::new();
-        let mut take = |row: &PostboxRow, bytes: Vec<u8>, known: &mut Vec<String>| {
+        let mut take = |row: &PostboxRow, bytes: Vec<u8>, known: &mut KnownDocuments| {
             let account_ref = row
                 .account_number
                 .as_ref()
                 .and_then(|n| wanted.get(n))
                 .cloned()
                 .unwrap_or_default();
-            known.push(row.key());
+            known.insert(row.key());
             out.push(RemoteDocument {
                 account_ref,
                 booking_external_id: None,
@@ -816,7 +750,7 @@ impl FordMoneyConnector {
                 date: row.date.clone(),
             });
         };
-        let is_wanted = |row: &PostboxRow, known: &[String]| {
+        let is_wanted = |row: &PostboxRow, known: &KnownDocuments| {
             row.account_number
                 .as_ref()
                 .is_some_and(|n| wanted.contains_key(n))
@@ -847,21 +781,17 @@ impl FordMoneyConnector {
         if let (Some(mut form), Some(refresh)) = (
             form_by_id(&archive, "contentForm"),
             link_param(&archive, ".button-anzeigen"),
+        ) && let (Some(start), Some(end)) = (
+            form.field_ending(":inbox-datetimepicker-start"),
+            form.field_ending(":inbox-datetimepicker-end"),
         ) {
-            if let (Some(start), Some(end)) = (
-                form.field_ending(":inbox-datetimepicker-start")
-                    .map(str::to_string),
-                form.field_ending(":inbox-datetimepicker-end")
-                    .map(str::to_string),
-            ) {
-                form.set(&start, ARCHIVE_START);
-                form.set(&end, &site_date(&super::today()).unwrap_or_default());
-                if let Ok(wide) = self.post_page(&form.action, &form.clicked(&refresh)).await {
-                    let wide_rows = parse_postbox(&wide);
-                    if wide_rows.len() >= rows.len() {
-                        rows = wide_rows;
-                        list_page = wide;
-                    }
+            form.set(&start, ARCHIVE_START);
+            form.set(&end, &de_date(&super::today()).unwrap_or_default());
+            if let Ok(wide) = self.post_page(&form.action, &form.clicked(&refresh)).await {
+                let wide_rows = parse_postbox(&wide);
+                if wide_rows.len() >= rows.len() {
+                    rows = wide_rows;
+                    list_page = wide;
                 }
             }
         }
@@ -906,8 +836,7 @@ impl BankConnector for FordMoneyConnector {
         let form = form_by_id(&page.html(), "contentForm").ok_or_else(page_changed)?;
         let user = form
             .field_ending(":Benutzerkennung")
-            .ok_or_else(page_changed)?
-            .to_string();
+            .ok_or_else(page_changed)?;
         let mut fields = form.clicked("contentForm:submitLogin");
         fields.retain(|(n, _)| n != &user);
         fields.push((user, login.to_string()));
@@ -929,11 +858,19 @@ impl BankConnector for FordMoneyConnector {
 
     async fn respond(&mut self, _ctx: &ConnectContext, _r: ChallengeResponse) -> CoreResult<Phase> {
         let mut tf = self.two_factor.clone().ok_or(CoreError::SessionClosed)?;
-        let xml = match self.ajax(&tf.form, &tf.poll, &tf.render, true).await {
-            Ok(xml) => xml,
-            // The bank holds the request until the approval; a timeout = still pending.
-            Err(CoreError::Network { .. }) => return Ok(Phase::Pending(push_challenge())),
-            Err(e) => return Err(e),
+        let client = self.http()?.clone();
+        let (form, poll, render) = (tf.form.clone(), tf.poll.clone(), tf.render.clone());
+        let step = poll_step(&mut self.approval_poll, || {
+            approval_request(client, form, poll, render)
+        })
+        .await;
+        let xml = match step {
+            PollStep::Waiting => return Ok(Phase::Pending(push_challenge())),
+            PollStep::Answer(Ok(xml)) => xml,
+            PollStep::Answer(Err(CoreError::Network { .. })) => {
+                return Ok(Phase::Pending(push_challenge()));
+            }
+            PollStep::Answer(Err(e)) => return Err(e),
         };
         if let Some((_, vs)) = partial_updates(&xml)
             .into_iter()
@@ -973,21 +910,15 @@ impl BankConnector for FordMoneyConnector {
             .iter()
             .map(|a| (a.number.clone(), format!("{REF_PREFIX}{}", a.iban)))
             .collect();
-        let mut known = known_documents(&ctx.state);
-        let state = |known: &Vec<String>| {
-            let keep = known.len().saturating_sub(KNOWN_DOCUMENTS_MAX);
-            Some(json!({ "documents": known[keep..] }))
-        };
+        let mut known = KnownDocuments::from_state(&ctx.state);
 
-        // "Kontoauszüge abrufen" for one account: documents only.
-        if let Some(only) = ctx.settings.get(super::STATEMENTS_ONLY) {
-            let only = only.expose().to_string();
+        if let Documents::StatementsOnly(only) = &ctx.documents {
             let wanted: HashMap<String, String> =
-                refs.into_iter().filter(|(_, r)| *r == only).collect();
+                refs.into_iter().filter(|(_, r)| r == only).collect();
             let documents = self.documents(&wanted, &mut known).await?;
             return Ok(FetchResult {
                 documents,
-                state: state(&known),
+                state: known.to_state(),
                 ..Default::default()
             });
         }
@@ -1011,25 +942,27 @@ impl BankConnector for FordMoneyConnector {
             });
         }
 
-        let auto: Vec<String> = ctx
-            .settings
-            .get(super::STATEMENTS_AUTO)
-            .map(|v| v.expose().split(',').map(str::to_string).collect())
-            .unwrap_or_default();
-        if !auto.is_empty() {
+        let due = ctx.documents.due_statements();
+        if !due.is_empty() {
             let wanted: HashMap<String, String> =
-                refs.into_iter().filter(|(_, r)| auto.contains(r)).collect();
-            // Optional: a failed document download never fails the sync.
-            if let Ok(documents) = self.documents(&wanted, &mut known).await {
+                refs.into_iter().filter(|(_, r)| due.contains(r)).collect();
+            // Optional: a failed download never fails the sync. On failure the
+            // ids of what was downloaded so far are dropped with the documents.
+            let mut fetched = known.clone();
+            if let Ok(documents) = self.documents(&wanted, &mut fetched).await {
                 out.documents = documents;
-                out.statements_fetched = auto;
+                out.statements_fetched = due.to_vec();
+                known = fetched;
             }
         }
-        out.state = state(&known);
+        out.state = known.to_state();
         Ok(out)
     }
 
     async fn finish(&mut self, _ctx: &ConnectContext) {
+        if let Some(open) = self.approval_poll.take() {
+            open.abort();
+        }
         if let (Some(client), Some(vs)) = (self.client.take(), self.last_view_state.take()) {
             let fields = [
                 ("headerForm", "headerForm"),
@@ -1049,6 +982,13 @@ impl BankConnector for FordMoneyConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[tokio::test]
+    async fn login_client_does_not_follow_redirects_to_another_origin() {
+        let client = client().unwrap();
+        crate::connectors::tests::redirects::assert_no_cross_origin_replay(&client).await;
+    }
 
     // Invented pages in the shape of the Ford Money online banking; no real data.
     const LOGIN_PAGE: &str = r#"<html><body>
@@ -1205,6 +1145,52 @@ mod tests {
         );
     }
 
+    async fn held_step(
+        open: &mut Option<JoinHandle<CoreResult<String>>>,
+        held: &mut Option<tokio::sync::oneshot::Receiver<String>>,
+        started: &Arc<AtomicU32>,
+    ) -> PollStep {
+        let (held, started) = (held.take(), started.clone());
+        poll_step(open, || async move {
+            started.fetch_add(1, Ordering::SeqCst);
+            Ok(held.expect("only one request").await.unwrap())
+        })
+        .await
+    }
+
+    /// A bank that answers only after the former 60 s limit: the request stays
+    /// open and no second one is sent, so the approval cannot get lost.
+    #[tokio::test]
+    async fn a_held_approval_request_stays_open_until_the_bank_answers() {
+        assert!(APPROVAL_POLL_TIMEOUT > Duration::from_secs(60));
+        let (answer, held) = tokio::sync::oneshot::channel::<String>();
+        let mut held = Some(held);
+        let started = Arc::new(AtomicU32::new(0));
+        let mut open = None;
+        assert!(matches!(
+            held_step(&mut open, &mut held, &started).await,
+            PollStep::Waiting
+        ));
+        tokio::task::yield_now().await;
+        for _ in 0..3 {
+            assert!(matches!(
+                held_step(&mut open, &mut held, &started).await,
+                PollStep::Waiting
+            ));
+        }
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+
+        answer.send("btnConfirmed1".to_string()).unwrap();
+        let xml = loop {
+            match held_step(&mut open, &mut held, &started).await {
+                PollStep::Waiting => tokio::task::yield_now().await,
+                PollStep::Answer(r) => break r.unwrap(),
+            }
+        };
+        assert_eq!(approval_of(&xml), Approval::Approved);
+        assert!(open.is_none());
+    }
+
     #[test]
     fn reads_accounts_with_iban_balance_and_bookings_link() {
         let accounts = parse_accounts(&overview()).unwrap();
@@ -1252,24 +1238,24 @@ mod tests {
     fn reads_signed_bookings_with_stable_content_ids() {
         let list = format!(
             r#"<ul id="contentForm:transactionList"><div style="display: none"><input id="contentForm:limit" type="text" name="contentForm:limit" value="1000" /></div>{}{}{}{}</ul>"#,
-            booking("30.10.2026", "SoliZuschl.1", "<em>- 0,71 €</em>"),
-            booking("30.10.2026", "Kap.ertr.st1", "<em>- 13,01 €</em>"),
-            booking("30.10.2026", "Abschluss   ", "+            7,02 €"),
-            booking("30.10.2026", "Abschluss   ", "+            7,02 €"),
+            booking("15.03.2026", "SoliZuschl.1", "<em>- 1,17 €</em>"),
+            booking("15.03.2026", "Kap.ertr.st1", "<em>- 21,37 €</em>"),
+            booking("15.03.2026", "Abschluss   ", "+            5,55 €"),
+            booking("15.03.2026", "Abschluss   ", "+            5,55 €"),
         );
         let mut ids = ContentIds::default();
         let tx = parse_bookings(&list, "fordmoney:DE00", "2000-01-01", &mut ids).unwrap();
         assert_eq!(tx.len(), 4);
         assert_eq!(
             (tx[0].amount_cents, tx[0].booking_text.as_str()),
-            (-71, "SoliZuschl.1")
+            (-117, "SoliZuschl.1")
         );
         assert_eq!(tx[0].purpose, "SoliZuschl.1");
-        assert_eq!(tx[0].booking_date, "2026-10-30");
-        assert_eq!(tx[1].amount_cents, -1_301);
+        assert_eq!(tx[0].booking_date, "2026-03-15");
+        assert_eq!(tx[1].amount_cents, -2_137);
         assert_eq!(
             (tx[2].amount_cents, tx[2].booking_text.as_str()),
-            (702, "Abschluss")
+            (555, "Abschluss")
         );
         assert_ne!(
             tx[2].external_id, tx[3].external_id,
@@ -1279,10 +1265,12 @@ mod tests {
         let tx2 = parse_bookings(&list, "fordmoney:DE00", "2000-01-01", &mut again).unwrap();
         assert_eq!(tx2[3].external_id, tx[3].external_id);
         let mut recent = ContentIds::default();
-        assert!(parse_bookings(&list, "a", "2026-11-01", &mut recent)
-            .unwrap()
-            .is_empty());
-        let broken = list.replace("- 13,01 €", "n/a");
+        assert!(
+            parse_bookings(&list, "a", "2026-11-01", &mut recent)
+                .unwrap()
+                .is_empty()
+        );
+        let broken = list.replace("- 21,37 €", "n/a");
         assert!(parse_bookings(&broken, "a", "2000-01-01", &mut ContentIds::default()).is_err());
     }
 
@@ -1292,7 +1280,7 @@ mod tests {
             "<ul>{}{}{}</ul>",
             postbox_row(
                 0,
-                "30.10.2026",
+                "15.03.2026",
                 "Kontoauszug Tagesgeld lfd. Nr. 10/2026",
                 "Tagesgeld 1000000001"
             ),
@@ -1304,7 +1292,7 @@ mod tests {
             ),
             postbox_row(
                 2,
-                "25.02.2026",
+                "18.02.2026",
                 "Jahressteuerbescheinigung 2025",
                 "Tagesgeld 1000000002"
             ),
@@ -1312,7 +1300,7 @@ mod tests {
         let rows = parse_postbox(&html);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].link, "contentForm:j_idt283:0:j_idt285");
-        assert_eq!(rows[0].date, "2026-10-30");
+        assert_eq!(rows[0].date, "2026-03-15");
         assert_eq!(rows[0].subject, "Kontoauszug Tagesgeld lfd. Nr. 10/2026");
         assert_eq!(rows[0].product, "Tagesgeld 1000000001");
         assert_eq!(rows[0].account_number.as_deref(), Some("1000000001"));
@@ -1328,11 +1316,11 @@ mod tests {
         );
         assert_eq!(
             document_file_name(&rows[0]),
-            "2026-10-30_Kontoauszug_Tagesgeld_lfd._Nr._10_2026.pdf"
+            "2026-03-15_Kontoauszug_Tagesgeld_lfd._Nr._10_2026.pdf"
         );
         assert_eq!(
             rows[2].key(),
-            "2026-02-25|Jahressteuerbescheinigung 2025|Tagesgeld 1000000002"
+            "2026-02-18|Jahressteuerbescheinigung 2025|Tagesgeld 1000000002"
         );
     }
 
@@ -1355,10 +1343,7 @@ mod tests {
             Some("0"),
             "first option without selection"
         );
-        let start = form
-            .field_ending(":inbox-datetimepicker-start")
-            .unwrap()
-            .to_string();
+        let start = form.field_ending(":inbox-datetimepicker-start").unwrap();
         form.set(&start, ARCHIVE_START);
         assert_eq!(form.get(&start), Some(ARCHIVE_START));
         assert_eq!(
@@ -1380,16 +1365,10 @@ mod tests {
     }
 
     #[test]
-    fn amounts_dates_and_known_documents() {
-        assert_eq!(parse_amount("<em>- 0,71 €</em>"), Some(-71));
-        assert_eq!(parse_amount("+            97,02 €"), Some(9_702));
-        assert_eq!(parse_amount("58.824,77 €"), Some(5_882_477));
+    fn amounts_and_dates() {
+        assert_eq!(parse_amount("<em>- 1,17 €</em>"), Some(-117));
+        assert_eq!(parse_amount("+            88,88 €"), Some(8_888));
+        assert_eq!(parse_amount("12.345,67 €"), Some(1_234_567));
         assert_eq!(parse_amount("—"), None);
-        assert_eq!(site_date("2026-01-05").as_deref(), Some("05.01.2026"));
-        assert_eq!(
-            known_documents(&json!({"documents": ["a", "b"]})),
-            vec!["a", "b"]
-        );
-        assert!(known_documents(&Value::Null).is_empty());
     }
 }

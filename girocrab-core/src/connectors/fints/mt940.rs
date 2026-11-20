@@ -1,7 +1,10 @@
 //! SWIFT MT940 account statement parser (as delivered in HIKAZ), with the
 //! German ":86:" structured purpose (GVC + ?nn sub-fields) and SEPA keys.
 
+use jiff::civil::Date;
+
 use crate::connectors::RemoteTransaction;
+use crate::dates::{clamped_ymd, iso, year};
 use crate::money::parse_cents;
 
 #[derive(Debug, Default, Clone)]
@@ -12,14 +15,32 @@ pub struct Mt940Statement {
     pub currency: String,
 }
 
-fn yymmdd(s: &str) -> Option<String> {
-    let d = s.get(..6)?;
-    if !d.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    let yy: u32 = d.get(0..2)?.parse().ok()?;
-    let year = if yy > 80 { 1900 + yy } else { 2000 + yy };
-    Some(format!("{year}-{}-{}", d.get(2..4)?, d.get(4..6)?))
+fn digits(s: &str, len: usize) -> Option<&str> {
+    s.get(..len)
+        .filter(|d| d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The two-digit number at byte `i` of an all-digit field.
+fn two(s: &str, i: usize) -> Option<u32> {
+    s.get(i..i + 2)?.parse().ok()
+}
+
+/// The day a leading `YYMMDD` names. A day past the month's end is its last day:
+/// banks that count interest 30/360 date bookings on 30.02, and those must not be lost.
+fn yymmdd(s: &str) -> Option<Date> {
+    let d = digits(s, 6)?;
+    clamped_ymd(year(&d[..2])?, two(d, 2)?, two(d, 4)?)
+}
+
+/// The `MMDD` entry date of a `:61:` line, in the value date's year moved across New Year.
+fn entry_date(mmdd: &str, value: Date) -> Option<Date> {
+    let (m, d) = (two(mmdd, 0)?, two(mmdd, 2)?);
+    let y = match (value.month(), m) {
+        (12, 1) => value.year() + 1,
+        (1, 12) => value.year() - 1,
+        _ => value.year(),
+    };
+    clamped_ymd(y.into(), m, d)
 }
 
 /// Splits the statement into (tag, value) fields; continuation lines are
@@ -28,19 +49,19 @@ fn fields(text: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for line in text.split(['\n']) {
         let line = line.trim_end_matches('\r');
-        if let Some(rest) = line.strip_prefix(':') {
-            if let Some(end) = rest.find(':') {
-                let tag = rest[..end].to_string();
-                if tag.len() <= 3
-                    && tag
-                        .chars()
-                        .next()
-                        .map(|c| c.is_ascii_digit())
-                        .unwrap_or(false)
-                {
-                    out.push((tag, line[end + 2..].to_string()));
-                    continue;
-                }
+        if let Some(rest) = line.strip_prefix(':')
+            && let Some(end) = rest.find(':')
+        {
+            let tag = rest[..end].to_string();
+            if tag.len() <= 3
+                && tag
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+            {
+                out.push((tag, line[end + 2..].to_string()));
+                continue;
             }
         }
         if line == "-" || line.is_empty() {
@@ -164,7 +185,7 @@ pub fn parse(
                 if let (Some(date), Some(cur), Some(amt)) = (v.get(1..7), v.get(7..10), v.get(10..))
                 {
                     let sign = if v.starts_with('D') { -1 } else { 1 };
-                    stmt.closing_date = yymmdd(date);
+                    stmt.closing_date = yymmdd(date).map(iso);
                     stmt.currency = cur.to_string();
                     if let Ok(c) = parse_cents(amt) {
                         stmt.closing_balance_cents = Some(sign * c);
@@ -180,29 +201,9 @@ pub fn parse(
                 let Some(mut rest) = v.get(6..) else {
                     continue;
                 };
-                let mut booking_date = value_date.clone();
-                if rest
-                    .get(..4)
-                    .is_some_and(|d| d.chars().all(|c| c.is_ascii_digit()))
-                {
-                    // entry date MMDD (year from value date, adjusted around new year)
-                    let year: i32 = value_date
-                        .get(..4)
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(2000);
-                    let vm: u32 = value_date
-                        .get(5..7)
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(1);
-                    let bm: u32 = rest.get(..2).and_then(|x| x.parse().ok()).unwrap_or(vm);
-                    let y = if vm == 12 && bm == 1 {
-                        year + 1
-                    } else if vm == 1 && bm == 12 {
-                        year - 1
-                    } else {
-                        year
-                    };
-                    booking_date = format!("{y}-{}-{}", &rest[..2], &rest[2..4]);
+                let mut booking_date = value_date;
+                if let Some(mmdd) = digits(rest, 4) {
+                    booking_date = entry_date(mmdd, value_date).unwrap_or(value_date);
                     rest = &rest[4..];
                 }
                 let (sign, rest) = if let Some(r) = rest.strip_prefix("RC") {
@@ -243,8 +244,8 @@ pub fn parse(
                 txs.push(RemoteTransaction {
                     account_ref: account_ref.to_string(),
                     external_id: String::new(),
-                    booking_date,
-                    value_date,
+                    booking_date: iso(booking_date),
+                    value_date: iso(value_date),
                     amount_cents: sign * amount,
                     currency: stmt.currency.clone(),
                     counterparty: String::new(),
@@ -325,6 +326,46 @@ mod tests {
         assert_eq!(txs[0].gvc, "105");
         assert_eq!(txs[1].gvc, "166");
         assert!(parse_86("free text").gvc.is_empty());
+    }
+
+    #[test]
+    fn out_of_range_dates_are_clamped_or_dropped() {
+        let dates = |line: &str| {
+            let (txs, _) = parse(&format!(":25:x\r\n:61:{line}\r\n-\r\n"), "acc", "EUR");
+            txs.iter()
+                .map(|t| (t.booking_date.clone(), t.value_date.clone()))
+                .collect::<Vec<_>>()
+        };
+        let one = |b: &str, v: &str| vec![(b.to_string(), v.to_string())];
+        // 30.02 (30/360 interest) is the month's last day, a booking is never dropped for it
+        assert_eq!(
+            dates("2402280230DR1,00NDDTNONREF"),
+            one("2024-02-29", "2024-02-28")
+        );
+        assert_eq!(
+            dates("2502300230DR1,00NDDTNONREF"),
+            one("2025-02-28", "2025-02-28")
+        );
+        // an entry date that names no month falls back to the value date
+        assert_eq!(
+            dates("2402281328DR1,00NDDTNONREF"),
+            one("2024-02-28", "2024-02-28")
+        );
+        // a value date that names no month drops the line
+        assert!(dates("2513010101DR1,00NDDTNONREF").is_empty());
+        // the entry date moves across New Year
+        assert_eq!(
+            dates("2412310102DR1,00NDDTNONREF"),
+            one("2025-01-02", "2024-12-31")
+        );
+        assert_eq!(
+            dates("2501021231DR1,00NDDTNONREF"),
+            one("2024-12-31", "2025-01-02")
+        );
+        assert_eq!(
+            dates("991231DR1,00NDDTNONREF"),
+            one("1999-12-31", "1999-12-31")
+        );
     }
 
     #[test]

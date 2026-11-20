@@ -44,13 +44,14 @@ struct DepotMetricGrid: View {
     @Environment(\.textScale) private var textScale
     let tiles: [DepotMetricTile]
     let wide: Bool
-    @State private var width: CGFloat = 10_000
+    /// Two tiles fit side by side.
+    @State private var fitsTwo = true
     /// Dynamic Type (iPhone) scales the minimum width of a tile like the text inside it.
     @ScaledMetric(relativeTo: .body) private var minTileWidth: CGFloat = 170
 
     private var perRow: Int {
         if wide { return max(tiles.count, 1) }
-        return width >= 2 * minTileWidth * textScale + 10 ? 2 : 1
+        return fitsTwo ? 2 : 1
     }
 
     var body: some View {
@@ -61,7 +62,9 @@ struct DepotMetricGrid: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: Bool.self) { [minTileWidth, textScale] in
+            $0.size.width >= 2 * minTileWidth * textScale + 10
+        } action: { fitsTwo = $0 }
     }
 }
 

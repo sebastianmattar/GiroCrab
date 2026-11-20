@@ -8,8 +8,8 @@ import GiroCrabCore
 final class CategoryPeriodTests: XCTestCase {
     private let key = "period.byCategory"
 
-    override func setUp() { UserDefaults.standard.removeObject(forKey: key) }
-    override func tearDown() { UserDefaults.standard.removeObject(forKey: key) }
+    override func setUp() { AppDefaults.store.removeObject(forKey: key) }
+    override func tearDown() { AppDefaults.store.removeObject(forKey: key) }
 
     func testStorageKeyRoundTrip() {
         let now = Date()

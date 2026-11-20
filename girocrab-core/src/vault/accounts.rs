@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::Vault;
 use crate::error::{CoreError, CoreResult};
@@ -109,10 +109,9 @@ impl Vault {
                 "SELECT id, login_name, deleted_ms IS NOT NULL FROM bank_connections
                  WHERE connector = ?1 ORDER BY deleted_ms IS NOT NULL, id",
             )?;
-            let r = st
-                .query_map([key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-                .collect::<Result<Vec<_>, _>>()?;
-            r
+
+            st.query_map([key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<Result<Vec<_>, _>>()?
         };
         if let Some((id, _, deleted)) = existing.iter().find(|(_, l, _)| {
             !login_name.is_empty()
@@ -163,6 +162,16 @@ impl Vault {
 
     fn purge_connection(db: &Connection, connection_id: i64) -> Result<(), CoreError> {
         crate::sync_merge::soft_delete_connection(db, connection_id)?;
+        Self::purge_connection_secrets(db, connection_id)
+    }
+
+    /// Removes the device-local settings of deleted login `connection_id`: stored
+    /// PIN, RAH-10 keys, portal cookies, its Enable Banking application, document
+    /// settings and the account choice. Runs for local deletes and for deletions a merge brings in.
+    pub(crate) fn purge_connection_secrets(
+        db: &Connection,
+        connection_id: i64,
+    ) -> Result<(), CoreError> {
         db.execute(
             "DELETE FROM settings WHERE key IN (?1, ?2, ?3)",
             params![
@@ -170,6 +179,12 @@ impl Vault {
                 format!("fints.rah10.counter.{connection_id}"),
                 format!("fints.rah10.bank_keys.{connection_id}")
             ],
+        )?;
+        // portal session cookies the Linux front end keeps per login; dropped here
+        // so cleanup does not depend on which UI path deleted the login
+        db.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [format!("web.secret_cookies.{connection_id}")],
         )?;
         // stored secrets of this connection (PIN, portal user name `pin.conn.<id>.login`);
         // the soft delete blanked the session (state_json)
@@ -181,14 +196,25 @@ impl Vault {
         crate::connectors::clear_documents_settings(db, connection_id)?;
         // its own Enable Banking application (#824)
         super::enable_banking_apps::forget(db, connection_id)?;
-        // the account choice of this login (#346): a re-added login starts fresh
-        db.execute(
-            "DELETE FROM settings WHERE key = ?1",
-            [crate::connectors::account_selection::key(
-                db,
-                connection_id,
-            )?],
-        )?;
+        // the account choice of this login (#346): a re-added login starts fresh,
+        // while a live twin with the same login keeps its choice
+        let sel = crate::connectors::account_selection::key(db, connection_id)?;
+        let others: Vec<i64> = {
+            let mut stmt = db
+                .prepare("SELECT id FROM bank_connections WHERE deleted_ms IS NULL AND id <> ?1")?;
+            let rows = stmt.query_map([connection_id], |r| r.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut shared = false;
+        for other in others {
+            if crate::connectors::account_selection::key(db, other)? == sel {
+                shared = true;
+                break;
+            }
+        }
+        if !shared {
+            db.execute("DELETE FROM settings WHERE key = ?1", [sel])?;
+        }
         Ok(())
     }
 }
@@ -277,14 +303,14 @@ impl Vault {
         let blz = blz.trim().to_string();
         let url = url.trim().to_string();
         if ConnectorKind::fints_blz(&ConnectorKind::fints_key(&blz)).is_none() {
-            return Err(CoreError::InvalidInput {
-                message: tr("Die BLZ muss aus genau 8 Ziffern bestehen.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Die BLZ muss aus genau 8 Ziffern bestehen.",
+            )));
         }
         if !crate::connectors::fints_presets::is_valid_fints_url(&url) {
-            return Err(CoreError::InvalidInput {
-                message: tr("Die FinTS-URL muss mit https:// beginnen.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Die FinTS-URL muss mit https:// beginnen.",
+            )));
         }
         let key = ConnectorKind::fints_key(&blz);
         if !crate::demo::is_magic_demo_login(&login_name) {
@@ -330,9 +356,7 @@ impl Vault {
         let country = country.trim().to_uppercase();
         let key = ConnectorKind::enable_banking_key(&country, &aspsp);
         if aspsp.is_empty() || ConnectorKind::enable_banking_target(&key).is_none() {
-            return Err(CoreError::InvalidInput {
-                message: tr("Bank oder Ländercode ungültig.").into(),
-            });
+            return Err(CoreError::invalid(tr("Bank oder Ländercode ungültig.")));
         }
         if !crate::demo::is_magic_demo_login(&login_name) {
             crate::banking_gate::check_connector(&key)?;
@@ -391,10 +415,9 @@ impl Vault {
             });
         };
         if !archived {
-            return Err(CoreError::InvalidInput {
-                message: tr("Nur archivierte Konten können gelöscht werden. Bitte das Konto zuerst archivieren.")
-                    .to_string(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Nur archivierte Konten können gelöscht werden. Bitte das Konto zuerst archivieren.",
+            )));
         }
         Self::delete_account_rows(&tx, account_id)?;
         // linked loan payments of this account are gone with it
@@ -448,7 +471,7 @@ impl Vault {
                     a.initial_balance_cents, g.uuid, {in_total},
                     a.color_hex, IFNULL(c.connector, ''), IFNULL(c.bank_code, ''), IFNULL(c.login_name, ''), a.external_ref,
                     a.archived_unix, a.access_revoked,
-                    o.opening_cents, IFNULL(o.opening_date, ''), {derived}
+                    o.opening_cents, IFNULL(o.opening_date, ''), {derived}, a.note
              FROM accounts a LEFT JOIN bank_connections c ON c.id = a.connection_id
              LEFT JOIN user_groups g ON g.uuid = a.user_group_uuid AND g.deleted_ms IS NULL
              LEFT JOIN opening_balances o ON o.account_id = a.id
@@ -507,6 +530,7 @@ impl Vault {
                 opening_balance_cents: r.get(28)?,
                 opening_balance_date: r.get(29)?,
                 balance_derived: r.get(30)?,
+                note: r.get(31)?,
             })
         })?;
         let mut accounts = rows.collect::<Result<Vec<_>, _>>()?;
@@ -608,8 +632,8 @@ impl Vault {
             .collect();
         let mut balance: i64 = chosen.iter().map(|a| a.balance_cents).sum();
         let ids: Vec<i64> = chosen.iter().map(|a| a.id).collect();
-        let today = chrono::Local::now().date_naive();
-        let start = today - chrono::Duration::days(days.max(1) as i64 - 1);
+        let today = crate::dates::today();
+        let start = today - crate::dates::days(days.max(1) as i64 - 1);
         // Securities depots with a valuation history (`depot_values`) take their course from it;
         // the walk back over bookings is only for the other accounts, so nothing counts twice.
         let depot_series = crate::depot_values::series(&*self.db()?, &ids, start, today)?;
@@ -630,7 +654,7 @@ impl Vault {
                 .map(|a| a.balance_cents)
                 .sum();
         }
-        let from = start.format("%Y-%m-%d").to_string();
+        let from = crate::dates::iso(start);
         let per_day = {
             let db = self.db()?;
             for a in chosen.iter().filter(|a| book_ids.contains(&a.id)) {
@@ -650,13 +674,14 @@ impl Vault {
         let mut out = Vec::with_capacity(days as usize);
         let mut day = today;
         while day >= start {
-            let key = day.format("%Y-%m-%d").to_string();
+            let key = crate::dates::iso(day);
             out.push(DailyBalance {
                 date: key.clone(),
                 balance_cents: balance,
             });
             balance -= per_day.get(&key).copied().unwrap_or(0);
-            day -= chrono::Duration::days(1);
+            let Ok(prev) = day.yesterday() else { break };
+            day = prev;
         }
         out.reverse();
         // Depot values enter directly. Before its first point a depot walks back over its own
@@ -670,10 +695,10 @@ impl Vault {
             }
             let db = self.db()?;
             for (id, first_day, first_value) in &depots.firsts {
-                let Ok(first) = chrono::NaiveDate::parse_from_str(first_day, "%Y-%m-%d") else {
+                let Ok(first) = jiff::civil::Date::strptime("%Y-%m-%d", first_day) else {
                     continue;
                 };
-                let k = (first - start).num_days();
+                let k = crate::dates::days_between(start, first);
                 if k <= 0 {
                     continue;
                 }
@@ -725,8 +750,8 @@ impl Vault {
             })
             .map(|a| a.id)
             .collect();
-        let today = chrono::Local::now().date_naive();
-        let start = today - chrono::Duration::days(days.max(1) as i64 - 1);
+        let today = crate::dates::today();
+        let start = today - crate::dates::days(days.max(1) as i64 - 1);
         let Some(series) = crate::depot_values::series(&*self.db()?, &ids, start, today)? else {
             return Ok(vec![]);
         };
@@ -735,9 +760,7 @@ impl Vault {
         };
         Ok((first..series.values.len())
             .map(|i| DepotValuePoint {
-                date: (start + chrono::Duration::days(i as i64))
-                    .format("%Y-%m-%d")
-                    .to_string(),
+                date: crate::dates::iso(start + crate::dates::days(i as i64)),
                 value_cents: series.values[i],
                 covered_depots: series.covered[i],
                 total_depots: series.total_depots,
@@ -761,11 +784,15 @@ impl Vault {
     /// Changes the account type (Kontoart), e.g. a checking account that is really a card.
     pub fn set_account_kind(&self, account_id: i64, kind: AccountKind) -> Result<(), CoreError> {
         let db = self.db()?;
+        let tx = db.unchecked_transaction()?;
+        // valued by its items or loan terms until now (see below)
+        let valued = crate::assets::is_tangible(&tx, account_id)?
+            || crate::loans::is_manual_loan(&tx, account_id)?;
         // The "by kind" sidebar sections are the `account_groups`: move the
         // account into the section of its new kind (#575).
         let (group, sym, order) = crate::connectors::group_for(kind);
-        let gid = Self::ensure_group(&db, group, sym, order)?;
-        let n = db.execute(
+        let gid = Self::ensure_group(&tx, group, sym, order)?;
+        let n = tx.execute(
             "UPDATE accounts SET kind = ?1, group_id = ?2 WHERE id = ?3",
             params![kind.as_str(), gid, account_id],
         )?;
@@ -775,7 +802,17 @@ impl Vault {
             });
         }
         // a depot's value history counts only while it is one (#578)
-        crate::depot_values::rebuild(&db, account_id, None)?;
+        crate::depot_values::rebuild(&tx, account_id, None)?;
+        // Sachwerte accounts and manual loans value themselves only while
+        // they keep their kind: recompute the balance on the way in and out.
+        crate::assets::refresh_balances(&tx)?;
+        crate::loans::refresh_all(&tx)?;
+        let still = crate::assets::is_tangible(&tx, account_id)?
+            || crate::loans::is_manual_loan(&tx, account_id)?;
+        if valued && !still {
+            crate::opening_balance::recompute(&tx, account_id)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -786,6 +823,37 @@ impl Vault {
             params![owner.trim(), account_id],
         )?;
         if n == 0 {
+            return Err(CoreError::NotFound {
+                what: trf("Konto {0}", &[&account_id]),
+            });
+        }
+        Ok(())
+    }
+
+    /// Sets the account note (#512); empty clears it. Syncs like the name: the
+    /// newer edit wins (#980), so saving an unchanged note keeps its stamp, and
+    /// an edit is always newer than the note it replaces (a note from a device
+    /// whose clock runs ahead must not win over it).
+    pub fn set_account_note(&self, account_id: i64, note: String) -> Result<(), CoreError> {
+        let db = self.db()?;
+        let n = db.execute(
+            "UPDATE accounts SET note = ?1, note_ms = max(note_ms + 1, ?3)
+             WHERE id = ?2 AND note IS NOT ?1",
+            params![note.trim(), account_id, crate::dates::now_ms()],
+        )?;
+        if n > 0 {
+            db.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                [crate::user_groups::moved_notes_key(account_id)],
+            )?;
+        }
+        let exists = n > 0
+            || db.query_row(
+                "SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?1)",
+                [account_id],
+                |r| r.get(0),
+            )?;
+        if !exists {
             return Err(CoreError::NotFound {
                 what: trf("Konto {0}", &[&account_id]),
             });

@@ -482,6 +482,24 @@ extension AppModel {
         }
     }
 
+    /// „Sichern“ in Kontoeinstellungen: writes the fields that differ from `original`, the account
+    /// when the sheet opened, so a value a sync brought in meanwhile is no edit (#980). One reload.
+    func saveAccountEdits(_ original: Account, name: String, owner: String, kind: AccountKind, note: String) {
+        guard let vault else { return }
+        let id = original.id
+        let kindChanged = kind != original.kind && !isOffline(id)
+        do {
+            if name != original.name.trimmingCharacters(in: .whitespaces) { try vault.renameAccount(accountId: id, name: name) }
+            if owner != original.owner.trimmingCharacters(in: .whitespaces) { try vault.setAccountOwner(accountId: id, owner: owner) }
+            if kindChanged { try vault.setAccountKind(accountId: id, kind: kind) }
+            if note != original.note.trimmingCharacters(in: .whitespacesAndNewlines) { try vault.setAccountNote(accountId: id, note: note) }
+        } catch {
+            errorMessage = describe(error)
+        }
+        reloadAccounts()
+        if kindChanged { dashboardStale = true }
+    }
+
     func renameAccount(_ accountId: Int64, to name: String) {
         guard let vault else { return }
         do {

@@ -26,7 +26,7 @@ public final class CloudSyncManager {
     }
     /// Legacy plaintext key file of v0.4.0. Never written anymore; removed on sync.
     private let legacyKeyFileName = "tresor.key"
-    private let defaults = UserDefaults.standard
+    private let defaults = AppDefaults.store
     /// Modification date of each peer snapshot when it was last merged.
     @ObservationIgnored private var seen: [String: Double]
     /// Same for peers this vault's key didn't open (not retried until they change).
@@ -57,7 +57,7 @@ public final class CloudSyncManager {
     public private(set) var folderBothVaults = false
 
     /// Whether this app copied the data to "GiroCrab" (set at migration).
-    static var migratedByThisApp: Bool { UserDefaults.standard.object(forKey: K.migrated) != nil }
+    static var migratedByThisApp: Bool { AppDefaults.store.object(forKey: K.migrated) != nil }
     public private(set) var lastSync: Date?
     public private(set) var lastStats: String?
     public private(set) var isSyncing = false

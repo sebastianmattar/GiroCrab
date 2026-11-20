@@ -18,15 +18,15 @@ ColumnLayout {
     Text {
         text: d.loan ? qsTr("Stand %1: %2").arg(Fmt.medium(d.loan.setup.anchor_date)).arg(Fmt.money(d.loan.setup.anchor_balance_cents)) : ""
         font.pixelSize: Theme.caption; color: Theme.text; wrapMode: Text.WordWrap; Layout.fillWidth: true
-        Sensitive {}
+        Sensitive { amounts: true }
     }
-    Text { text: d.paymentsLine(); font.pixelSize: Theme.caption; color: Theme.secondary; wrapMode: Text.WordWrap; Layout.fillWidth: true; Sensitive {} }
+    Text { text: d.paymentsLine(); font.pixelSize: Theme.caption; color: Theme.secondary; wrapMode: Text.WordWrap; Layout.fillWidth: true; Sensitive { amounts: true } }
     Text {
         visible: d.loan !== null && d.loan.setup.interest_rate_ppm !== null
         text: d.loan && d.loan.setup.interest_rate_ppm !== null
               ? qsTr("Sollzins %1 % · Zinsen seit Stichtag %2").arg(Fmt.percentText(d.loan.setup.interest_rate_ppm)).arg(Fmt.money(d.s.interest_cents)) : ""
         font.pixelSize: Theme.caption; color: Theme.secondary; wrapMode: Text.WordWrap; Layout.fillWidth: true
-        Sensitive {}
+        Sensitive { amounts: true }
     }
     Text {
         visible: d.s !== null && d.s.months_left !== null && d.s.months_left > 0

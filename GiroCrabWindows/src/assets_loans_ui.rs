@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 
 use girocrab_core::asset_classification::ClassifiedAsset;
 use girocrab_core::asset_classification::{
-    classify_asset, normalized_isin, AssetClassification, ClassificationSource,
-    ClassificationValues,
+    AssetClassification, ClassificationSource, ClassificationValues, classify_asset,
+    normalized_isin,
 };
 use girocrab_core::assets::PRICE_SYMBOLS;
-use girocrab_core::assets::{asset_weight_presets, AssetItem, AssetWeightPreset, MANUAL_SOURCE};
+use girocrab_core::assets::{AssetItem, AssetWeightPreset, MANUAL_SOURCE, asset_weight_presets};
 use girocrab_core::loans::{LoanLink, ManualLoan};
 use girocrab_core::{Account, AccountKind, Vault};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -19,7 +19,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::assets_loans::{self as al, ItemForm, LoanForm};
 use crate::planning::{euro, format_plain};
 use crate::portfolio::class_label;
-use crate::{privacy_on, with_state, AlPoint, AlRow, AssetsState, MainWindow};
+use crate::{AlPoint, AlRow, AssetsState, MainWindow, privacy_on, with_state};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 
@@ -1042,7 +1042,7 @@ fn wire_loans(win: &MainWindow) {
                 return fail(
                     &win,
                     "Restschuld: Bitte den offenen Betrag positiv eingeben.",
-                )
+                );
             }
             Err(e) => return fail(&win, e),
         };

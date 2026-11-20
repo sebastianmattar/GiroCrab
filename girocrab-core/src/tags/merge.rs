@@ -8,9 +8,10 @@
 //! merge orders reach the same state. The tag sets of the bookings follow in
 //! `sync_merge::merge_bookings` ([`TagIds`]).
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::{fold, normalize_links};
 use crate::error::CoreResult;
@@ -101,24 +102,21 @@ pub(crate) fn merge_attached(conn: &Connection) -> CoreResult<()> {
         state.entry(uuid).and_modify(|r| r.merge(&o)).or_insert(o);
     }
     // same name, different uuid: the smaller uuid survives (BTreeMap order)
-    let mut first: HashMap<String, String> = HashMap::new();
-    let mut losers: Vec<(String, String)> = Vec::new();
-    for (uuid, r) in &state {
+    let mut survivors: HashMap<String, (String, i64)> = HashMap::new();
+    for (uuid, r) in &mut state {
         if r.deleted_ms.is_some() {
             continue;
         }
-        match first.get(&fold(&r.name)) {
-            Some(survivor) => losers.push((uuid.clone(), survivor.clone())),
-            None => {
-                first.insert(fold(&r.name), uuid.clone());
+        match survivors.entry(fold(&r.name)) {
+            Entry::Occupied(e) => {
+                let (survivor, survivor_ms) = e.get();
+                r.deleted_ms = Some(r.updated_ms.max(*survivor_ms));
+                r.merged_into = Some(survivor.clone());
+            }
+            Entry::Vacant(e) => {
+                e.insert((uuid.clone(), r.updated_ms));
             }
         }
-    }
-    for (loser, survivor) in losers {
-        let stamp = state[&loser].updated_ms.max(state[&survivor].updated_ms);
-        let r = state.get_mut(&loser).expect("loser is in the state");
-        r.deleted_ms = Some(stamp);
-        r.merged_into = Some(survivor);
     }
     for (uuid, r) in &state {
         match local.get(uuid) {

@@ -73,7 +73,7 @@ Sheet {
             visible: sheet.multi
             spacing: 2
             Text { text: qsTr("%1 Buchungen kategorisieren").arg(sheet.targets.length); font.pixelSize: Theme.body + 1; font.weight: Font.Bold; color: Theme.text }
-            Text { text: Fmt.money(sheet.targets.reduce((s, b) => s + b.amount_cents, 0)); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary }
+            Text { text: Fmt.money(sheet.targets.reduce((s, b) => s + b.amount_cents, 0)); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } }
         }
         RowLayout {
             visible: !sheet.multi && AppModel.selectedBooking !== null
@@ -81,8 +81,8 @@ Sheet {
             MerchantSignet { merchant: AppModel.selectedBooking ? AppModel.selectedBooking.merchant : null; categorySymbol: AppModel.selectedBooking ? AppModel.selectedBooking.category_symbol : "" }
             ColumnLayout {
                 spacing: 0
-                Text { text: AppModel.selectedBooking ? AppModel.selectedBooking.merchant.name : ""; font.pixelSize: Theme.body + 1; font.weight: Font.Bold; color: Theme.text }
-                Text { text: AppModel.selectedBooking ? Fmt.money(AppModel.selectedBooking.amount_cents) : ""; font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary }
+                Text { text: AppModel.selectedBooking ? AppModel.selectedBooking.merchant.name : ""; font.pixelSize: Theme.body + 1; font.weight: Font.Bold; color: Theme.text; Sensitive {} }
+                Text { text: AppModel.selectedBooking ? Fmt.money(AppModel.selectedBooking.amount_cents) : ""; font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } }
             }
         }
         TextField {

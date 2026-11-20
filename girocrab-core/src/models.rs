@@ -379,6 +379,9 @@ pub struct Account {
     /// The balance is computed from the bookings (imports, connectors without
     /// a reported balance), not delivered by the bank; depots and loans never.
     pub balance_derived: bool,
+    /// The user's note on the account (#512), `""` = none. Syncs like the
+    /// name: the newer edit wins (#980).
+    pub note: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -791,6 +794,33 @@ pub struct DepotValuePoint {
     pub total_depots: u32,
 }
 
+/// An amount in one currency: what a category holds in currencies other than EUR (#1049).
+#[derive(Debug, Clone, uniffi::Record)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CurrencyAmount {
+    pub currency: String,
+    pub cents: i64,
+}
+
+/// What a category (with its subcategories) holds in one currency other than EUR (#1049).
+#[derive(Debug, Clone, uniffi::Record)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CategoryCurrencyAmount {
+    pub category_id: i64,
+    pub currency: String,
+    pub cents: i64,
+}
+
+/// The KPI tiles of one currency other than EUR (#1049): what `SelectionFlow` leaves out.
+#[derive(Debug, Clone, uniffi::Record)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CurrencyFlow {
+    pub currency: String,
+    pub consumption_cents: i64,
+    pub invested_cents: i64,
+    pub income_cents: i64,
+}
+
 /// Sum of one category (with subcategories) over one calendar day, month or year (`period` = `yyyy-MM-dd`, `yyyy-MM` or `yyyy`).
 #[derive(Debug, Clone, uniffi::Record)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1049,13 +1079,19 @@ pub struct StandingOrderLimits {
     pub weekdays: Vec<u32>,
 }
 
-/// Recipient suggested from past bookings (auto-completion).
-#[derive(Debug, Clone, uniffi::Record)]
+/// Recipient suggested from past bookings (auto-completion, `recipients.rs`): one per IBAN.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KnownRecipient {
+    /// The most used name the IBAN was paid under.
     pub name: String,
     pub iban: String,
+    /// Outgoing bookings to this IBAN.
     pub times_used: u32,
+    /// Date of the latest of them (`YYYY-MM-DD`).
+    pub last_used: String,
+    /// "Nicht mehr vorschlagen": only `list_known_recipients` returns these.
+    pub hidden: bool,
 }
 
 /// Budget progress of one category for one month.

@@ -3,23 +3,25 @@
 //! receipts (HKQTG).
 
 use super::syntax::{self, SegmentBuilder};
-use super::{camt, fints_date, kku, mt940, FinTsConnector, SepaAccount, UpdAccount};
-use crate::connectors::{today, ConnectContext, RemoteTransaction};
+use super::{FinTsConnector, SepaAccount, UpdAccount, camt, fints_date, kku, mt940};
+use crate::connectors::{ConnectContext, RemoteTransaction, today};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::trf;
 
 /// Start date of a card statement request: `since`, but not further back than the
 /// bank's storage period (`storage_days`, 0 = unknown). Dates are `YYYY-MM-DD`.
 pub(super) fn card_since(since: &str, today: &str, storage_days: i64) -> String {
-    let parse = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
+    let parse = |d: &str| jiff::civil::Date::strptime("%Y-%m-%d", d).ok();
     match (parse(since), parse(today)) {
         (Some(s), Some(t)) if storage_days > 0 => {
             // the bank's number: an absurd value must not overflow the date arithmetic
             // (a panic on a hostile reply); no bound cuts the range then
-            let oldest =
-                chrono::Duration::try_days(storage_days).and_then(|d| t.checked_sub_signed(d));
+            let oldest = jiff::Span::new()
+                .try_days(storage_days)
+                .and_then(|d| t.checked_sub(d))
+                .ok();
             match oldest {
-                Some(oldest) => s.max(oldest).format("%Y-%m-%d").to_string(),
+                Some(oldest) => crate::dates::iso(s.max(oldest)),
                 None => since.to_string(),
             }
         }
@@ -458,10 +460,10 @@ impl FinTsConnector {
                 ));
                 // the bank's own file name (e.g. DKB), else one of ours
                 let bank_file_name = statement_file_name(s);
-                if let Some(code) = receipt_code(s) {
-                    if !self.st.pending_receipts.contains(&code) {
-                        self.st.pending_receipts.push(code);
-                    }
+                if let Some(code) = receipt_code(s)
+                    && !self.st.pending_receipts.contains(&code)
+                {
+                    self.st.pending_receipts.push(code);
                 }
                 let (stmt_label, period, date) = if pdf_only {
                     hiekp_details(s)
@@ -472,34 +474,34 @@ impl FinTsConnector {
                 };
                 for el in &s.elements {
                     for val in el {
-                        if let syntax::Value::Binary(pdf) = val {
-                            if pdf.starts_with(b"%PDF") {
-                                // HKEKP periods are not reliable enough for an
-                                // id; the bank re-sends unacknowledged statements,
-                                // so the content keeps them from being stored twice.
-                                let source_url = if pdf_only {
-                                    format!("fints:hkekp:{label}:{:016x}", crate::fnv::fnv1a64(pdf))
-                                } else {
-                                    format!("fints:hkeka:{label}:{period}")
-                                };
-                                docs.push(crate::documents::RemoteDocument {
-                                    account_ref: label.to_string(),
-                                    booking_external_id: None,
-                                    // like MoneyMoney: the bank's file name, readable
-                                    title: bank_file_name
-                                        .as_deref()
-                                        .map(statement_title)
-                                        .unwrap_or_else(|| trf("Kontoauszug {0}", &[&stmt_label])),
-                                    doc_type: "kontoauszug".into(),
-                                    mime_type: "application/pdf".into(),
-                                    file_name: bank_file_name.clone().unwrap_or_else(|| {
-                                        format!("Kontoauszug_{}_{}.pdf", label, date)
-                                    }),
-                                    source_url,
-                                    bytes: pdf.clone(),
-                                    date: date.clone(),
-                                });
-                            }
+                        if let syntax::Value::Binary(pdf) = val
+                            && pdf.starts_with(b"%PDF")
+                        {
+                            // HKEKP periods are not reliable enough for an
+                            // id; the bank re-sends unacknowledged statements,
+                            // so the content keeps them from being stored twice.
+                            let source_url = if pdf_only {
+                                format!("fints:hkekp:{label}:{:016x}", crate::fnv::fnv1a64(pdf))
+                            } else {
+                                format!("fints:hkeka:{label}:{period}")
+                            };
+                            docs.push(crate::documents::RemoteDocument {
+                                account_ref: label.to_string(),
+                                booking_external_id: None,
+                                // like MoneyMoney: the bank's file name, readable
+                                title: bank_file_name
+                                    .as_deref()
+                                    .map(statement_title)
+                                    .unwrap_or_else(|| trf("Kontoauszug {0}", &[&stmt_label])),
+                                doc_type: "kontoauszug".into(),
+                                mime_type: "application/pdf".into(),
+                                file_name: bank_file_name.clone().unwrap_or_else(|| {
+                                    format!("Kontoauszug_{}_{}.pdf", label, date)
+                                }),
+                                source_url,
+                                bytes: pdf.clone(),
+                                date: date.clone(),
+                            });
                         }
                     }
                 }

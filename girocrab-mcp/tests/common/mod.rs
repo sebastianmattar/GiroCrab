@@ -1,8 +1,8 @@
 //! Shared by the integration tests (each test file uses only part of it).
 #![allow(dead_code)]
 
-use girocrab_mcp::{no_token, Adapter, Config};
-use serde_json::{json, Value};
+use girocrab_mcp::{Adapter, Config, no_token};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 

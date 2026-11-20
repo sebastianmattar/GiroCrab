@@ -783,9 +783,11 @@ mod tests {
     #[test]
     fn unsupported_fields_parse_but_never_match() {
         let src = "mandate:X OR reference:ABC";
-        assert!(!SearchExpr::parse(src)
-            .unwrap()
-            .matches(&inp("ABC", "X", -1)));
+        assert!(
+            !SearchExpr::parse(src)
+                .unwrap()
+                .matches(&inp("ABC", "X", -1))
+        );
         assert!(matches!(
             SearchExpr::parse_supported(src),
             Err(SearchExprError::UnsupportedField("mandate"))

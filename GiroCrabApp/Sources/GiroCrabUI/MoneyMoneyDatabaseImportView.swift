@@ -603,7 +603,7 @@ struct MoneyMoneyDatabaseImportView: View {
     private func startConsent(_ connectionID: Int64) {
         guard let conn = model.connections.first(where: { $0.id == connectionID }) else { return }
         dismiss()
-        model.requestSync(conn)
+        model.requestFullSync(conn)
     }
 
     /// The counts of what arrived in GiroCrab; zero rows are left out.

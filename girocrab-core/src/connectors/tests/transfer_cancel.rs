@@ -1,8 +1,8 @@
 //! `TransferSession::cancel()`: the outcome comes from the bank, the session
 //! stays retryable until the cancellation is confirmed.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
@@ -72,12 +72,8 @@ fn session(outcomes: Vec<CancelOutcome>, bank: Bank) -> (TransferSession, Arc<At
     let calls = Arc::new(AtomicUsize::new(0));
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
-        secret: crate::secret::SecretString::new(String::new()),
-        settings: Default::default(),
-        state: serde_json::Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let job = TransferJob {
         source_iban: "DE02120300000000202051".into(),
@@ -98,7 +94,7 @@ fn session(outcomes: Vec<CancelOutcome>, bank: Bank) -> (TransferSession, Arc<At
         bank,
     };
     (
-        TransferSession::new(vault, Box::new(connector), ctx, OrderKind::Single, job, 1),
+        TransferSession::new(vault, Box::new(connector), ctx, OrderKind::Single(job), 1),
         calls,
     )
 }
@@ -148,6 +144,7 @@ async fn executed_transfer_cannot_be_cancelled() {
         panic!("an executed order must finish");
     };
     assert!(outcome.record_error.is_some());
+    assert_eq!(outcome.end_to_end_id, "GC1");
     assert!(matches!(s.start().await, Err(CoreError::SessionClosed)));
     assert!(matches!(
         s.cancel().await,
@@ -173,10 +170,10 @@ async fn unclear_outcome_is_reported_and_never_cancelled_blindly() {
     let (s, calls) = session(vec![CancelOutcome::Cancelled], Bank::Unclear);
     // Recording the "Status unklar" booking fails (no account 1), which must
     // not turn a possibly executed order into an error the app would retry.
-    assert!(matches!(
-        s.start().await,
-        Ok(TransferStep::OutcomeUnknown { .. })
-    ));
+    let Ok(TransferStep::OutcomeUnknown { end_to_end_id, .. }) = s.start().await else {
+        panic!("an unclear order must be reported as such");
+    };
+    assert_eq!(end_to_end_id, "GC1");
     assert!(matches!(
         s.cancel().await,
         CancelOutcome::CancellationUnknown { .. }

@@ -37,8 +37,8 @@ ColumnLayout {
         preview = null; error = ""; loading = false; importing = false; keepCategories = true; keepNotes = true
         if (AppModel.demoImportPreview) {
             preview = AppModel.demoImportPreview
-            fileName = "MoneyMoney-Umsaetze.xml"
-            filePath = "MoneyMoney-Umsaetze.xml"
+            fileName = "Umsaetze.xml"
+            filePath = "Umsaetze.xml"
             // `--demo-sheet moneymoney` shows the "Übernahme" step (preview + target account)
             step = "options"
         }
@@ -111,8 +111,8 @@ ColumnLayout {
 
     FileDialog {
         id: picker
-        title: qsTr("MoneyMoney-Export auswählen")
-        nameFilters: [qsTr("MoneyMoney-Export (*.csv *.xml *.sta *.mt940 *.txt)"), qsTr("Alle Dateien (*)")]
+        title: qsTr("Exportdatei auswählen")
+        nameFilters: [qsTr("Exportdatei (*.csv *.xml *.sta *.mt940 *.txt)"), qsTr("Alle Dateien (*)")]
         onAccepted: v.load(selectedFile)
     }
 
@@ -138,7 +138,7 @@ ColumnLayout {
                 }
                 FormSection {
                     title: qsTr("Datei")
-                    footers: [qsTr("In MoneyMoney ein einzelnes Konto wählen, alle Umsätze markieren (⌘A) und „Umsätze exportieren …“, dann die Datei auf diesen Rechner kopieren. Nur CSV enthält auch die Kategorien. Sie können die Datei auch hierher ziehen.")]
+                    footers: [qsTr("Erwartet wird eine Exportdatei mit den Umsätzen eines Kontos (CSV, XML, camt.053 oder MT940). Kategorien werden übernommen, sofern die Datei sie enthält. Sie können die Datei auch hierher ziehen.")]
                     ImportFileRow {
                         label: qsTr("Exportdatei")
                         path: v.filePath

@@ -2,8 +2,8 @@
 //! account, replaced on every complete fetch, and expanded into the coming
 //! executions for the "Geplant" page. Read-only; nothing is sent from here.
 
-use chrono::{Datelike, Duration, NaiveDate};
-use rusqlite::{params, Connection, OptionalExtension};
+use jiff::civil::Date;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::connectors::{RemoteStandingOrder, StandingOrderJob};
 use crate::dates::parse_iso;
@@ -109,8 +109,8 @@ struct Row {
     iban: String,
     cents: i64,
     purpose: String,
-    first: NaiveDate,
-    last: Option<NaiveDate>,
+    first: Date,
+    last: Option<Date>,
     unit: String,
     interval: u32,
     exec_day: u32,
@@ -121,12 +121,13 @@ struct Row {
 /// accounts (empty = all).
 pub(crate) fn planned_executions(
     conn: &Connection,
-    from: NaiveDate,
-    to: Option<NaiveDate>,
+    from: Date,
+    to: Option<Date>,
     account_ids: &[i64],
 ) -> CoreResult<Vec<PlannedPayment>> {
     let open_ended = to.is_none();
-    let to = to.unwrap_or(from + Duration::days(MAX_AHEAD_DAYS));
+    let to =
+        to.unwrap_or_else(|| crate::dates::add_days(from, MAX_AHEAD_DAYS).unwrap_or(Date::MAX));
     let mut q = conn.prepare(
         "SELECT s.id, s.account_id, a.name, s.recipient_name, s.recipient_iban, s.amount_cents,
                 s.purpose, s.first_date, s.last_date, s.time_unit, s.interval, s.exec_day
@@ -144,7 +145,7 @@ pub(crate) fn planned_executions(
                 iban: r.get(4)?,
                 cents: r.get(5)?,
                 purpose: r.get(6)?,
-                first: NaiveDate::MIN,
+                first: Date::MIN,
                 last: None,
                 unit: r.get(9)?,
                 interval: r.get(10)?,
@@ -190,17 +191,26 @@ pub(crate) fn planned_executions(
 /// execution day (31 = last day; days a month lacks fall on its last day),
 /// week orders on that weekday (1 = Monday); never before the first date or
 /// after the last one.
-fn occurrences(o: &Row, from: NaiveDate, to: NaiveDate) -> Vec<NaiveDate> {
+fn occurrences(o: &Row, from: Date, to: Date) -> Vec<Date> {
     let end = o.last.map_or(to, |l| l.min(to));
     let step = o.interval.max(1) as i64;
     let mut out = Vec::new();
     if o.unit == "W" {
-        let monday = o.first - Duration::days(o.first.weekday().num_days_from_monday() as i64);
-        let day = Duration::days(o.exec_day.clamp(1, 7) as i64 - 1);
+        // First date and interval come from the bank: checked steps end the
+        // list at the end of jiff's range (9999-12-31) instead of panicking.
+        let back = i64::from(o.first.weekday().to_monday_zero_offset());
+        let Some(monday) = crate::dates::add_days(o.first, -back) else {
+            return out;
+        };
+        let Some(exec) = crate::dates::add_days(monday, o.exec_day.clamp(1, 7) as i64 - 1) else {
+            return out;
+        };
         // start just before `from`: an old order must not run out of the 1000-step cap
-        let k0 = ((from - monday).num_days() / (7 * step) - 1).max(0);
+        let k0 = (crate::dates::days_between(monday, from) / (7 * step) - 1).max(0);
         for k in k0..k0 + 1000 {
-            let d = monday + Duration::days(7 * step * k) + day;
+            let Some(d) = crate::dates::add_days(exec, 7 * step * k) else {
+                break;
+            };
             if d > end {
                 break;
             }
@@ -209,15 +219,13 @@ fn occurrences(o: &Row, from: NaiveDate, to: NaiveDate) -> Vec<NaiveDate> {
             }
         }
     } else {
-        let first_months = o.first.year() as i64 * 12 + o.first.month0() as i64;
-        let from_months = from.year() as i64 * 12 + from.month0() as i64;
+        let first_months = i64::from(o.first.year()) * 12 + i64::from(o.first.month()) - 1;
+        let from_months = i64::from(from.year()) * 12 + i64::from(from.month()) - 1;
         let k0 = ((from_months - first_months) / step - 1).max(0);
         for k in k0..k0 + 1000 {
             let months = first_months + step * k;
             let (y, m) = ((months / 12) as i32, (months % 12) as u32 + 1);
-            let last_day = last_day_of_month(y, m);
-            let day = o.exec_day.clamp(1, 31).min(last_day);
-            let Some(d) = NaiveDate::from_ymd_opt(y, m, day) else {
+            let Some(d) = crate::dates::clamped_ymd(y, m, o.exec_day.clamp(1, 31)) else {
                 continue;
             };
             if d > end {
@@ -229,13 +237,6 @@ fn occurrences(o: &Row, from: NaiveDate, to: NaiveDate) -> Vec<NaiveDate> {
         }
     }
     out
-}
-
-fn last_day_of_month(y: i32, m: u32) -> u32 {
-    let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
-    NaiveDate::from_ymd_opt(ny, nm, 1)
-        .and_then(|d| d.pred_opt())
-        .map_or(28, |d| d.day())
 }
 
 /// A stored standing order as the bank reported it (#496): what the editor shows
@@ -289,23 +290,16 @@ fn info_from(r: &rusqlite::Row) -> rusqlite::Result<StandingOrderInfo> {
 
 /// Whether `first` is a day the schedule runs on: the execution day of the month (31 = last
 /// day; a day beyond the month's end means its last day) or the weekday (1 = Monday).
-pub(crate) fn first_date_fits(first: NaiveDate, unit: &str, exec_day: u32) -> bool {
+pub(crate) fn first_date_fits(first: Date, unit: &str, exec_day: u32) -> bool {
     if unit == "W" {
-        return first.weekday().number_from_monday() == exec_day;
+        return first.weekday().to_monday_one_offset() as u32 == exec_day;
     }
-    let (y, m) = (first.year(), first.month());
-    let next_month = if m == 12 {
-        NaiveDate::from_ymd_opt(y + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(y, m + 1, 1)
-    };
-    let month_end = next_month
-        .and_then(|d| d.pred_opt())
-        .map_or(31, |d| d.day());
+    let month_end = first.days_in_month() as u32;
+    let day = first.day() as u32;
     if exec_day >= 31 {
-        return first.day() == month_end;
+        return day == month_end;
     }
-    first.day() == exec_day || (exec_day > month_end && first.day() == month_end)
+    day == exec_day || (exec_day > month_end && day == month_end)
 }
 
 #[uniffi::export]
@@ -343,7 +337,7 @@ impl Vault {
         action: crate::models::StandingOrderAction,
     ) -> Result<Option<crate::models::StandingOrderLimits>, crate::error::CoreError> {
         let db = self.db()?;
-        let state: Option<String> = db
+        let state: Option<crate::secret::SecretJson> = db
             .query_row(
                 "SELECT c.state_json FROM accounts a JOIN bank_connections c ON c.id = a.connection_id
                  WHERE a.id = ?1 AND a.deleted_ms IS NULL AND c.deleted_ms IS NULL",
@@ -351,8 +345,7 @@ impl Vault {
                 |r| r.get(0),
             )
             .optional()?;
-        let Some(state) = state.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        else {
+        let Some(state) = state else {
             return Ok(None);
         };
         Ok(crate::connectors::fints::standing_limits_from_state(
@@ -458,7 +451,7 @@ mod day_tests {
 
     #[test]
     fn first_date_must_match_the_execution_day() {
-        let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
+        let d = |y, m, day| crate::dates::ymd(y, m, day).unwrap();
         assert!(first_date_fits(d(2026, 12, 3), "M", 3));
         assert!(!first_date_fits(d(2026, 11, 16), "M", 3));
         assert!(first_date_fits(d(2027, 2, 28), "M", 31), "31 = last day");

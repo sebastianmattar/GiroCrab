@@ -71,7 +71,7 @@ SidebarRow {
                     elide: Text.ElideRight; Layout.maximumWidth: Math.ceil(implicitWidth); Layout.fillWidth: true
                     HoverHandler { id: nameHover }
                     ToolTip.visible: nameHover.hovered && (row.account.owner || "") !== ""; ToolTip.delay: 600
-                    ToolTip.text: row.account.owner || ""
+                    ToolTip.text: AppModel.masking(row.account.owner || "")
                     Sensitive {}
                 }
                 SFIcon { visible: row.account.access_revoked; symbol: "lock.slash"; size: 10; color: "orange"
@@ -93,12 +93,13 @@ SidebarRow {
                     Layout.preferredWidth: 44; implicitHeight: 4
                     background: Rectangle { radius: 2; color: Theme.withAlpha(Theme.loan, 0.2) }
                     contentItem: Item { Rectangle { width: parent.width * (row.repaid || 0); height: parent.height; radius: 2; color: Theme.withAlpha(Theme.loan, 0.7) } }
+                    Sensitive { amounts: true }   // SidebarView.swift: the bar shows the share too
                 }
                 Text {
                     visible: row.repaid !== null
                     text: qsTr("%1 getilgt").arg(Fmt.percent(row.repaid || 0)); font.pixelSize: Theme.caption2; color: Theme.secondary
                     elide: Text.ElideRight; Layout.fillWidth: true
-                    Sensitive {}
+                    Sensitive { amounts: true }
                 }
                 Text {
                     visible: row.repaid === null
@@ -116,7 +117,7 @@ SidebarRow {
                     text: Fmt.money(row.account.balance_cents, row.account.currency)
                     font.pixelSize: Theme.subheadline; font.features: { "tnum": 1 }
                     color: row.selected ? Theme.text : (row.account.kind === "Loan" ? Theme.loan : (row.account.balance_cents < 0 ? Theme.negative : Theme.text))
-                    Sensitive {}
+                    Sensitive { amounts: true }
                 }
             }
         }

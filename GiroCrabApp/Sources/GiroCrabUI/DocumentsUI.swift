@@ -241,7 +241,7 @@ struct DocumentsView: View {
 
     var body: some View {
         @Bindable var model = model
-        let found = model.allDocuments(search: search, unlinkedOnly: unlinkedOnly, accountId: model.documentsAccountFilter, scope: model.documentsScope)
+        let found = model.allDocuments(search: search, unlinkedOnly: unlinkedOnly, accountId: model.documentsAccountFilter, connectionId: model.documentsConnectionFilter, scope: model.documentsScope)
         let docs = DocumentFilters.apply(found, type: typeFilter, year: yearFilter, unseenOnly: unseenOnly, keeping: selected ?? previewDoc?.id)
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -256,18 +256,21 @@ struct DocumentsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if isCompact {
                         VStack(alignment: .leading, spacing: 8) {
-                            accountPicker
+                            connectionPicker
+                                accountPicker
                             unlinkedToggle
                             unseenRow(docs)
                         }
                     } else {
                         ViewThatFits(in: .horizontal) {
                             HStack(spacing: 12) {
+                                connectionPicker
                                 accountPicker
                                 Spacer(minLength: 0)
                                 unlinkedToggle
                             }
                             VStack(alignment: .leading, spacing: 8) {
+                                connectionPicker
                                 accountPicker
                                 unlinkedToggle
                             }
@@ -359,7 +362,7 @@ struct DocumentsView: View {
                     selected = nil
                 }
                 .overlay {
-                    if docs.isEmpty && model.documentsScope == .all && model.documentsAccountFilter == nil && !unlinkedOnly && !unseenOnly && search.isEmpty
+                    if docs.isEmpty && model.documentsScope == .all && model.documentsAccountFilter == nil && model.documentsConnectionFilter == nil && !unlinkedOnly && !unseenOnly && search.isEmpty
                         && typeFilter == nil && yearFilter == nil {
                         ContentUnavailableView("Keine Belege", systemImage: "doc.on.doc", description: Text("Belege kommen beim Abruf (Trade Republic, comdirect-PostBox, FinTS-Kontoauszug) oder per Drag & Drop."))
                     } else if docs.isEmpty {
@@ -371,6 +374,7 @@ struct DocumentsView: View {
                             Button("Alle Dokumente anzeigen") {
                                 model.documentsScope = .all
                                 model.documentsAccountFilter = nil
+                                model.documentsConnectionFilter = nil
                                 unlinkedOnly = false
                                 unseenOnly = false
                                 typeFilter = nil
@@ -443,7 +447,10 @@ struct DocumentsView: View {
         .searchable(text: $search, placement: .toolbar, prompt: "Belege durchsuchen")
         // The account filter is only set on purpose ("Belege anzeigen" on an account);
         // opening the section later starts at "Alle Konten" again (#670).
-        .onDisappear { model.documentsAccountFilter = nil }
+        .onDisappear {
+            model.documentsAccountFilter = nil
+            model.documentsConnectionFilter = nil
+        }
     }
 
     private var importButton: some View {
@@ -460,6 +467,7 @@ struct DocumentsView: View {
                 // the dialog was opened from PostBox or a filtered account.
                 model.documentsScope = .receipts
                 model.documentsAccountFilter = nil
+                model.documentsConnectionFilter = nil
                 search = ""
                 unlinkedOnly = false
                 // a new receipt is stored as read, with today's type and year: no filter may hide it
@@ -482,7 +490,7 @@ struct DocumentsView: View {
     }
 
     private func exportButton(_ docs: [DocumentInfo]) -> some View {
-        let filtered = model.documentsAccountFilter != nil || model.documentsScope != .all || !search.isEmpty
+        let filtered = model.documentsAccountFilter != nil || model.documentsConnectionFilter != nil || model.documentsScope != .all || !search.isEmpty
             || unlinkedOnly || unseenOnly || typeFilter != nil || yearFilter != nil
         return Button {
             exportIDs = filtered ? docs.map(\.id) : nil
@@ -505,7 +513,7 @@ struct DocumentsView: View {
 
     /// Retrieval switched off for a connection in view: otherwise nobody knows why nothing new arrives.
     @ViewBuilder private var documentsOffHint: some View {
-        let off = model.connectionsWithDocumentsOff(accountFilter: model.documentsAccountFilter)
+        let off = model.connectionsWithDocumentsOff(accountFilter: model.documentsAccountFilter, connectionFilter: model.documentsConnectionFilter)
         if !off.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Label {
@@ -516,9 +524,32 @@ struct DocumentsView: View {
                 }
                 .appFont(.caption).foregroundStyle(Theme.secondary)
                 Button("Einstellungen › Banken öffnen") { model.openSettings(.banks) }
-                    .buttonStyle(.link).appFont(.caption)
+                    .buttonStyle(.plain).appFont(.caption).foregroundStyle(Theme.accent)
                     .help("Beim Zugang „Dokumente abrufen“ einschalten")
             }
+        }
+    }
+
+    /// Bank connection filter (#1042). Only with more than one connection (or while one is chosen).
+    /// "Ohne Konto": documents without an account have no connection and fall out of every other choice.
+    @ViewBuilder private var connectionPicker: some View {
+        let connections = model.documentsFilterConnections
+        if connections.count > 1 || model.documentsConnectionFilter != nil {
+            let selection = Binding<Int64?>(
+                get: { model.documentsConnectionFilter },
+                set: { model.selectDocumentsConnection($0) })
+            Picker("Bankzugang", selection: selection) {
+                Text("Alle Bankzugänge").tag(Int64?.none)
+                Text("Ohne Konto").tag(Int64?.some(AppModel.documentsWithoutAccount))
+                Divider()
+                ForEach(connections) { c in
+                    Text(c.displayName).tag(Int64?.some(c.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .sensitive(model.documentsConnectionFilter == nil || model.documentsConnectionFilter == AppModel.documentsWithoutAccount ? [] : .personal)
+            .frame(minWidth: isCompact ? 0 : 150, maxWidth: isCompact ? .infinity : 270)
+            .help("Dokumente eines Bankzugangs anzeigen")
         }
     }
 
@@ -526,9 +557,11 @@ struct DocumentsView: View {
         @Bindable var model = model
         return Picker("Konto", selection: $model.documentsAccountFilter) {
             Text("Alle Konten").tag(Int64?.none)
-            Text("Ohne Konto").tag(Int64?.some(AppModel.documentsWithoutAccount))
-            Divider()
-            ForEach(model.accountMenuSections) { section in
+            if model.documentsConnectionFilter == nil {
+                Text("Ohne Konto").tag(Int64?.some(AppModel.documentsWithoutAccount))
+                Divider()
+            }
+            ForEach(model.documentsAccountSections) { section in
                 Section(section.title) {
                     ForEach(section.accounts) { a in
                         Label(model.accountLabel(a), systemImage: a.sfSymbol).tag(Int64?.some(a.id))
@@ -537,6 +570,7 @@ struct DocumentsView: View {
             }
         }
         .pickerStyle(.menu)
+        .disabled(model.documentsConnectionFilter == AppModel.documentsWithoutAccount)
         .sensitive(model.documentsAccountFilter == nil || model.documentsAccountFilter == AppModel.documentsWithoutAccount ? [] : .personal)
         .frame(minWidth: isCompact ? 0 : 150, maxWidth: isCompact ? .infinity : 270)
         .help("Dokumente eines Kontos anzeigen")

@@ -31,6 +31,33 @@ CREATE TABLE IF NOT EXISTS transfer_templates (
     default_purpose      TEXT    NOT NULL DEFAULT ''
 );";
 
+/// Whether a booking in `currency` enters the sums (category totals, history, KPI tiles) of a
+/// selection of `account_count` accounts (#1049, as in `balances::chosen` and #569): one account
+/// counts in its own currency, several (or all) only EUR; amounts in other currencies are never
+/// added to them. An empty currency is EUR.
+pub(crate) fn counts_in_sums(account_count: usize, currency: &str) -> bool {
+    account_count == 1 || currency.is_empty() || currency.eq_ignore_ascii_case("EUR")
+}
+
+/// SQL condition on `t` that is `counts_in_sums` for the whole selection.
+pub(crate) fn sums_condition(account_count: usize) -> &'static str {
+    if account_count == 1 {
+        ""
+    } else {
+        " AND t.currency COLLATE NOCASE IN ('', 'EUR')"
+    }
+}
+
+/// Whether any live booking is in a currency other than EUR: the cheap check that lets the
+/// "Zusätzlich" queries return at once for the many vaults that have none.
+pub(crate) fn has_other_currencies(conn: &rusqlite::Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM transactions WHERE deleted_ms IS NULL AND upper(currency) NOT IN ('', 'EUR'))",
+        [],
+        |r| r.get(0),
+    )
+}
+
 /// Bookings as (category_id, amount_cents, booking_date) rows where a split
 /// booking contributes its split amounts instead of the parent category.
 /// `extra`: more columns of `t` (e.g. ", t.currency AS currency"); `condition`:
@@ -53,9 +80,7 @@ pub(crate) fn effective_sql(extra: &str, condition: &str) -> String {
 
 fn month_range(year: i32, month: u32) -> Result<(String, String), CoreError> {
     if !(1..=12).contains(&month) {
-        return Err(CoreError::InvalidInput {
-            message: tr("Ungültiger Monat.").into(),
-        });
+        return Err(CoreError::invalid(tr("Ungültiger Monat.")));
     }
     Ok((
         format!("{year:04}-{month:02}-01"),
@@ -74,9 +99,7 @@ impl Vault {
         budget_cents: Option<i64>,
     ) -> Result<(), CoreError> {
         if budget_cents.is_some_and(|b| b <= 0) {
-            return Err(CoreError::InvalidInput {
-                message: tr("Das Budget muss größer als 0 sein.").into(),
-            });
+            return Err(CoreError::invalid(tr("Das Budget muss größer als 0 sein.")));
         }
         let db = self.db()?;
         let n = db.execute(
@@ -106,7 +129,8 @@ impl Vault {
             let mut stmt = db.prepare(&format!(
                 "SELECT category_id, SUM(amount_cents) FROM {}
                  WHERE booking_date >= ?1 AND booking_date <= ?2 GROUP BY category_id",
-                effective_sql("", "")
+                // budgets are amounts in EUR: other currencies are never added to them (#1049)
+                effective_sql("", sums_condition(0))
             ))?;
             for row in stmt.query_map(params![from, to], |r| {
                 Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?))
@@ -216,44 +240,28 @@ impl Vault {
             })?;
         if !splits.is_empty() {
             if splits.len() < 2 || splits.iter().any(|s| s.amount_cents == 0) {
-                return Err(CoreError::InvalidInput {
-                    message: tr(
-                        "Eine Splitbuchung braucht mindestens zwei Teilbeträge ungleich 0.",
-                    )
-                    .into(),
-                });
+                return Err(CoreError::invalid(tr(
+                    "Eine Splitbuchung braucht mindestens zwei Teilbeträge ungleich 0.",
+                )));
             }
             // checked: an overflowing (wrapping) sum must not pass as "equal"
             let sum = splits
                 .iter()
                 .try_fold(0i64, |acc, s| acc.checked_add(s.amount_cents))
-                .ok_or_else(|| CoreError::InvalidInput {
-                    message: tr("Die Teilbeträge sind zu groß.").into(),
-                })?;
+                .ok_or_else(|| CoreError::invalid(tr("Die Teilbeträge sind zu groß.")))?;
             if sum != amount {
-                return Err(CoreError::InvalidInput {
-                    message: trf(
-                        "Die Teilbeträge ({0} ¢) ergeben nicht den Buchungsbetrag ({1} ¢).",
-                        &[&sum, &amount],
-                    ),
-                });
+                return Err(CoreError::invalid(trf(
+                    "Die Teilbeträge ({0} ¢) ergeben nicht den Buchungsbetrag ({1} ¢).",
+                    &[&sum, &amount],
+                )));
             }
         }
+        let lines: Vec<_> = splits
+            .iter()
+            .map(|s| (s.category_id, s.amount_cents, s.note.as_str()))
+            .collect();
         let tx = db.transaction()?;
-        tx.execute(
-            "DELETE FROM transaction_splits WHERE transaction_id = ?1",
-            [transaction_id],
-        )?;
-        for s in &splits {
-            tx.execute(
-                "INSERT INTO transaction_splits(transaction_id, category_id, amount_cents, note) VALUES (?1, ?2, ?3, ?4)",
-                params![transaction_id, s.category_id, s.amount_cents, s.note.trim()],
-            )?;
-        }
-        tx.execute(
-            "UPDATE transactions SET splits_ms = ?1 WHERE id = ?2",
-            params![crate::dates::now_ms(), transaction_id],
-        )?;
+        store_splits(&tx, transaction_id, &lines)?;
         tx.commit()?;
         Ok(())
     }
@@ -295,15 +303,14 @@ impl Vault {
         count: u32,
         account_ids: Option<Vec<i64>>,
     ) -> Result<Vec<PeriodCashflow>, CoreError> {
-        use chrono::{Datelike, Local};
-        let today = Local::now().date_naive();
+        let today = crate::dates::today();
         crate::planning::cashflow_for(
             self,
             granularity,
             count,
             account_ids.as_deref().unwrap_or_default(),
-            today.year(),
-            today.month(),
+            today.year().into(),
+            today.month() as u32,
         )
     }
 
@@ -337,14 +344,14 @@ impl Vault {
         let rname = template.recipient_name.trim().to_string();
         let iban = normalize_iban(&template.recipient_iban);
         if name.is_empty() || rname.is_empty() || iban.is_empty() {
-            return Err(CoreError::InvalidInput {
-                message: tr("Name, Empfänger und IBAN der Vorlage dürfen nicht leer sein.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Name, Empfänger und IBAN der Vorlage dürfen nicht leer sein.",
+            )));
         }
         if template.default_amount_cents.is_some_and(|c| c <= 0) {
-            return Err(CoreError::InvalidInput {
-                message: tr("Der Vorlagenbetrag muss größer als 0 sein.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Der Vorlagenbetrag muss größer als 0 sein.",
+            )));
         }
         let db = self.db()?;
         let bic = template.recipient_bic.trim().to_uppercase();
@@ -438,6 +445,10 @@ pub(crate) fn cashflow_for(
     };
     let mut acc: HashMap<String, (i64, i64)> = HashMap::new();
     v.visit_bookings(&*v.db()?, &filter, |_, b| {
+        // other currencies are never added to the sums, unless one account is selected (#1049)
+        if !counts_in_sums(account_ids.len(), &b.currency) {
+            return;
+        }
         let (date, amt) = (&b.booking_date, b.amount_cents);
         // Non-ASCII / malformed dates are skipped instead of panicking on a slice.
         let key = match granularity {
@@ -472,6 +483,39 @@ pub(crate) fn cashflow_for(
             }
         })
         .collect())
+}
+
+/// Replaces the splits of booking `id` with `lines` (category, amount, note)
+/// and stamps `splits_ms`. The amounts are the caller's to check.
+pub(crate) fn store_splits(
+    conn: &rusqlite::Connection,
+    id: i64,
+    lines: &[(Option<i64>, i64, impl AsRef<str>)],
+) -> Result<(), CoreError> {
+    conn.execute(
+        "DELETE FROM transaction_splits WHERE transaction_id = ?1",
+        [id],
+    )?;
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO transaction_splits(transaction_id, category_id, amount_cents, note) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for (category, cents, note) in lines {
+        insert.execute(params![id, category, cents, note.as_ref().trim()])?;
+    }
+    conn.prepare_cached("UPDATE transactions SET splits_ms = ?2 WHERE id = ?1")?
+        .execute(params![id, crate::dates::now_ms()])?;
+    Ok(())
+}
+
+/// A booking turned into a split booking by an import keeps no category of its
+/// own (its splits carry them, #654), unless the user set it.
+pub(crate) fn clear_split_category(conn: &rusqlite::Connection, id: i64) -> Result<(), CoreError> {
+    conn.prepare_cached(
+        "UPDATE transactions SET category_id = NULL, category_source = 'none', rule_id = NULL, category_ms = ?2
+          WHERE id = ?1 AND category_id IS NOT NULL AND category_source != 'manual'",
+    )?
+    .execute(params![id, crate::dates::now_ms()])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -554,10 +598,11 @@ mod tests {
             .category_history(ins, vec![], Some("2025-02-01".into()), None)
             .unwrap();
         assert_eq!(h.len(), 1);
-        assert!(v
-            .category_history(ins, vec![-1], None, None)
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.category_history(ins, vec![-1], None, None)
+                .unwrap()
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -574,9 +619,10 @@ mod tests {
             note: String::new(),
         };
         // wrong sum / single part rejected
-        assert!(v
-            .set_transaction_splits(id, vec![inp(a, -1_000), inp(b, -1_000)])
-            .is_err());
+        assert!(
+            v.set_transaction_splits(id, vec![inp(a, -1_000), inp(b, -1_000)])
+                .is_err()
+        );
         assert!(v.set_transaction_splits(id, vec![inp(a, -3_000)]).is_err());
         v.set_transaction_splits(id, vec![inp(a, -1_000), inp(b, -2_000)])
             .unwrap();
@@ -615,12 +661,14 @@ mod tests {
         assert_eq!(parts.iter().map(|p| p.amount_cents).sum::<i64>(), 5_900);
         assert!(parts.iter().any(|p| p.amount_cents == -14_100));
         // signed sum off, or a zero part: still rejected
-        assert!(v
-            .set_transaction_splits(id, vec![inp(a, 20_000), inp(b, -14_000)])
-            .is_err());
-        assert!(v
-            .set_transaction_splits(id, vec![inp(a, 5_900), inp(b, 0)])
-            .is_err());
+        assert!(
+            v.set_transaction_splits(id, vec![inp(a, 20_000), inp(b, -14_000)])
+                .is_err()
+        );
+        assert!(
+            v.set_transaction_splits(id, vec![inp(a, 5_900), inp(b, 0)])
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -729,8 +777,8 @@ mod tests {
             .unwrap();
         assert!(unc.transactions.iter().all(|t| t.id != id));
         // overflowing parts are rejected instead of wrapping to the booking amount
-        assert!(v
-            .set_transaction_splits(
+        assert!(
+            v.set_transaction_splits(
                 id,
                 vec![
                     TransactionSplitInput {
@@ -745,7 +793,8 @@ mod tests {
                     },
                 ],
             )
-            .is_err());
+            .is_err()
+        );
         let csv = v.export_bookings_csv(f).unwrap();
         assert!(csv.starts_with(
             "\u{FEFF}Datum;Konto;Name;IBAN;Verwendungszweck;Kategorie;Betrag;Währung;Tags\r\n"
@@ -756,10 +805,9 @@ mod tests {
 
     #[test]
     fn cashflow_ignores_transfers_between_own_accounts() {
-        use chrono::{Datelike, Local};
         let (v, dir) = vault();
-        let today = Local::now().date_naive();
-        let date = today.format("%Y-%m-%d").to_string();
+        let today = crate::dates::today();
+        let date = crate::dates::iso(today);
         {
             let c = v.db().unwrap();
             c.execute(
@@ -780,8 +828,8 @@ mod tests {
             PeriodGranularity::Month,
             1,
             &[],
-            today.year(),
-            today.month(),
+            today.year().into(),
+            today.month() as u32,
         )
         .unwrap();
         assert_eq!(cf.last().unwrap().expense_cents, 1_000);

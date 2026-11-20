@@ -31,15 +31,14 @@
 //! for a purchase) and fade with the distance in time, so a category the user
 //! switched to recently beats the one used years before.
 //!
-//! The history is read once and kept on the vault until a write changes the
-//! vault (`total_changes()`, like the list's `ListCache`), so moving through the
+//! The history is read once and kept on the vault until its data changes
+//! (`vault::cache`, like the list's `ListCache`), so moving through the
 //! list costs no scan. Only the raw rows are read under the vault lock;
 //! merchants are resolved after it is released.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use chrono::{Datelike, NaiveDate};
 use rusqlite::Connection;
 
 use crate::error::{CoreError, CoreResult};
@@ -150,27 +149,11 @@ struct Row {
 
 /// Everything suggestions need from one state of the database.
 pub(crate) struct History {
-    changes: u64,
     by_merchant: HashMap<(bool, String), Vec<Vote>>,
     by_iban: HashMap<(bool, String, String), Vec<Vote>>,
     text: similar::TextIndex,
     /// Keyword and regex rules by id (their limits decide which votes count).
     rules: HashMap<i64, Rule>,
-}
-
-/// The last history read, until the database changes.
-#[derive(Default)]
-pub(crate) struct HistoryCache(Mutex<Option<Arc<History>>>);
-
-impl HistoryCache {
-    fn get(&self, changes: u64) -> Option<Arc<History>> {
-        let slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        slot.as_ref().filter(|h| h.changes == changes).cloned()
-    }
-
-    fn put(&self, history: Arc<History>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(history);
-    }
 }
 
 /// Key a merchant can be matched by; `None` for a payment service with
@@ -186,9 +169,9 @@ fn merchant_key(m: &MerchantInfo) -> Option<String> {
 }
 
 fn day_number(date: &str) -> Option<i32> {
-    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+    jiff::civil::Date::strptime("%Y-%m-%d", date)
         .ok()
-        .map(|d| d.num_days_from_ce())
+        .map(crate::dates::day_number)
 }
 
 fn load_targets(vault: &Vault, conn: &Connection, ids: &[i64]) -> CoreResult<Vec<Target>> {
@@ -256,12 +239,7 @@ fn read_rows(conn: &Connection) -> CoreResult<Vec<Row>> {
 }
 
 impl History {
-    fn build(
-        changes: u64,
-        rows: Vec<Row>,
-        rules: HashMap<i64, Rule>,
-        own_ibans: &HashSet<String>,
-    ) -> Self {
+    fn build(rows: Vec<Row>, rules: HashMap<i64, Rule>, own_ibans: &HashSet<String>) -> Self {
         let mut by_merchant: HashMap<(bool, String), Vec<Vote>> = HashMap::new();
         let mut by_iban: HashMap<(bool, String, String), Vec<Vote>> = HashMap::new();
         let mut texts = Vec::with_capacity(rows.len());
@@ -296,7 +274,6 @@ impl History {
                 .push(vote);
         }
         History {
-            changes,
             by_merchant,
             by_iban,
             text: similar::TextIndex::build(texts),
@@ -407,9 +384,9 @@ fn decide<'a>(
     }
     // heaviest first; equal weight: more bookings, then the lower id (stable)
     let (category_id, (weight, support)) = tally.into_iter().max_by(|a, b| {
-        a.1 .0
-            .total_cmp(&b.1 .0)
-            .then(a.1 .1.cmp(&b.1 .1))
+        a.1.0
+            .total_cmp(&b.1.0)
+            .then(a.1.1.cmp(&b.1.1))
             .then(b.0.cmp(&a.0))
     })?;
     (support >= min_support && total > 0.0 && weight / total >= min_share).then_some(
@@ -428,8 +405,8 @@ impl Vault {
     /// a change (only the SQL part under the vault lock).
     fn suggestion_history(&self) -> CoreResult<Arc<History>> {
         let db = self.db()?;
-        let changes = db.total_changes();
-        if let Some(history) = self.suggestions.get(changes) {
+        let stamp = self.data_stamp(&db);
+        if let Some(history) = self.suggestions.get(stamp) {
             return Ok(history);
         }
         let rows = read_rows(&db)?;
@@ -442,9 +419,9 @@ impl Vault {
         // inside an open transaction a rollback would not lower the count
         let keep = db.is_autocommit();
         drop(db);
-        let history = Arc::new(History::build(changes, rows, rules, &own_ibans));
+        let history = Arc::new(History::build(rows, rules, &own_ibans));
         if keep {
-            self.suggestions.put(history.clone());
+            self.suggestions.put(stamp, history.clone());
         }
         Ok(history)
     }

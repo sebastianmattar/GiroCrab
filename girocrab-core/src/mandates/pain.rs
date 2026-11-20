@@ -2,7 +2,7 @@
 //! club): its debtors become mandates, the creditor ID and the sequence types
 //! are taken over.
 
-use crate::connectors::fints::pain008::{parse_pain008, validate_creditor_id, SequenceType};
+use crate::connectors::fints::pain008::{SequenceType, parse_pain008, validate_creditor_id};
 use crate::connectors::fints::sepa::validate_creditor_iban_matches;
 use crate::error::CoreError;
 use crate::i18n::tr;

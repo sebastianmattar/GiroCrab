@@ -115,9 +115,11 @@ fn old_postings_keep_their_ids_edits_splits_and_documents_without_duplicates() {
     let stored = rows(&v);
     assert_eq!(stored.len(), 2);
     assert_eq!(stored[0].0, row);
-    assert!(stored
-        .iter()
-        .all(|r| r.1.len() == "advanzia-post-".len() + 16));
+    assert!(
+        stored
+            .iter()
+            .all(|r| r.1.len() == "advanzia-post-".len() + 16)
+    );
     let db = v.db().unwrap();
     let edits: (String, i64, i64, i64) = db.query_row("SELECT note,checked,(SELECT count(*) FROM transaction_splits WHERE transaction_id=t.id),(SELECT count(*) FROM booking_documents WHERE booking_id=t.id) FROM transactions t WHERE id=?1",[row],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
     assert_eq!(edits, ("invented note".into(), 1, 1, 1));
@@ -178,17 +180,18 @@ fn old_deleted_postings_and_discarded_holds_stay_deleted() {
 fn invalid_balance_or_late_failure_does_not_partially_adopt_the_account() {
     let (v, id, _dir) = setup();
     let account = legacy(&v, id);
-    assert!(v
-        .clone()
-        .import_advanzia_capture(
-            id,
-            BANK.into(),
-            v.advanzia_profile(id).unwrap().profile_id,
-            vec![posted("p")],
-            "null".into(),
-            Some(account)
-        )
-        .is_err());
+    assert!(
+        v.clone()
+            .import_advanzia_capture(
+                id,
+                BANK.into(),
+                v.advanzia_profile(id).unwrap().profile_id,
+                vec![posted("p")],
+                "null".into(),
+                Some(account)
+            )
+            .is_err()
+    );
     v.db().unwrap().execute_batch("CREATE TRIGGER reject_fake_import BEFORE INSERT ON transactions BEGIN SELECT RAISE(ABORT,'fictional failure'); END;").unwrap();
     assert!(import(&v, id, Some(account), vec![posted("p")]).is_err());
     assert!(!v.advanzia_profile(id).unwrap().has_account);
@@ -208,17 +211,18 @@ fn foreign_target_or_different_bank_uuid_cannot_reassign_the_legacy_account() {
         .unwrap();
     assert!(import(&v, other, Some(account), vec![posted("p")]).is_err());
     import(&v, id, Some(account), vec![posted("p")]).unwrap();
-    assert!(v
-        .clone()
-        .import_advanzia_capture(
-            id,
-            "00000000-0000-4000-8000-000000000002".into(),
-            v.advanzia_profile(id).unwrap().profile_id,
-            vec![posted("q")],
-            "0".into(),
-            None
-        )
-        .is_err());
+    assert!(
+        v.clone()
+            .import_advanzia_capture(
+                id,
+                "00000000-0000-4000-8000-000000000002".into(),
+                v.advanzia_profile(id).unwrap().profile_id,
+                vec![posted("q")],
+                "0".into(),
+                None
+            )
+            .is_err()
+    );
     assert_eq!(rows(&v).len(), 1);
     assert_eq!(v.list_accounts().unwrap()[0].balance_cents, -2098);
 }
@@ -227,13 +231,15 @@ fn conflicting_legacy_reference_never_silently_discards_bank_rows() {
     let (v, id, _dir) = setup();
     let account = legacy(&v, id);
     old_row(&v, account, false, "p");
-    assert!(import(
-        &v,
-        id,
-        Some(account),
-        vec![body("APPROVED", "p", "-99", "TEST SHOP")]
-    )
-    .is_err());
+    assert!(
+        import(
+            &v,
+            id,
+            Some(account),
+            vec![body("APPROVED", "p", "-99", "TEST SHOP")]
+        )
+        .is_err()
+    );
     assert_eq!(rows(&v).len(), 1);
     assert!(!v.advanzia_profile(id).unwrap().has_account);
 }
@@ -286,9 +292,11 @@ fn a_current_account_can_reuse_exact_legacy_booking_ids() {
         0
     );
     assert_eq!(rows(&v).len(), 2);
-    assert!(rows(&v)
-        .iter()
-        .any(|r| r.1 == compatibility::legacy_id(false, "old")));
+    assert!(
+        rows(&v)
+            .iter()
+            .any(|r| r.1 == compatibility::legacy_id(false, "old"))
+    );
 }
 #[test]
 fn two_existing_identifiers_for_one_reference_fail_without_choosing_a_row() {
@@ -350,13 +358,14 @@ fn settlement_preserves_tags_on_the_posted_booking() {
     ).unwrap();
     assert_eq!(moved.0, tag);
     assert!(moved.1 > 1);
-    assert!(db
-        .query_row(
+    assert!(
+        db.query_row(
             "SELECT deleted_ms IS NOT NULL FROM transactions WHERE id=?1",
             [hold],
             |r| r.get::<_, bool>(0)
         )
-        .unwrap());
+        .unwrap()
+    );
 }
 
 #[test]
@@ -390,9 +399,11 @@ fn legacy_holds_never_adopt_or_replace_an_imported_posting() {
             let stored = rows(&v);
             assert_eq!(stored.len(), 2);
             assert!(stored.iter().all(|r| r.3.is_none()));
-            assert!(stored
-                .iter()
-                .any(|r| r.0 == imported && r.1 == "mm-fictional-posting"));
+            assert!(
+                stored
+                    .iter()
+                    .any(|r| r.0 == imported && r.1 == "mm-fictional-posting")
+            );
             assert_eq!(v.advanzia_open_holds(id).unwrap().len(), 1);
             let note: String = v
                 .db()
@@ -406,4 +417,33 @@ fn legacy_holds_never_adopt_or_replace_an_imported_posting() {
             assert_eq!(note, "keep imported note");
         }
     }
+}
+
+#[test]
+fn readding_a_login_after_deleting_its_legacy_account_imports_to_a_new_account() {
+    let (v, id, _dir) = setup();
+    let account = legacy(&v, id);
+    let old = old_row(&v, account, false, "old-posting");
+    v.set_account_archived(account, true).unwrap();
+    v.delete_account(account).unwrap();
+    let readded = v
+        .add_bank_connection(
+            ConnectorKind::Advanzia,
+            "Testkarte".into(),
+            "fictional-login".into(),
+        )
+        .unwrap();
+    assert_eq!(readded, id, "the same login reuses its existing connection");
+    import(&v, readded, None, vec![posted("new-posting")]).unwrap();
+    let accounts = v.list_accounts().unwrap();
+    assert_eq!(accounts.len(), 1);
+    assert_ne!(accounts[0].id, account);
+    assert!(rows(&v).iter().any(|row| row.0 == old && row.3.is_some()));
+    assert!(v.advanzia_profile(id).unwrap().has_account);
+    assert_eq!(
+        import(&v, id, None, vec![posted("new-posting")])
+            .unwrap()
+            .transactions_imported,
+        0
+    );
 }

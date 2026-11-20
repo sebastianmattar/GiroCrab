@@ -12,8 +12,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use jiff::civil::Date;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::dates::parse_iso;
 use crate::error::{CoreError, CoreResult};
@@ -22,7 +22,7 @@ use crate::models::*;
 use crate::rules::RuleRow;
 use crate::schema::has_table;
 use crate::search_expr::SearchExpr;
-use crate::vault::{sql_int_list, Vault, LIVE_BOOKINGS_SQL};
+use crate::vault::{LIVE_BOOKINGS_SQL, Vault, sql_int_list};
 
 pub(crate) const LOAN_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS loan_terms (
@@ -140,7 +140,7 @@ fn validate(setup: &LoanSetup) -> CoreResult<LoanSetup> {
     let Some(date) = parse_iso(&setup.anchor_date) else {
         return Err(CoreError::invalid(tr("Ungültiges Stichtagsdatum.")));
     };
-    if date > chrono::Local::now().date_naive() {
+    if date > crate::dates::today() {
         return Err(CoreError::invalid(tr(
             "Der Stichtag darf nicht in der Zukunft liegen.",
         )));
@@ -166,7 +166,7 @@ fn validate(setup: &LoanSetup) -> CoreResult<LoanSetup> {
     compile_expr(&setup.match_expr)?;
     Ok(LoanSetup {
         name,
-        anchor_date: date.format("%Y-%m-%d").to_string(),
+        anchor_date: crate::dates::iso(date),
         match_expr: setup.match_expr.trim().to_string(),
         interest_rate_ppm: setup.interest_rate_ppm.filter(|r| *r > 0),
         ..setup.clone()
@@ -215,7 +215,7 @@ fn months_left(balance: i64, payment: i64, ppm: i64) -> Option<u32> {
 /// the linked bookings as seen from the paying account (debit = negative).
 pub(crate) fn compute_status(setup: &LoanSetup, bookings: &[(String, i64)]) -> LoanStatus {
     let ppm = setup.interest_rate_ppm.unwrap_or(0);
-    let mut events: Vec<(NaiveDate, &str, i64)> = Vec::new();
+    let mut events: Vec<(Date, &str, i64)> = Vec::new();
     let mut before = 0u32;
     let anchor = parse_iso(&setup.anchor_date);
     for (d, amount) in bookings {
@@ -234,7 +234,7 @@ pub(crate) fn compute_status(setup: &LoanSetup, bookings: &[(String, i64)]) -> L
     let mut balance = setup.anchor_balance_cents;
     let mut last = anchor;
     for (date, raw, payment) in events {
-        let days = last.map_or(0, |l| (date - l).num_days());
+        let days = last.map_or(0, |l| crate::dates::days_between(l, date));
         let int = interest(balance, ppm, days);
         balance = balance + int - payment;
         last = Some(date);
@@ -281,7 +281,7 @@ fn load_setup(conn: &Connection, account_id: i64) -> CoreResult<Option<LoanSetup
             "SELECT a.name, a.initial_balance_cents, l.anchor_date, l.anchor_balance_cents,
                     l.interest_rate_ppm, l.match_expr
                FROM loan_terms l JOIN accounts a ON a.id = l.account_id
-              WHERE l.account_id = ?1 AND a.deleted_ms IS NULL",
+              WHERE l.account_id = ?1 AND a.kind = 'loan' AND a.deleted_ms IS NULL",
             [account_id],
             |r| {
                 Ok(LoanSetup {
@@ -323,10 +323,20 @@ fn refresh(conn: &Connection, loan_id: i64) -> CoreResult<LoanStatus> {
     Ok(st)
 }
 
+pub(crate) fn is_manual_loan(conn: &Connection, account_id: i64) -> CoreResult<bool> {
+    if !has_table(conn, "main", "loan_terms")? {
+        return Ok(false);
+    }
+    Ok(load_setup(conn, account_id)?.is_some())
+}
+
+/// A manual loan whose kind the user changed (e.g. to cash) is an ordinary
+/// account afterwards: its terms stay (for a change back), but it neither
+/// links bookings nor gets its balance from them.
 fn manual_loan_ids(conn: &Connection) -> CoreResult<Vec<i64>> {
     let mut st = conn.prepare(
         "SELECT account_id FROM loan_terms
-          WHERE account_id IN (SELECT id FROM accounts WHERE deleted_ms IS NULL) ORDER BY account_id",
+          WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'loan' AND deleted_ms IS NULL) ORDER BY account_id",
     )?;
     let rows = st.query_map([], |r| r.get(0))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -342,7 +352,7 @@ pub(crate) fn apply_loan_rules(conn: &Connection) -> CoreResult<u32> {
     let loans: Vec<(i64, SearchExpr)> = {
         let mut st = conn.prepare(
             "SELECT l.account_id, l.match_expr FROM loan_terms l JOIN accounts a ON a.id = l.account_id
-              WHERE l.match_expr != '' AND a.archived_unix IS NULL AND a.deleted_ms IS NULL
+              WHERE l.match_expr != '' AND a.kind = 'loan' AND a.archived_unix IS NULL AND a.deleted_ms IS NULL
               ORDER BY l.account_id",
         )?;
         let rows: Vec<(i64, String)> = st
@@ -690,12 +700,12 @@ impl Vault {
             None => {
                 return Err(CoreError::NotFound {
                     what: trf("Buchung {0}", &[&transaction_id]),
-                })
+                });
             }
             Some("loan") => {
                 return Err(CoreError::invalid(tr(
                     "Buchungen eines Darlehenskontos lassen sich keinem anderen Darlehen zuordnen.",
-                )))
+                )));
             }
             _ => {}
         }
@@ -728,10 +738,10 @@ impl Vault {
                 }
             }
         }
-        if let Some((prev, _)) = previous {
-            if Some(prev) != loan_account_id {
-                refresh(&tx, prev)?;
-            }
+        if let Some((prev, _)) = previous
+            && Some(prev) != loan_account_id
+        {
+            refresh(&tx, prev)?;
         }
         tx.commit()?;
         Ok(())

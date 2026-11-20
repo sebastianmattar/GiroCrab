@@ -180,23 +180,17 @@ pub fn parse(data: &[u8]) -> CoreResult<Vec<Segment>> {
             b'@' if cur.is_empty() && cur_binary.is_none() => {
                 // binary: @len@
                 let rest = &data[i + 1..];
-                let end =
-                    rest.iter()
-                        .position(|&b| b == b'@')
-                        .ok_or_else(|| CoreError::Protocol {
-                            message: "unterminated binary length".into(),
-                        })?;
+                let end = rest
+                    .iter()
+                    .position(|&b| b == b'@')
+                    .ok_or_else(|| CoreError::protocol("unterminated binary length"))?;
                 let len: usize = std::str::from_utf8(&rest[..end])
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .ok_or_else(|| CoreError::Protocol {
-                        message: "bad binary length".into(),
-                    })?;
+                    .ok_or_else(|| CoreError::protocol("bad binary length"))?;
                 let start = i + 1 + end + 1;
                 let Some(stop) = start.checked_add(len).filter(|s| *s <= data.len()) else {
-                    return Err(CoreError::Protocol {
-                        message: "binary data exceeds message".into(),
-                    });
+                    return Err(CoreError::protocol("binary data exceeds message"));
                 };
                 cur_binary = Some(data[start..stop].to_vec());
                 i = stop;

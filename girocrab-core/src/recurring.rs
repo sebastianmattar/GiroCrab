@@ -9,9 +9,10 @@
 //! a group; user decisions live in `recurring_series`.
 
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 
-use chrono::{Datelike, Duration, Local, Months, NaiveDate};
-use rusqlite::{params, Connection, OptionalExtension};
+use jiff::civil::Date;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::dates::{iso, parse_iso};
 use crate::error::{CoreError, CoreResult};
@@ -74,17 +75,16 @@ impl RecurrenceInterval {
             Self::Custom => None,
         }
     }
-    /// Accepted gap between two bookings (days) and the minimum occurrences.
-    fn gap_bounds(self) -> Option<(i64, i64, usize)> {
-        match self {
-            Self::Monthly => Some((25, 36, 2)),
-            Self::Quarterly => Some((82, 100, 3)),
-            Self::HalfYearly => Some((170, 195, 2)),
-            Self::Yearly => Some((350, 380, 2)),
-            Self::Custom => None,
-        }
-    }
 }
+
+/// The intervals detection looks for, each with its accepted gap between two
+/// bookings (days) and the minimum number of bookings.
+const DETECTABLE: [(RecurrenceInterval, RangeInclusive<i64>, usize); 4] = [
+    (RecurrenceInterval::Monthly, 25..=36, 2),
+    (RecurrenceInterval::Quarterly, 82..=100, 3),
+    (RecurrenceInterval::HalfYearly, 170..=195, 2),
+    (RecurrenceInterval::Yearly, 350..=380, 2),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -236,7 +236,7 @@ pub fn normalize_custom_dates(input: &[String]) -> Vec<String> {
                 (b.parse::<u32>().ok()?, a.parse::<u32>().ok()?)
             };
             // validate against a leap year so 29.02. is accepted
-            NaiveDate::from_ymd_opt(2024, m, d)?;
+            crate::dates::ymd(2024, m, d)?;
             Some(format!("{m:02}-{d:02}"))
         })
         .collect();
@@ -246,21 +246,17 @@ pub fn normalize_custom_dates(input: &[String]) -> Vec<String> {
 }
 
 /// The custom date (MM-DD) in a given year; Feb 29 falls back to Feb 28.
-fn custom_in_year(mmdd: &str, year: i32) -> Option<NaiveDate> {
+fn custom_in_year(mmdd: &str, year: i32) -> Option<Date> {
     let (m, d) = mmdd.split_once('-')?;
     let (m, d) = (m.parse().ok()?, d.parse().ok()?);
-    NaiveDate::from_ymd_opt(year, m, d).or_else(|| NaiveDate::from_ymd_opt(year, m, d - 1))
+    crate::dates::ymd(year, m, d).or_else(|| crate::dates::ymd(year, m, d - 1))
 }
 
 /// First due date strictly after `after`.
-fn next_after(
-    after: NaiveDate,
-    interval: RecurrenceInterval,
-    custom: &[String],
-) -> Option<NaiveDate> {
+fn next_after(after: Date, interval: RecurrenceInterval, custom: &[String]) -> Option<Date> {
     match interval.months() {
-        Some(m) => after.checked_add_months(Months::new(m)),
-        None => (after.year()..=after.year() + 1)
+        Some(m) => after.checked_add(jiff::Span::new().months(m)).ok(),
+        None => (i32::from(after.year())..=i32::from(after.year()) + 1)
             .flat_map(|y| custom.iter().filter_map(move |c| custom_in_year(c, y)))
             .filter(|d| *d > after)
             .min(),
@@ -268,24 +264,22 @@ fn next_after(
 }
 
 /// Classifies the booking dates of one group; `None` = not regular.
-fn detect_interval(dates: &[NaiveDate]) -> Option<RecurrenceInterval> {
+fn detect_interval(dates: &[Date]) -> Option<RecurrenceInterval> {
     if dates.len() < 2 {
         return None;
     }
-    let gaps: Vec<i64> = dates.windows(2).map(|w| (w[1] - w[0]).num_days()).collect();
+    let gaps: Vec<i64> = dates
+        .windows(2)
+        .map(|w| crate::dates::days_between(w[0], w[1]))
+        .collect();
     let med = median(gaps.clone());
-    [
-        RecurrenceInterval::Monthly,
-        RecurrenceInterval::Quarterly,
-        RecurrenceInterval::HalfYearly,
-        RecurrenceInterval::Yearly,
-    ]
-    .into_iter()
-    .find(|i| {
-        let (lo, hi, min_n) = i.gap_bounds().expect("fixed interval");
-        let fitting = gaps.iter().filter(|g| (lo..=hi).contains(*g)).count();
-        (lo..=hi).contains(&med) && dates.len() >= min_n && fitting * 4 >= gaps.len() * 3
-    })
+    DETECTABLE
+        .into_iter()
+        .find(|(_, gap, min_n)| {
+            let fitting = gaps.iter().filter(|g| gap.contains(g)).count();
+            gap.contains(&med) && dates.len() >= *min_n && fitting * 4 >= gaps.len() * 3
+        })
+        .map(|(interval, ..)| interval)
 }
 
 /// Stored user decision for a series key.
@@ -344,7 +338,7 @@ fn amount_close_pct(a: i64, b: i64, percent: i64) -> bool {
 /// Interval of a group of bookings (date-sorted) when it looks recurring.
 fn detect_group(list: &[&Booking]) -> Option<RecurrenceInterval> {
     // one booking per day (split payments / corrections)
-    let mut dates: Vec<NaiveDate> = list
+    let mut dates: Vec<Date> = list
         .iter()
         .filter_map(|b| parse_iso(&b.booking_date))
         .collect();
@@ -401,15 +395,15 @@ fn make_series(
     interval: RecurrenceInterval,
     custom: Vec<String>,
     source: RecurringSource,
-    today: NaiveDate,
+    today: Date,
 ) -> Option<RecurringSeries> {
     let last = *list.last()?;
     let last_date = parse_iso(&last.booking_date)?;
     let next = next_after(last_date, interval, &custom)?;
     // A detected series that missed two cycles has ended (contract cancelled).
     if source == RecurringSource::Detected {
-        let cycle = (next - last_date).num_days();
-        if (today - last_date).num_days() > cycle * 2 + 7 {
+        let cycle = crate::dates::days_between(last_date, next);
+        if crate::dates::days_between(last_date, today) > cycle * 2 + 7 {
             return None;
         }
     }
@@ -442,7 +436,7 @@ fn make_series(
 fn build_series(
     bookings: &[Booking],
     stored: &HashMap<String, Stored>,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<RecurringSeries> {
     let mut groups: HashMap<String, Vec<&Booking>> = HashMap::new();
     for b in bookings {
@@ -572,13 +566,10 @@ fn month_items(
         open_income_cents: 0,
         booked_expense_cents: 0,
     };
-    let Some(start) = NaiveDate::from_ymd_opt(year, month, 1) else {
+    let Some(start) = crate::dates::ymd(year, month, 1) else {
         return ov;
     };
-    let end = start
-        .checked_add_months(Months::new(1))
-        .map(|d| d - Duration::days(1))
-        .unwrap_or(start);
+    let end = start.last_of_month();
     let prefix = format!("{year:04}-{month:02}");
     let in_month: Vec<&Booking> = bookings
         .iter()
@@ -639,11 +630,11 @@ fn month_items(
 }
 
 impl Vault {
-    fn recurring_input(&self, account_ids: Vec<i64>) -> CoreResult<(Vec<Booking>, NaiveDate)> {
-        let today = Local::now().date_naive();
+    fn recurring_input(&self, account_ids: Vec<i64>) -> CoreResult<(Vec<Booking>, Date)> {
+        let today = crate::dates::today();
         let filter = BookingFilter {
             account_ids,
-            date_from: Some(iso(today - Duration::days(LOOKBACK_DAYS))),
+            date_from: Some(iso(today - crate::dates::days(LOOKBACK_DAYS))),
             ..Default::default()
         };
         Ok((self.collect_bookings(&*self.db()?, &filter)?, today))
@@ -868,7 +859,7 @@ const DUPLICATE_WINDOW_DAYS: i64 = 3;
 /// [`DUPLICATE_WINDOW_DAYS`]; the second one is not used for the price comparison.
 /// Result is sorted by booking date, then counterparty.
 pub fn detect_price_increases(series: &[(String, String, i64)]) -> Vec<PriceIncreaseAlert> {
-    let mut groups: HashMap<String, (String, Vec<(NaiveDate, i64)>)> = HashMap::new();
+    let mut groups: HashMap<String, (String, Vec<(Date, i64)>)> = HashMap::new();
     for (name, date, cents) in series {
         let key = name.trim().to_lowercase();
         let Some(d) = parse_iso(date) else { continue };
@@ -885,32 +876,35 @@ pub fn detect_price_increases(series: &[(String, String, i64)]) -> Vec<PriceIncr
     let mut alerts = Vec::new();
     for (name, mut list) in groups.into_values() {
         list.sort();
-        let mut unique: Vec<(NaiveDate, i64)> = Vec::new();
+        let mut unique: Vec<(Date, i64)> = Vec::new();
         for (d, amount) in list {
-            if let Some(&(pd, pa)) = unique.last() {
-                if pa == amount && (d - pd).num_days() <= DUPLICATE_WINDOW_DAYS {
-                    alerts.push(PriceIncreaseAlert {
-                        counterparty: name.clone(),
-                        previous_cents: amount,
-                        new_cents: amount * 2,
-                        increase_cents: amount,
-                        booking_date: iso(d),
-                    });
-                    continue;
-                }
+            if let Some(&(pd, pa)) = unique.last()
+                && pa == amount
+                && crate::dates::days_between(pd, d) <= DUPLICATE_WINDOW_DAYS
+            {
+                alerts.push(PriceIncreaseAlert {
+                    counterparty: name.clone(),
+                    previous_cents: amount,
+                    new_cents: amount * 2,
+                    increase_cents: amount,
+                    booking_date: iso(d),
+                });
+                continue;
             }
             unique.push((d, amount));
         }
-        if let [.., a, b, c] = unique.as_slice() {
-            if a.1 == b.1 && c.1 > b.1 && c.1 <= b.1 * 2 {
-                alerts.push(PriceIncreaseAlert {
-                    counterparty: name.clone(),
-                    previous_cents: b.1,
-                    new_cents: c.1,
-                    increase_cents: c.1 - b.1,
-                    booking_date: iso(c.0),
-                });
-            }
+        if let [.., a, b, c] = unique.as_slice()
+            && a.1 == b.1
+            && c.1 > b.1
+            && c.1 <= b.1 * 2
+        {
+            alerts.push(PriceIncreaseAlert {
+                counterparty: name.clone(),
+                previous_cents: b.1,
+                new_cents: c.1,
+                increase_cents: c.1 - b.1,
+                booking_date: iso(c.0),
+            });
         }
     }
     alerts.sort_by(|a, b| {
@@ -1060,8 +1054,8 @@ mod tests {
         }
     }
 
-    fn today() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+    fn today() -> Date {
+        jiff::civil::date(2026, 11, 11)
     }
 
     #[test]
@@ -1146,9 +1140,10 @@ mod tests {
         v.push(bk(20, "2026-10-02", -129_900, "", "Apple")); // one-off purchase
         let s = build_series(&v, &HashMap::new(), today());
         assert_eq!(s.len(), 2, "{s:?}");
-        assert!(s
-            .iter()
-            .all(|x| x.amount_specific && x.base_key == s[0].base_key));
+        assert!(
+            s.iter()
+                .all(|x| x.amount_specific && x.base_key == s[0].base_key)
+        );
         assert!(s[0].series_key.starts_with(&s[0].base_key) && s[0].series_key.contains('#'));
         let ov = month_items(&s, &v, 2026, 11);
         assert_eq!(ov.booked_expense_cents, 299);
@@ -1325,7 +1320,7 @@ mod tests {
         assert_eq!(c, vec!["02-29", "03-15", "08-15"]);
         assert_eq!(
             custom_in_year("02-29", 2027),
-            NaiveDate::from_ymd_opt(2027, 2, 28)
+            crate::dates::ymd(2027, 2, 28)
         );
     }
 
@@ -1415,9 +1410,7 @@ mod vault_tests {
         let dir = std::env::temp_dir().join(format!("gc-recurring-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![7u8; 32]).unwrap();
-        let d = (Local::now().date_naive() - Duration::days(10))
-            .format("%Y-%m-%d")
-            .to_string();
+        let d = crate::dates::iso(crate::dates::today() - crate::dates::days(10));
         let id = {
             let c = v.db().unwrap();
             c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
@@ -1436,9 +1429,10 @@ mod vault_tests {
             c.last_insert_rowid()
         };
         assert!(v.list_recurring(vec![]).unwrap().is_empty());
-        assert!(v
-            .mark_booking_recurring(id, RecurrenceInterval::Custom, vec![])
-            .is_err());
+        assert!(
+            v.mark_booking_recurring(id, RecurrenceInterval::Custom, vec![])
+                .is_err()
+        );
         v.mark_booking_recurring(id, RecurrenceInterval::Quarterly, vec![])
             .unwrap();
         let s = v.list_recurring(vec![]).unwrap();
@@ -1464,9 +1458,7 @@ mod vault_tests {
         let dir = std::env::temp_dir().join(format!("gc-recurring-615-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![7u8; 32]).unwrap();
-        let d = (Local::now().date_naive() - Duration::days(10))
-            .format("%Y-%m-%d")
-            .to_string();
+        let d = crate::dates::iso(crate::dates::today() - crate::dates::days(10));
         let id = {
             let c = v.db().unwrap();
             c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])

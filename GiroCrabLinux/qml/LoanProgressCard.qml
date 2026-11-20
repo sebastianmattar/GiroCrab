@@ -32,7 +32,7 @@ Rectangle {
             Layout.fillWidth: true
             SFIcon { visible: !card.compact; symbol: "house"; size: 15; color: Theme.text }
             Text { visible: !card.compact; text: qsTr("Tilgung"); font.pixelSize: Theme.body + 1; font.weight: Font.DemiBold; color: Theme.text }
-            Text { visible: card.repaid !== null; text: qsTr("%1 getilgt").arg(Fmt.percent(card.repaid || 0)); font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; color: Theme.loan }
+            Text { visible: card.repaid !== null; text: qsTr("%1 getilgt").arg(Fmt.percent(card.repaid || 0)); font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; color: Theme.loan; Sensitive { amounts: true } }
             Text { visible: card.repaid === null; text: qsTr("Ursprünglicher Kreditbetrag fehlt"); font.pixelSize: Theme.caption; color: Theme.secondary }
             Item { Layout.fillWidth: true }
             // manual loans: amount, Stand and rate live in the loan editor
@@ -45,7 +45,7 @@ Rectangle {
             TextField {
                 id: amount; visible: card.manual === null && card.editing; Layout.preferredWidth: 130
                 placeholderText: qsTr("z. B. %1").arg(Fmt.plain(28000000)); onAccepted: card.commit()
-                Sensitive {}
+                Sensitive { amounts: true }
             }
             Button { visible: card.manual === null && card.editing; text: qsTr("Abbrechen"); onClicked: card.editing = false }
             Button { visible: card.manual === null && card.editing; text: qsTr("Speichern"); highlighted: true; onClicked: card.commit() }
@@ -60,7 +60,7 @@ Rectangle {
                 implicitWidth: origText.implicitWidth + 12
                 contentItem: Text { id: origText; text: parent.text; elide: Text.ElideRight; horizontalAlignment: Text.AlignRight
                                     verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.caption; color: Theme.text
-                                    Sensitive { when: card.initial !== null } }   // the original loan amount
+                                    Sensitive { amounts: true; when: card.initial !== null } }   // the original loan amount
                 ToolTip.text: qsTr("Ursprünglicher Kreditbetrag bearbeiten")
                 onClicked: { amount.text = card.initial ? Fmt.plain(card.initial) : ""; card.editing = true; amount.forceActiveFocus() }
             }
@@ -69,6 +69,7 @@ Rectangle {
             visible: card.repaid !== null
             Layout.fillWidth: true; height: 4; radius: 2; color: Theme.withAlpha(Theme.loan, 0.2)
             Rectangle { height: 4; radius: 2; width: parent.width * (card.repaid || 0); color: Theme.loan }
+            Sensitive { amounts: true }   // LoanProgressCard.swift: the bar tells the share too
         }
         ManualLoanDetails {
             visible: card.manual !== null && !card.compact

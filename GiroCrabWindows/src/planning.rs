@@ -444,9 +444,11 @@ mod tests {
         assert_eq!(named[0].category_id, Some(8));
         assert_eq!(named[1].category_id, Some(7));
         assert!(build_splits(&[], &cats, -1000).unwrap().is_empty());
-        assert!(build_splits(&[draft(0, ""), draft(0, " ")], &cats, -1000)
-            .unwrap()
-            .is_empty());
+        assert!(
+            build_splits(&[draft(0, ""), draft(0, " ")], &cats, -1000)
+                .unwrap()
+                .is_empty()
+        );
         assert!(build_splits(&[draft(0, "-10")], &cats, -1000).is_err());
         assert!(build_splits(&[draft(0, "-4"), draft(0, "-5")], &cats, -1000).is_err());
         assert!(build_splits(&[draft(0, "4"), draft(0, "-14")], &cats, -1000).is_err());

@@ -90,7 +90,11 @@ impl SyncSession {
                 ));
                 let fetched = st.connector.fetch(&st.ctx).await;
                 st.connector.finish(&st.ctx).await;
-                let summary = store_fetch(&self.vault, self.kind, st.ctx.connection_id, fetched?)?;
+                let mut data = fetched?;
+                if let Some(only) = &st.ctx.only_account {
+                    data.keep_only(only);
+                }
+                let summary = store_fetch(&self.vault, self.kind, st.ctx.connection_id, data)?;
                 Ok(SyncStep::Finished { summary })
             }
         }

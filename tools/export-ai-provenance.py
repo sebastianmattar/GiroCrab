@@ -71,12 +71,16 @@ ORCH_PHRASE_RE = re.compile(
 # Provenance trailers defined in docs/ai-transparency.md (+ common conventions).
 TRAILER_RE = re.compile(
     r"^(Co-Authored-By|AI-Orchestrator|AI-Agent|AI-Model|AI-Assisted|Assisted-By|Generated-By|"
-    r"Human-Steering|AI-Agency|Review-Focus|Security-Check|Perf-Check|Verification|AI-Data-Policy)\s*:\s*(.+?)\s*$", re.I | re.M)
+    r"Human-Steering|AI-Agency|Review-Focus|Security-Check|Perf-Check|Verification|AI-Data-Policy)[ \t]*:[ \t]*(\S.*?)[ \t\r]*$", re.I | re.M)
 FOOTER_RE = re.compile(r"Generated with \[?(Claude Code|[\w .-]+?)\]?\(", re.I)
 PERF_BENCH_RE = re.compile(r"\bcategory_perf\b", re.I)
+# HTML comments in a PR body are template hints, not answers (an unfilled template must not count).
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 REFLECTION_HEAD_RE = re.compile(r"^#{1,6}\s*(?:🤖\s*)?AI Process Reflection\b.*$", re.I | re.M)
 REFLECTION_ITEM_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?\**(Human-Steering|AI-Agency|Review-Focus|Security-Check|Perf-Check)\s*:\**\s*(.+?)\s*$", re.I | re.M)
+    r"^\s*(?:[-*]\s*)?\**(Human-Steering|AI-Agency|Review-Focus|Security-Check|Perf-Check)[ \t]*:\**[ \t]*(\S.*?)?[ \t\r]*$", re.I | re.M)
+# Indented answer below a label that stands alone (`- **AI-Agency:**` + `  - …` / `  1. …`).
+REFLECTION_SUB_RE = re.compile(r"^[ \t]+(?:[-*+]|\d+[.)])?[ \t]*(\S.*?)[ \t\r]*$")
 
 LAYERS = [  # first match wins
     ("legacy", r"^(cashcrab-core|CashCrabApp)/"),
@@ -164,14 +168,23 @@ def parse_reflection(body, trailers):
     section of the PR body and the trailers of the commits/PR body. Self-reported, unverified."""
     out = {"human_steering": [], "ai_agency": [], "review_focus": [], "security_check": [], "perf_check": []}
     section = False
-    m = REFLECTION_HEAD_RE.search(body or "")
+    body = HTML_COMMENT_RE.sub("", body or "")
+    m = REFLECTION_HEAD_RE.search(body)
     if m:
         rest = body[m.end():]
         nxt = re.search(r"^#{1,6}\s", rest, re.M)
         rest = rest[:nxt.start()] if nxt else rest
-        for k, v in REFLECTION_ITEM_RE.findall(rest):
-            out[k.lower().replace("-", "_")].append(v)
-            section = True
+        for item in REFLECTION_ITEM_RE.finditer(rest):
+            k, v = item.group(1), item.group(2) or ""
+            values = [v] if v.strip("*") else []  # `*` alone: the closing `**` of an empty item
+            if not values:
+                for line in rest[item.end():].lstrip("\r\n").splitlines():
+                    sub = REFLECTION_SUB_RE.match(line)
+                    if not sub or REFLECTION_ITEM_RE.match(line):  # an indented next item ends the answers
+                        break
+                    values.append(sub.group(1))
+            out[k.lower().replace("-", "_")] += values
+            section = section or bool(values)
     for k, v in trailers:
         key = k.lower().replace("-", "_")
         if key in out:
@@ -179,7 +192,7 @@ def parse_reflection(body, trailers):
     for k in out:
         out[k] = list(dict.fromkeys(x[:300] for x in out[k]))[:5]
     # `category_perf` named anywhere in the PR body counts as perf evidence, even without a Perf-Check item.
-    bench = bool(PERF_BENCH_RE.search(body or ""))
+    bench = bool(PERF_BENCH_RE.search(body))
     return {"present": section or any(out.values()), "section": section,
             "perf_benchmark_mentioned": bench, **out}
 
@@ -305,9 +318,10 @@ def pr_features(pr, patch=None, pseudo=None):
         is_ai = any(re.search(rx, n, re.I) for n in names for _, rx in AI_TOOLS)
         ai_commits += is_ai
         human_commits += not is_ai
-    trailers += parse_trailers(body)
+    clean_body = HTML_COMMENT_RE.sub("", body or "")  # template hints are no evidence
+    trailers += parse_trailers(clean_body)
     roles = {}
-    tools = detect_tools(coauthors, trailers, body, pr.get("headRefName"), author, roles)
+    tools = detect_tools(coauthors, trailers, clean_body, pr.get("headRefName"), author, roles)
     reflection = parse_reflection(body, trailers)
 
     layers, security = classify_paths(paths)

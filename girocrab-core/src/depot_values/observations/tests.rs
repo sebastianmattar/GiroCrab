@@ -1,5 +1,5 @@
 use super::*;
-use crate::connectors::{store_fetch, FetchResult, RemoteAccount, RemoteHolding};
+use crate::connectors::{FetchResult, RemoteAccount, RemoteHolding, store_fetch};
 use crate::models::{AccountKind, ConnectorKind};
 use crate::vault::Vault;
 
@@ -95,12 +95,14 @@ fn imported(position: &str, name: &str, currency: &str, day: &str, cents: i64) -
         source_ref: String::new(),
         name: name.into(),
         currency: currency.into(),
-        observed_ms: chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+        observed_ms: jiff::tz::TimeZone::UTC
+            .to_timestamp(
+                jiff::civil::Date::strptime("%Y-%m-%d", day)
+                    .unwrap()
+                    .at(12, 0, 0, 0),
+            )
             .unwrap()
-            .and_hms_opt(12, 0, 0)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis(),
+            .as_millisecond(),
         value_date: day.into(),
         value_cents: cents,
     }
@@ -135,7 +137,7 @@ fn position_keys() {
 
 #[test]
 fn the_valuation_day_is_the_banks_unless_it_is_missing_or_ahead() {
-    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+    let today = jiff::civil::date(2026, 11, 15);
     assert_eq!(
         valuation_day("2026-11-13", today),
         ("2026-11-13".into(), false)
@@ -550,20 +552,16 @@ fn perf_of_a_real_sized_imported_history() {
     store_fetch(&v, ConnectorKind::Comdirect, c, fetch(vec![], 100)).unwrap();
     let id = depot(&v);
     // 7 years of days, 223 positions of ~500 days each and a total every day: ~114k rows
-    let start = chrono::NaiveDate::from_ymd_opt(2019, 1, 14).unwrap();
+    let start = jiff::civil::date(2019, 1, 14);
     let mut rows = Vec::new();
     for d in 0..2_550_i64 {
-        let day = (start + chrono::Duration::days(d))
-            .format("%Y-%m-%d")
-            .to_string();
+        let day = crate::dates::iso(start + crate::dates::days(d));
         rows.push(imported("", "", "EUR", &day, 1_000_000 + d));
     }
     for p in 0..223_i64 {
         let from = (p * 9) % 2_000;
         for d in from..from + 500 {
-            let day = (start + chrono::Duration::days(d))
-                .format("%Y-%m-%d")
-                .to_string();
+            let day = crate::dates::iso(start + crate::dates::days(d));
             let mut r = imported(
                 &format!("name:pos {p}"),
                 &format!("Pos {p}"),
@@ -605,7 +603,9 @@ fn perf_of_a_real_sized_imported_history() {
     let t_depot = t.elapsed();
     println!(
         "rows {n}: import {t_import:?}, rebuild {t_rebuild:?}, fetch {t_fetch:?}, positions ({}) {t_list:?}, one position ({}) {t_one:?}, depot history ({}) {t_depot:?}",
-        list.len(), h.len(), all.len()
+        list.len(),
+        h.len(),
+        all.len()
     );
 }
 
@@ -685,10 +685,7 @@ fn an_unread_balance_records_the_positions_but_no_total() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    let today = chrono::Local::now()
-        .date_naive()
-        .format("%Y-%m-%d")
-        .to_string();
+    let today = crate::dates::today_iso();
     assert_eq!(rows.len(), 3, "no second total: {rows:?}");
     assert_eq!(rows[2], ("position".into(), today, true, 120));
 }

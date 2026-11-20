@@ -9,14 +9,14 @@ final class AllAccountsRootTests: XCTestCase {
     private var model: AppModel!
 
     override func setUp() async throws {
-        UserDefaults.standard.removeObject(forKey: AppModel.allAccountsCollapsedKey)
+        AppDefaults.store.removeObject(forKey: AppModel.allAccountsCollapsedKey)
         model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
         XCTAssertEqual(model.vaultState, .open)
     }
 
     override func tearDown() async throws {
         model = nil
-        UserDefaults.standard.removeObject(forKey: AppModel.allAccountsCollapsedKey)
+        AppDefaults.store.removeObject(forKey: AppModel.allAccountsCollapsedKey)
     }
 
     private func account(_ base: Account, cents: Int64, currency: String, inTotal: Bool = true) -> Account {

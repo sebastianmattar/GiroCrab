@@ -10,14 +10,14 @@ final class RunningBalanceTests: XCTestCase {
     private var saved: Any?
 
     override func setUp() async throws {
-        saved = UserDefaults.standard.object(forKey: ViewLayout.runningBalanceKey)
-        UserDefaults.standard.set(false, forKey: ViewLayout.runningBalanceKey)
+        saved = AppDefaults.store.object(forKey: ViewLayout.runningBalanceKey)
+        AppDefaults.store.set(false, forKey: ViewLayout.runningBalanceKey)
         model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
         XCTAssertEqual(model.vaultState, .open)
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.set(saved, forKey: ViewLayout.runningBalanceKey)
+        AppDefaults.store.set(saved, forKey: ViewLayout.runningBalanceKey)
         model = nil
     }
 
@@ -34,7 +34,7 @@ final class RunningBalanceTests: XCTestCase {
         XCTAssertTrue(model.listBalances.bookings.isEmpty, "off by default")
         XCTAssertFalse(model.currentFilter.withBalances)
 
-        UserDefaults.standard.set(true, forKey: ViewLayout.runningBalanceKey)
+        AppDefaults.store.set(true, forKey: ViewLayout.runningBalanceKey)
         try await waitUntil { !model.listBalances.bookings.isEmpty }
         XCTAssertFalse(model.listBalances.days.isEmpty)
         // the newest booked row carries today's balance of the account
@@ -60,7 +60,7 @@ final class RunningBalanceTests: XCTestCase {
         let accountExport = try await model.loadExportPage(
             accountIDs: nil, period: .all, bookingIDs: nil, options: nil, withBalances: true)
         XCTAssertFalse(try XCTUnwrap(accountExport).balances.isEmpty)
-        UserDefaults.standard.set(false, forKey: ViewLayout.runningBalanceKey)
+        AppDefaults.store.set(false, forKey: ViewLayout.runningBalanceKey)
         try await waitUntil { model.listBalances.bookings.isEmpty }
         XCTAssertTrue(model.listBalances.bookings.isEmpty)
         XCTAssertTrue(model.listBalances.days.isEmpty)

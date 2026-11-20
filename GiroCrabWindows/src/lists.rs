@@ -326,10 +326,10 @@ pub fn validate_rule(
     rule.case_sensitive = form.case_sensitive;
     rule.min_amount_cents = parse_bound(&form.min_amount, "Mindestbetrag")?;
     rule.max_amount_cents = parse_bound(&form.max_amount, "Höchstbetrag")?;
-    if let (Some(lo), Some(hi)) = (rule.min_amount_cents, rule.max_amount_cents) {
-        if lo > hi {
-            return Err("Der Mindestbetrag darf nicht über dem Höchstbetrag liegen.".into());
-        }
+    if let (Some(lo), Some(hi)) = (rule.min_amount_cents, rule.max_amount_cents)
+        && lo > hi
+    {
+        return Err("Der Mindestbetrag darf nicht über dem Höchstbetrag liegen.".into());
     }
     Ok(rule)
 }

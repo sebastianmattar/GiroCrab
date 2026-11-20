@@ -2,7 +2,7 @@ pragma Singleton
 import QtQuick
 
 // AppModel+Selection.swift › focusMerchant(of:) / leaveMerchantFocus() (#495): the list of every
-// booking of one merchant in the current period – all accounts, no category, status, direction,
+// booking of one merchant in the current period – all accounts, no category, status, direction, tag,
 // scope or search filter. The merchant key covers differing counterparty spellings of one
 // merchant. AppModel.currentFilter() reads `key`; any other sidebar choice ends the list
 // (AppModel.onSidebarSelectionChanged calls `sidebarChanged`).
@@ -20,11 +20,12 @@ QtObject {
         if (!b || !b.merchant.key) return
         // A second merchant from within a merchant list still returns to the original view.
         const ret = back || { selection: AppModel.sidebarSelection, scope: AppModel.scope, status: AppModel.statusFilter,
-                              direction: AppModel.directionFilter, search: AppModel.searchText }
+                              direction: AppModel.directionFilter, search: AppModel.searchText, tags: TagFilter.snapshot() }
         // Filters first: their reloads still run on the old, cheaper selection.
         AppModel.scope = "All"
         AppModel.statusFilter = "all"
         AppModel.directionFilter = "All"
+        TagFilter.clear()
         if (AppModel.searchText !== "") { AppModel.searchText = ""; AppModel.searchTimer.stop() }
         focus = { key: b.merchant.key, name: b.merchant_name || b.merchant.name || b.counterparty }
         back = ret
@@ -41,6 +42,7 @@ QtObject {
         AppModel.scope = ret.scope
         AppModel.statusFilter = ret.status
         AppModel.directionFilter = ret.direction
+        TagFilter.restore(ret.tags)
         if (AppModel.searchText !== ret.search) AppModel.searchText = ret.search
     }
     /// The sidebar selection changed: unless set from here, the merchant list ends.

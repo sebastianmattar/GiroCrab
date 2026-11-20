@@ -2,11 +2,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::{
-    account_key, merge_deletion, pick_match, rule_target_key, rule_uuid_for_content,
-    rules_have_tags, survivor, ACCOUNT_KEY_SEP,
+    ACCOUNT_KEY_SEP, account_key, merge_deletion, pick_match, rule_target_key,
+    rule_uuid_for_content, rules_have_tags, survivor,
 };
 use crate::error::CoreResult;
 use crate::schema::has_table;

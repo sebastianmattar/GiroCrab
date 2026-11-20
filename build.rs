@@ -102,7 +102,9 @@ fn main() {
     if env::var("GIROCRAB_SKIP_SWIFT").is_ok()
         || env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos")
     {
-        println!("cargo:warning=skipping the SwiftUI app build (GIROCRAB_SKIP_SWIFT or non-macOS target)");
+        println!(
+            "cargo:warning=skipping the SwiftUI app build (GIROCRAB_SKIP_SWIFT or non-macOS target)"
+        );
         return;
     }
     // `cargo clippy --workspace` only lints: the release core build and the

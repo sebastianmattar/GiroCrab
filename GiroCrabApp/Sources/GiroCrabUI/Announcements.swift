@@ -162,7 +162,7 @@ public final class AnnouncementCenter {
     public init(
         publicKeys: [String],
         fetcher: BankingPolicyFetcher?,
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = AppDefaults.store,
         distribution: BankingDistribution = .current,
         version: String,
         now: @escaping () -> Date = Date.init,

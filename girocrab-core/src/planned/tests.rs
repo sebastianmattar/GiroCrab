@@ -100,9 +100,10 @@ fn past_orders_range_and_account_filter() {
     let r = v.list_planned_payments(None, None, vec![b]).unwrap();
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].account_id, b);
-    assert!(v
-        .list_planned_payments(Some("kaputt".into()), None, vec![])
-        .is_err());
+    assert!(
+        v.list_planned_payments(Some("kaputt".into()), None, vec![])
+            .is_err()
+    );
 }
 
 #[test]

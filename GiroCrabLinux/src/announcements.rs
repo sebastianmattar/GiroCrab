@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SUPPORTED_SCHEMA: i64 = 1;
 /// `AnnouncementCenter.defaultURL`: next to the banking policy, independent of releases.
@@ -54,10 +54,10 @@ struct RawDocument {
 /// test key (`GIROCRAB_ANNOUNCEMENTS_KEY`, Swift: `#if DEBUG`).
 fn keys() -> Vec<VerifyingKey> {
     #[cfg(debug_assertions)]
-    if let Ok(k) = std::env::var("GIROCRAB_ANNOUNCEMENTS_KEY") {
-        if !k.is_empty() {
-            return decode_keys(&[k.as_str()]);
-        }
+    if let Ok(k) = std::env::var("GIROCRAB_ANNOUNCEMENTS_KEY")
+        && !k.is_empty()
+    {
+        return decode_keys(&[k.as_str()]);
     }
     decode_keys(crate::banking_policy::PUBLIC_KEYS)
 }
@@ -72,10 +72,10 @@ fn decode_keys(list: &[&str]) -> Vec<VerifyingKey> {
 
 fn url() -> String {
     #[cfg(debug_assertions)]
-    if let Ok(u) = std::env::var("GIROCRAB_ANNOUNCEMENTS_URL") {
-        if !u.is_empty() {
-            return u;
-        }
+    if let Ok(u) = std::env::var("GIROCRAB_ANNOUNCEMENTS_URL")
+        && !u.is_empty()
+    {
+        return u;
     }
     URL.to_string()
 }
@@ -96,8 +96,12 @@ fn day_ms(s: Option<&str>, end_of_day: bool) -> Option<f64> {
     if y.len() != 4 || m.len() != 2 || d.len() != 2 {
         return None;
     }
-    let date = chrono::NaiveDate::from_ymd_opt(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)?;
-    let ms = date.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis() as f64;
+    let date = jiff::civil::Date::new(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?).ok()?;
+    let ms = date
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .ok()?
+        .timestamp()
+        .as_millisecond() as f64;
     Some(if end_of_day {
         ms + (24.0 * 3600.0 - 1.0) * 1000.0
     } else {
@@ -141,15 +145,17 @@ fn document(json: &[u8], distribution: &str, version: &str, language: &str) -> O
             }
             use std::cmp::Ordering::{Greater, Less};
             let cmp = crate::banking_policy::compare_versions;
-            if let Some(min) = &r.min_version {
-                if !version.is_empty() && cmp(version, min) == Less {
-                    return None;
-                }
+            if let Some(min) = &r.min_version
+                && !version.is_empty()
+                && cmp(version, min) == Less
+            {
+                return None;
             }
-            if let Some(max) = &r.max_version {
-                if !version.is_empty() && cmp(version, max) == Greater {
-                    return None;
-                }
+            if let Some(max) = &r.max_version
+                && !version.is_empty()
+                && cmp(version, max) == Greater
+            {
+                return None;
             }
             let empty = std::collections::BTreeMap::new();
             Some(json!({

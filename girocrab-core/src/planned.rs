@@ -4,9 +4,10 @@
 //! to [`Vault::list_planned_payments`]. Only real orders appear here, never
 //! guesses from the booking history (`recurring.rs`).
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::connectors::TransferJob;
+use crate::dates::today_iso as today;
 use crate::error::{CoreError, CoreResult};
 use crate::schema::{has_column, has_table};
 use crate::vault::Vault;
@@ -100,10 +101,6 @@ fn prune_old(db: &Connection) -> CoreResult<()> {
     Ok(())
 }
 
-fn today() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
-}
-
 impl Vault {
     /// Remembers a scheduled transfer the bank accepted.
     pub(crate) fn record_planned_transfer(
@@ -169,11 +166,9 @@ impl Vault {
 }
 
 fn check_date(label: &str, d: &str) -> CoreResult<()> {
-    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+    jiff::civil::Date::strptime("%Y-%m-%d", d)
         .map(|_| ())
-        .map_err(|_| CoreError::InvalidInput {
-            message: format!("{label}: {d}"),
-        })
+        .map_err(|_| CoreError::invalid(format!("{label}: {d}")))
 }
 
 #[uniffi::export]
@@ -232,7 +227,7 @@ impl Vault {
             }
         }
         // Standing orders: the executions in the same period.
-        let parse = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
+        let parse = |s: &str| jiff::civil::Date::strptime("%Y-%m-%d", s).ok();
         if let Some(f) = parse(&from) {
             let t = to.as_deref().and_then(parse);
             out.extend(crate::standing_orders::planned_executions(
@@ -300,7 +295,7 @@ impl Vault {
         };
         // Standing orders only exist as computed executions (few orders, no row load of
         // the transfers needed).
-        let parse = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
+        let parse = |s: &str| jiff::civil::Date::strptime("%Y-%m-%d", s).ok();
         if let Some(f) = parse(&from) {
             let end = to.as_deref().and_then(parse);
             for p in crate::standing_orders::planned_executions(&db, f, end, &account_ids)? {

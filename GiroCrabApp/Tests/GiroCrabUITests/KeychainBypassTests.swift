@@ -10,12 +10,12 @@ final class KeychainBypassTests: XCTestCase {
     override func setUp() {
         super.setUp()
         for n in names { unsetenv(n) }
-        UserDefaults.standard.removeObject(forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.removeObject(forKey: VaultKeyManager.requireBiometricsDefaultsKey)
     }
 
     override func tearDown() {
         for n in names { unsetenv(n) }
-        UserDefaults.standard.removeObject(forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.removeObject(forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         super.tearDown()
     }
 
@@ -39,9 +39,9 @@ final class KeychainBypassTests: XCTestCase {
         setenv("GIROCRAB_NO_KEYCHAIN", "1", 1)
         #if os(macOS)
         XCTAssertTrue(VaultKeyManager.biometricsPromptInBypass)
-        UserDefaults.standard.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         XCTAssertFalse(VaultKeyManager.biometricsPromptInBypass)
-        UserDefaults.standard.set(true, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.set(true, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         #endif
         setenv("GIROCRAB_DEMO_SEED", "1", 1)
         XCTAssertFalse(VaultKeyManager.biometricsPromptInBypass)
@@ -62,7 +62,7 @@ final class KeychainBypassTests: XCTestCase {
     func testBypassSetRequireBiometricsOnlyChangesPreference() async throws {
         setenv("GIROCRAB_NO_KEYCHAIN", "1", 1)
         try await VaultKeyManager.shared.setRequireBiometrics(false)
-        XCTAssertEqual(UserDefaults.standard.object(forKey: VaultKeyManager.requireBiometricsDefaultsKey) as? Bool, false)
+        XCTAssertEqual(AppDefaults.store.object(forKey: VaultKeyManager.requireBiometricsDefaultsKey) as? Bool, false)
     }
 
     func testBypassUnlockReturnsThrowAwayKeyWithoutKeychain() async throws {
@@ -76,14 +76,14 @@ final class KeychainBypassTests: XCTestCase {
     #if os(macOS)
     func testRequireBiometricsDefaultsToTrueAndFollowsPreference() {
         XCTAssertTrue(VaultKeyManager.shared.requireBiometrics)
-        UserDefaults.standard.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         XCTAssertFalse(VaultKeyManager.shared.requireBiometrics)
-        UserDefaults.standard.set(true, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.set(true, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         XCTAssertTrue(VaultKeyManager.shared.requireBiometrics)
     }
     #else
     func testRequireBiometricsIsAlwaysTrueOnIOS() {
-        UserDefaults.standard.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
+        AppDefaults.store.set(false, forKey: VaultKeyManager.requireBiometricsDefaultsKey)
         XCTAssertTrue(VaultKeyManager.shared.requireBiometrics)
     }
     #endif

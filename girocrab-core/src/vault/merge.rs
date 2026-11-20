@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use zeroize::Zeroizing;
 
 use super::Vault;
@@ -43,7 +43,7 @@ impl Vault {
         let conn_map = crate::sync_merge::merge_connections(&tx)?;
         let (acc_map, acc_inserted) =
             crate::sync_merge::merge_accounts(&tx, &conn_map, &group_map, &mut st)?;
-        // user groups, account placements and names (newest edit wins)
+        // user groups and account fields (newest edit wins)
         st.groups_updated = crate::user_groups::merge_attached(&tx, &acc_map, &acc_inserted)?;
 
         // categories and rules (newest edit wins, deletions stay deleted)
@@ -66,6 +66,7 @@ impl Vault {
         crate::asset_classification::store::merge_attached(&tx)?;
         crate::mandates::merge_attached(&tx, &acc_map)?;
         crate::mandates::merge_ack(&tx, &acc_map)?;
+        crate::recipients::merge_attached(&tx)?;
         tx.commit()?;
         Ok(st)
     }
@@ -80,7 +81,8 @@ pub struct MergeStats {
     pub rules_added: u32,
     pub bookings_added: u32,
     pub bookings_updated: u32,
-    /// User groups and account placements taken over from the other vault.
+    /// User groups and account fields taken over from the other vault (rows
+    /// changed by `user_groups::merge_attached`).
     pub groups_updated: u32,
     /// Rows this merge changed in the vault (part of [`Vault::change_count`]),
     /// so the app can tell its own changes from merged ones.
@@ -92,7 +94,7 @@ impl Vault {
     /// Merges another device's sync snapshot using this vault's own key
     /// (see [`merge_other_vault`](Self::merge_other_vault)).
     pub fn merge_peer_snapshot(&self, other_path: String) -> Result<MergeStats, CoreError> {
-        let key = self.kept_key()?.to_vec();
+        let key = self.kept_key().to_vec();
         self.merge_other_vault(other_path, key)
     }
 
@@ -120,8 +122,13 @@ impl Vault {
             Self::apply_key(&o, &key)?;
             let has_uuid =
                 crate::schema::has_column(&o, "main", "categories", "uuid").unwrap_or(true);
+            let has_notes =
+                crate::schema::has_column(&o, "main", "accounts", "note").unwrap_or(true);
             Self::migrate(&mut o)?;
             crate::sync_merge::fill_missing_uuids(&o)?;
+            if !has_notes {
+                crate::user_groups::mark_old_build_notes(&o)?;
+            }
             !has_uuid
         };
         let conn = self.db()?;
@@ -138,6 +145,8 @@ impl Vault {
         let res = res.and_then(|st| {
             detach_res?;
             let _ = crate::sync_merge::twins::fold_twins(&conn);
+            // … and card holds an older build turned into bookings on a switch (#1134)
+            let _ = super::connections::drop_switched_holds(&conn);
             Ok(st)
         });
         // Fold WAL frames into the main file so a plain file copy is complete.

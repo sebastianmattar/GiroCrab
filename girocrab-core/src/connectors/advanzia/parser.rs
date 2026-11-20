@@ -80,7 +80,7 @@ fn parse(raw: &str) -> CoreResult<Vec<Entry>> {
             .as_str()
             .and_then(|s| s.get(..10))
             .ok_or_else(|| invalid("Ungültiges Buchungsdatum."))?;
-        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        jiff::civil::Date::strptime("%Y-%m-%d", date)
             .map_err(|_| invalid("Ungültiges Buchungsdatum."))?;
         let text = |key: &str| v[key].as_str().map(str::trim).filter(|s| !s.is_empty());
         let name = text("merchantName")

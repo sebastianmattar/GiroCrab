@@ -47,7 +47,7 @@ extension AppModel {
                 try vault.setSetting(key: "enablebanking.application_id", value: app.applicationID)
                 try vault.setSetting(key: "enablebanking.private_key_pem", value: app.pem)
                 reloadSettings()
-                if !UserDefaults.standard.bool(forKey: EnableBankingKeySync.noticeSuppressedKey) {
+                if !AppDefaults.store.bool(forKey: EnableBankingKeySync.noticeSuppressedKey) {
                     // logins with their own application (#824) keep it
                     let own = Set(((try? vault.listConnectionEnableBankingApps()) ?? []).map(\.connectionId))
                     let banks = connections.filter { $0.connector == .enableBanking && !own.contains($0.id) }.map(\.displayName)

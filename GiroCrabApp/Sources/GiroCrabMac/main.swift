@@ -84,9 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var windowObservers: [NSObjectProtocol] = []
 
-    /// With the menu bar item on (GitHub #546) and every window closed, only the
-    /// crab in the menu bar stays: no Dock icon (accessory app). The first window
-    /// that opens again brings the Dock icon back.
+    /// With only the menu bar item enabled (GitHub #546), hide the Dock icon
+    /// while every window is closed.
     private func observeWindowsForDockPresence() {
         let center = NotificationCenter.default
         for name in [NSWindow.willCloseNotification, NSWindow.didBecomeKeyNotification, NSWindow.didMiniaturizeNotification] {
@@ -101,16 +100,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateDockPresence() {
         // titled = real windows (main, settings, help); the popover and status item are not
         let hasWindow = NSApp.windows.contains { $0.styleMask.contains(.titled) && ($0.isVisible || $0.isMiniaturized) }
-        let target: NSApplication.ActivationPolicy = (MenuBarKeepAlive.isEnabled && !hasWindow) ? .accessory : .regular
+        let menuBarOnly = MenuBarKeepAlive.isEnabled && !DockKeepAlive.isEnabled && !hasWindow
+        let target: NSApplication.ActivationPolicy = menuBarOnly ? .accessory : .regular
         guard NSApp.activationPolicy() != target else { return }
         NSApp.setActivationPolicy(target)
         if target == .regular { NSApp.activate(ignoringOtherApps: true) }
     }
 
-    /// Closing the window quits the app, unless the menu bar item is on: it stays
-    /// (GitHub #546), and "GiroCrab öffnen" in its popover or the Dock icon bring the window back.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        !MenuBarKeepAlive.isEnabled
+        !DockKeepAlive.isEnabled && !MenuBarKeepAlive.isEnabled
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard DockKeepAlive.isEnabled, !flag, !NSApp.windows.contains(where: { $0.isMiniaturized }) else { return true }
+        MenuBarActions.showMain()
+        return false
     }
 }
 

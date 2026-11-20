@@ -1190,7 +1190,8 @@ export component MainWindow inherits Window {
                 padding-left: 14px;
                 padding-right: 14px;
                 spacing: 12px;
-                Text { text: "Demo-Daten – diese Buchungen sind frei erfunden."; color: Theme.warning-text; vertical-alignment: center; horizontal-stretch: 1; }
+                // #952: the demo vault is rebuilt on every start (open_vault).
+                Text { text: "Demo-Daten – diese Buchungen sind frei erfunden. Änderungen werden beim Beenden zurückgesetzt."; color: Theme.warning-text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                 Button {
                     height: 24px; y: 3px;
                     text: root.has-own-vault ? "Zurück zum eigenen Tresor" : "Eigenes Konto anlegen";

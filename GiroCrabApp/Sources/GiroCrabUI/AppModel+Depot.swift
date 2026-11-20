@@ -10,9 +10,9 @@ extension AppModel {
         return isTangible(accountId) ? .tangible : .securities
     }
 
-    /// How the sidebar selection is presented: bookings, a securities depot or a Sachwerte account.
+    /// How the shown selection is presented: bookings, a securities depot or a Sachwerte account.
     var presentation: AccountPresentation {
-        guard case .account(let id)? = sidebarSelection else { return .bookings }
+        guard case .account(let id)? = shownSelection else { return .bookings }
         switch depotKind(of: id) {
         case .securities: return .securities(id)
         case .tangible: return .tangible(id)

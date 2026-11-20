@@ -10,7 +10,7 @@
 //! old pair as its own ([`pin_default_app`]), whichever front end or path
 //! (settings form, key file, iCloud Keychain) writes the new one.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
@@ -99,10 +99,9 @@ pub(crate) fn any_app(db: &Connection) -> CoreResult<Option<(String, String)>> {
             "SELECT CAST(substr(key, length(?1) + 2) AS INTEGER) FROM settings
               WHERE substr(key, 1, length(?1) + 1) = ?1 || '.' ORDER BY key",
         )?;
-        let rows = st
-            .query_map([APP_ID_KEY], |r| r.get(0))?
-            .collect::<Result<_, _>>()?;
-        rows
+
+        st.query_map([APP_ID_KEY], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
     };
     for id in ids {
         if let Some(p) = own_pair(db, id)? {
@@ -135,10 +134,9 @@ pub(crate) fn pin_default_app(db: &Connection) -> CoreResult<u32> {
     let logins: Vec<(i64, String)> = {
         let mut st =
             db.prepare("SELECT id, connector FROM bank_connections WHERE deleted_ms IS NULL")?;
-        let rows = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<Result<_, _>>()?;
-        rows
+
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?
     };
     let mut pinned = 0;
     for (conn_id, connector) in logins {
@@ -180,13 +178,13 @@ pub(crate) fn forget(db: &Connection, connection_id: i64) -> CoreResult<()> {
 /// Duplicate login `from` is merged into `keep`: `keep` takes over `from`'s
 /// own application unless it has one, then `from`'s is removed.
 pub(crate) fn merge_into(db: &Connection, keep: i64, from: i64) -> CoreResult<()> {
-    if own_pair(db, keep)?.is_none() {
-        if let Some((id, pem)) = own_pair(db, from)? {
-            let pem = Zeroizing::new(pem);
-            let [id_key, pem_key] = own_keys(keep);
-            Vault::set_setting_inner(db, &id_key, &id)?;
-            Vault::set_setting_inner(db, &pem_key, &pem)?;
-        }
+    if own_pair(db, keep)?.is_none()
+        && let Some((id, pem)) = own_pair(db, from)?
+    {
+        let pem = Zeroizing::new(pem);
+        let [id_key, pem_key] = own_keys(keep);
+        Vault::set_setting_inner(db, &id_key, &id)?;
+        Vault::set_setting_inner(db, &pem_key, &pem)?;
     }
     forget(db, from)
 }
@@ -242,8 +240,8 @@ impl Vault {
         let ids: Vec<i64> = {
             let mut st =
                 db.prepare("SELECT id FROM bank_connections WHERE deleted_ms IS NULL ORDER BY id")?;
-            let rows = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
-            rows
+
+            st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
         };
         let mut out = Vec::new();
         for id in ids {
@@ -274,12 +272,9 @@ impl Vault {
         let application_id = application_id.trim();
         let pem = private_key_pem.trim();
         if application_id.is_empty() != pem.is_empty() {
-            return Err(CoreError::InvalidInput {
-                message: tr(
-                    "Application-ID und privater Schlüssel gehören zusammen: bitte beide angeben.",
-                )
-                .into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Application-ID und privater Schlüssel gehören zusammen: bitte beide angeben.",
+            )));
         }
         if !pem.is_empty() {
             // a key that cannot sign must not replace one that can

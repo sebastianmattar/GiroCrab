@@ -24,10 +24,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use jiff::civil::Date;
+use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::dates::{iso, now_ms, parse_iso};
+use crate::dates::{iso, now_ms, parse_iso, today};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::models::*;
@@ -269,10 +269,6 @@ pub struct AssetPriceRefresh {
     pub error: Option<String>,
 }
 
-fn today() -> NaiveDate {
-    chrono::Local::now().date_naive()
-}
-
 fn is_manual(source: &str) -> bool {
     source == MANUAL_SOURCE
 }
@@ -316,7 +312,7 @@ fn validate(s: &AssetItemSetup) -> CoreResult<AssetItemSetup> {
             _ => {
                 return Err(CoreError::invalid(tr(
                     "Bitte den Wert zum Kaufdatum angeben.",
-                )))
+                )));
             }
         }
         s.weight_grams = 0.0;
@@ -414,15 +410,14 @@ fn manual_value_at(
         return None;
     }
     let (d0, v0) = &points[i - 1];
-    if interp == AssetInterpolation::Linear {
-        if let Some((d1, v1)) = points.get(i) {
-            if let (Some(a), Some(b), Some(x)) = (parse_iso(d0), parse_iso(d1), parse_iso(day)) {
-                let span = (b - a).num_days() as f64;
-                if span > 0.0 {
-                    let t = (x - a).num_days() as f64 / span;
-                    return Some((*v0 as f64 + (*v1 - *v0) as f64 * t, day.to_string()));
-                }
-            }
+    if interp == AssetInterpolation::Linear
+        && let Some((d1, v1)) = points.get(i)
+        && let (Some(a), Some(b), Some(x)) = (parse_iso(d0), parse_iso(d1), parse_iso(day))
+    {
+        let span = crate::dates::days_between(a, b) as f64;
+        if span > 0.0 {
+            let t = crate::dates::days_between(a, x) as f64 / span;
+            return Some((*v0 as f64 + (*v1 - *v0) as f64 * t, day.to_string()));
         }
     }
     Some((*v0 as f64, d0.clone()))
@@ -616,9 +611,12 @@ fn to_item(
 
 // ------------------------------------------------------------------ accounts
 
+/// A Sachwerte account whose kind the user changed (e.g. to cash) is an
+/// ordinary account afterwards: its balance comes from its bookings and
+/// opening balance, not from asset items.
 pub(crate) fn tangible_account_ids(conn: &Connection) -> CoreResult<Vec<i64>> {
     let mut st = conn.prepare(
-        "SELECT id FROM accounts WHERE connection_id IS NULL AND external_ref LIKE 'tangible-%' AND deleted_ms IS NULL ORDER BY id",
+        "SELECT id FROM accounts WHERE connection_id IS NULL AND external_ref LIKE 'tangible-%' AND kind = 'brokerage' AND deleted_ms IS NULL ORDER BY id",
     )?;
     let rows = st.query_map([], |r| r.get(0))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -627,7 +625,7 @@ pub(crate) fn tangible_account_ids(conn: &Connection) -> CoreResult<Vec<i64>> {
 pub(crate) fn is_tangible(conn: &Connection, account_id: i64) -> CoreResult<bool> {
     Ok(conn
         .query_row(
-            "SELECT 1 FROM accounts WHERE id = ?1 AND connection_id IS NULL AND external_ref LIKE 'tangible-%' AND deleted_ms IS NULL",
+            "SELECT 1 FROM accounts WHERE id = ?1 AND connection_id IS NULL AND external_ref LIKE 'tangible-%' AND kind = 'brokerage' AND deleted_ms IS NULL",
             [account_id],
             |_| Ok(()),
         )
@@ -686,7 +684,7 @@ pub(crate) fn refresh_balances(conn: &Connection) -> CoreResult<()> {
 /// move with the date (linear values, newer prices), not only with edits.
 pub(crate) fn refresh_balances_if_stale(conn: &Connection) -> CoreResult<()> {
     let stale: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM accounts WHERE connection_id IS NULL AND external_ref LIKE 'tangible-%'
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE connection_id IS NULL AND external_ref LIKE 'tangible-%' AND kind = 'brokerage'
                          AND deleted_ms IS NULL AND IFNULL(balance_date, '') != ?1)",
         [iso(today())],
         |r| r.get(0),
@@ -721,8 +719,8 @@ pub(crate) fn holdings(conn: &Connection, account_id: i64) -> CoreResult<Vec<Hol
 pub(crate) fn value_series(
     conn: &Connection,
     account_ids: &[i64],
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
 ) -> CoreResult<Option<Vec<i64>>> {
     let tangible: HashSet<i64> = tangible_account_ids(conn)?.into_iter().collect();
     let wanted: HashSet<i64> = account_ids
@@ -743,7 +741,8 @@ pub(crate) fn value_series(
     while day <= end {
         let key = iso(day);
         out.push(items.iter().map(|i| i.value_at(&key, &prices)).sum());
-        day += chrono::Duration::days(1);
+        let Ok(next) = day.tomorrow() else { break };
+        day = next;
     }
     Ok(Some(out))
 }
@@ -794,7 +793,9 @@ fn store_item(
                 |r| r.get(0),
             )?;
             if later_before > 0 {
-                return Err(CoreError::invalid(tr("Vor dem neuen Kaufdatum liegen noch Bestands- oder Wertänderungen. Bitte diese zuerst entfernen.")));
+                return Err(CoreError::invalid(tr(
+                    "Vor dem neuen Kaufdatum liegen noch Bestands- oder Wertänderungen. Bitte diese zuerst entfernen.",
+                )));
             }
             if !is_manual(&s.price_source) {
                 let values: i64 = conn.query_row(
@@ -803,7 +804,9 @@ fn store_item(
                     |r| r.get(0),
                 )?;
                 if values > 1 {
-                    return Err(CoreError::invalid(tr("Der Sachwert hat eingetragene Werte. Bitte diese zuerst entfernen, bevor er über den Kurs bewertet wird.")));
+                    return Err(CoreError::invalid(tr(
+                        "Der Sachwert hat eingetragene Werte. Bitte diese zuerst entfernen, bevor er über den Kurs bewertet wird.",
+                    )));
                 }
             }
             conn.execute(
@@ -1037,9 +1040,8 @@ struct RateRow {
 
 /// Parses a Frankfurter answer into (date, cents per unit).
 fn parse_rates(body: &str) -> CoreResult<Vec<(String, i64)>> {
-    let rows: Vec<RateRow> = serde_json::from_str(body).map_err(|e| CoreError::Protocol {
-        message: trf("Unerwartete Antwort der Kurs-API: {0}", &[&e]),
-    })?;
+    let rows: Vec<RateRow> = serde_json::from_str(body)
+        .map_err(|e| CoreError::protocol(trf("Unerwartete Antwort der Kurs-API: {0}", &[&e])))?;
     Ok(rows
         .into_iter()
         .filter(|r| r.rate.is_finite() && r.rate > 0.0 && parse_iso(&r.date).is_some())
@@ -1077,7 +1079,7 @@ fn fetch_plan(conn: &Connection, force: bool) -> CoreResult<Vec<(String, String,
     for (symbol, oldest) in needed {
         // a week before the oldest purchase: a weekend or holiday has no rate of its own
         let min_date = parse_iso(&oldest)
-            .map(|d| iso(d - chrono::Duration::days(7)))
+            .map(|d| iso(d - crate::dates::days(7)))
             .unwrap_or(oldest);
         if !PRICE_SYMBOLS.contains(&symbol.as_str()) {
             continue;
@@ -1421,7 +1423,8 @@ impl Vault {
                 balance_cents: item.value_at(&key, &prices),
                 date: key,
             });
-            day += chrono::Duration::days(1);
+            let Ok(next) = day.tomorrow() else { break };
+            day = next;
         }
         Ok(out)
     }
@@ -1489,8 +1492,8 @@ impl Vault {
 /// with the real prices from the API like in a real vault (offline the gold
 /// items show a missing price); house and car carry their own values,
 /// roughly following the market. Returns the account id.
-pub(crate) fn seed_demo(conn: &Connection, today: NaiveDate) -> CoreResult<i64> {
-    let day = |ago: i64| iso(today - chrono::Duration::days(ago));
+pub(crate) fn seed_demo(conn: &Connection, today: Date) -> CoreResult<i64> {
+    let day = |ago: i64| iso(today - crate::dates::days(ago));
     let acc = create_account_in(conn, "Sachwerte")?;
     let values = |item: i64, points: &[(i64, i64)]| -> CoreResult<()> {
         for &(ago, cents) in points {

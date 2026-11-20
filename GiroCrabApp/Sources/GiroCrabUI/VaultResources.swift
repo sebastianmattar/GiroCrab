@@ -38,7 +38,7 @@ struct VaultResources {
             clearSettings: {
                 CloudSyncManager.shared.resetForAppReset()
                 if let id = Bundle.main.bundleIdentifier {
-                    UserDefaults.standard.removePersistentDomain(forName: id)
+                    AppDefaults.store.removePersistentDomain(forName: id)
                 }
             },
             clearKeychainItems: {

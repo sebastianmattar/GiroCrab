@@ -54,12 +54,12 @@ Card {
                 }
                 // BalanceHeaderView.swift: the account note (AccountEditSheet, #605)
                 Text {
-                    readonly property string note: card.account ? SidebarModel.accountNote(card.account.id) : ""
+                    readonly property string note: card.account ? (card.account.note || "") : ""
                     visible: note !== "" && !card.compact
                     text: note; font.pixelSize: Theme.caption; color: Theme.secondary
                     wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight; Layout.fillWidth: true
                     HoverHandler { id: noteHover }
-                    ToolTip.visible: noteHover.hovered && truncated; ToolTip.delay: 600; ToolTip.text: note
+                    ToolTip.visible: noteHover.hovered && truncated; ToolTip.delay: 600; ToolTip.text: AppModel.masking(note)
                     Sensitive {}
                 }
                 // AccountCopyMenu on the title
@@ -112,7 +112,7 @@ Card {
                     text: card.balance ? Fmt.money(card.balance.cents) : ""
                     font.pixelSize: card.compact ? Theme.title3 + 3 : Theme.largeTitle + 4; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                     color: card.account && card.account.kind === "Loan" ? Theme.loan : Theme.text
-                    Sensitive {}
+                    Sensitive { amounts: true }
                 }
                 Text { visible: !card.compact; Layout.alignment: Qt.AlignRight; text: card.balance ? card.balance.label : ""; font.pixelSize: Theme.caption; color: Theme.secondary }
             }
@@ -222,6 +222,16 @@ Card {
                     }
                 }
             }
+            // TagFilterUI.swift › TagFilterButton (#228, part 3): the popover anchors on the button
+            MenuLabel {
+                id: tagFilterButton
+                visible: TagFilter.available
+                symbol: TagFilter.isActive ? "tag.fill" : "tag"; text: TagFilter.title; chevron: false
+                tint: TagFilter.isActive ? Theme.accent : Theme.text
+                onClicked: TagFilter.shown = !TagFilter.shown
+                ToolTip.visible: hovered && !TagFilter.shown; ToolTip.delay: 600; ToolTip.text: qsTr("Nach Tags filtern")
+                TagFilterPopover { wanted: TagFilter.shown && tagFilterButton.visible }
+            }
             // Category views: only the bookings of the chosen accounts (GitHub #406).
             MenuLabel {
                 visible: AppModel.showsCategoryAccountFilter && AppModel.allAccounts.length > 1
@@ -282,16 +292,30 @@ Card {
         property string symbol
         property string text
         property bool chevron: true
+        property color tint: Theme.text
         readonly property bool hovered: mlArea.containsMouse
         signal clicked()
         implicitWidth: r.implicitWidth; implicitHeight: 22
+        // keyboard: Tab reaches it, Space / Return opens it
+        activeFocusOnTab: true
+        Keys.onSpacePressed: ml.clicked()
+        Keys.onReturnPressed: ml.clicked()
+        Keys.onEnterPressed: ml.clicked()
+        Accessible.role: Accessible.Button
+        Accessible.name: ml.text
+        Accessible.onPressAction: ml.clicked()
+        Rectangle {
+            visible: ml.activeFocus
+            anchors.fill: parent; anchors.margins: -3
+            radius: 5; color: "transparent"; border.width: 2; border.color: Theme.accent
+        }
         RowLayout {
             id: r
             anchors.verticalCenter: parent.verticalCenter
             spacing: 5
-            SFIcon { symbol: ml.symbol; size: 14; color: Theme.text }
-            Text { text: ml.text; font.pixelSize: Theme.body; color: Theme.text }
-            SFIcon { visible: ml.chevron; symbol: "chevron.down"; size: 9; color: Theme.text }
+            SFIcon { symbol: ml.symbol; size: 14; color: ml.tint }
+            Text { text: ml.text; font.pixelSize: Theme.body; color: ml.tint }
+            SFIcon { visible: ml.chevron; symbol: "chevron.down"; size: 9; color: ml.tint }
         }
         MouseArea { id: mlArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ml.clicked() }
     }

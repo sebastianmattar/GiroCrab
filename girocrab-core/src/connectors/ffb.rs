@@ -15,6 +15,9 @@
 //!                                                -> invested capital per position (best effort)
 //!  GET  /api/kundenansicht/transaktion/query/?datumVon=…&datumBis=…
 //!                                                -> table `#view`, 20 orders per page, link "Nächste"
+//!  GET  /api/kundenansicht/postfach/overview, …/postfach/query?datumVon=…&datumBis=…
+//!                                                -> table `#view`, 50 documents per page, link "Nächste"
+//!  GET  /api/kundenansicht/postfach/document/<id> -> the PDF
 //!  GET  /action/logout                           -> best effort
 //!
 //! The session id travels in the URL (`;jsessionid=…`), like the site's own
@@ -31,13 +34,15 @@ use async_trait::async_trait;
 use regex::Regex;
 use zeroize::Zeroize;
 
-use super::uberspace::{
-    attr, attrs, element_by_id, parse_date, table_cells, text, FORM, INPUT, LINK,
+use super::html::{
+    FORM, INPUT, LINK, attr, attrs, de_date, element_by_id, parse_date, table_cells, table_texts,
+    text,
 };
 use super::{
-    http_client, BankConnector, ChallengeResponse, ConnectContext, FetchResult, Phase,
-    RemoteAccount, RemoteHolding, RemoteSecurityTransaction,
+    BankConnector, ChallengeResponse, ConnectContext, Documents, FetchResult, KnownDocuments,
+    Phase, RemoteAccount, RemoteHolding, RemoteSecurityTransaction, http_client_same_host,
 };
+use crate::documents::RemoteDocument;
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;
 use crate::models::{AccountKind, Holding, SecurityDirection, SecurityTransaction};
@@ -50,7 +55,13 @@ pub(crate) const REF_PREFIX: &str = "ffb:";
 const MAX_PAGES: usize = 500;
 /// Earliest start the depot development pages accept.
 const DEVELOPMENT_START: &str = "01.01.2009";
+/// Start of the document search ("Gesamt" in the Postfach date picker).
+const POSTFACH_START: &str = "01.01.2000";
+/// PDFs per run; the rest follows with the next fetch.
+const MAX_DOCUMENT_DOWNLOADS: usize = 200;
 
+static DOCUMENT_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/api/kundenansicht/postfach/document/(\d+)").unwrap());
 static ROW: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<tr\b([^>]*)>(.*?)</tr\s*>").unwrap());
 static SESSION: LazyLock<Regex> =
@@ -68,28 +79,23 @@ static TITLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)\btitle\s*=\s*"([^"]*)""#).unwrap());
 static DETAIL_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"showDetailsModal\(\s*(\d+)\s*\)").unwrap());
-/// `fonwknext=847160&depktoart=DE&depunterkto=0` in a position link.
+/// `fonwknext=A0TEST&depktoart=DE&depunterkto=0` in a position link.
 static POSITION_LINK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"fonwknext=([A-Z0-9]+)&(?:amp;)?depktoart=([A-Z]+)&(?:amp;)?depunterkto=(\d+)")
         .unwrap()
 });
-/// `'<depot>-DE-0-847160'` in the development page.
+/// `'<depot>-DE-0-A0TEST'` in the development page.
 static POSITION_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"SinglePosition\(\s*'\d+-([A-Z]+)-(\d+)-([A-Z0-9]+)'").unwrap());
 
 fn page_changed() -> CoreError {
-    CoreError::Protocol {
-        message: tr("FFB: Anmeldeseite nicht erkannt (Webseite geändert?).").into(),
-    }
+    CoreError::protocol(tr("FFB: Anmeldeseite nicht erkannt (Webseite geändert?)."))
 }
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput {
-        message: tr(
-            "FFB: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.",
-        )
-        .into(),
-    }
+    CoreError::invalid(tr(
+        "FFB: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.",
+    ))
 }
 
 fn wrong_credentials() -> CoreError {
@@ -116,10 +122,9 @@ fn ensure_ffb(url: &url::Url) -> CoreResult<()> {
     if url.scheme() == "https" && url.host_str() == Some(HOST) {
         return Ok(());
     }
-    Err(CoreError::Protocol {
-        message: tr("FFB: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.")
-            .into(),
-    })
+    Err(CoreError::protocol(tr(
+        "FFB: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
+    )))
 }
 
 // ------------------------------------------------------------------ parsing helpers
@@ -162,12 +167,6 @@ fn eur_and_native(s: &str) -> (Option<i64>, Option<(i64, String)>) {
     let eur = all.iter().find(|(_, c)| c == "EUR").map(|(v, _)| *v);
     let native = all.into_iter().find(|(_, c)| c != "EUR");
     (eur, native)
-}
-
-/// `YYYY-MM-DD` → `DD.MM.YYYY` (the site's date format).
-fn site_date(iso: &str) -> Option<String> {
-    let d = chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").ok()?;
-    Some(d.format("%d.%m.%Y").to_string())
 }
 
 /// Session id from a URL or page (`;jsessionid=…`).
@@ -410,13 +409,7 @@ fn parse_transactions(
         .map(|r| {
             let row = r.get(0).map_or("", |m| m.as_str());
             let a = attrs(&r[1]);
-            let cells: Vec<String> = table_cells(row)
-                .into_iter()
-                .next()
-                .unwrap_or_default()
-                .into_iter()
-                .map(text)
-                .collect();
+            let cells = table_texts(row).into_iter().next().unwrap_or_default();
             let class = attr(&a, "class").unwrap_or("").to_string();
             let order = attr(&a, "name")
                 .or_else(|| attr(&a, "id"))
@@ -506,6 +499,61 @@ fn parse_transactions(
     Ok((out, next_page(html)))
 }
 
+// ------------------------------------------------------------------ Postfach
+
+#[derive(Debug, Clone, PartialEq)]
+struct PostfachRow {
+    id: String,
+    date: String,
+    category: String,
+    kind: String,
+}
+
+/// Rows of the Postfach result table: read mark, date, category, document
+/// type, WKNs, PDF link, postage order.
+fn parse_postfach(html: &str) -> Vec<PostfachRow> {
+    let Some(table) = element_by_id(html, "view") else {
+        return Vec::new();
+    };
+    ROW.captures_iter(table)
+        .filter_map(|r| {
+            let row = r.get(0)?.as_str();
+            let id = DOCUMENT_ID.captures(row)?[1].to_string();
+            let cells = table_cells(row).into_iter().next()?;
+            if cells.len() < 6 {
+                return None;
+            }
+            Some(PostfachRow {
+                id,
+                date: parse_date(&text(cells[1]))?,
+                category: text(cells[2]),
+                kind: text(cells[3]),
+            })
+        })
+        .collect()
+}
+
+fn document_type(row: &PostfachRow) -> &'static str {
+    let kind = row.kind.to_lowercase();
+    if row.category == "Steuerunterlagen" || kind.contains("steuer") {
+        "steuer"
+    } else if kind.contains("auszug") || kind.contains("auszuege") {
+        "kontoauszug"
+    } else {
+        "postbox"
+    }
+}
+
+/// `YYYY-MM-DD_<type>_<id>.pdf`, without path separators.
+fn document_file_name(row: &PostfachRow) -> String {
+    let kind: String = row
+        .kind
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("{}_{}_{}.pdf", row.date, kind, row.id)
+}
+
 // ------------------------------------------------------------------ connector
 
 #[derive(Default)]
@@ -554,6 +602,77 @@ impl FfbConnector {
         self.get(&self.url(path, query)).await
     }
 
+    /// One Postfach PDF; `None` when the bank answers with anything else.
+    async fn download(&self, id: &str) -> CoreResult<Option<Vec<u8>>> {
+        let client = self.client.as_ref().ok_or(CoreError::SessionClosed)?;
+        let path = format!("/api/kundenansicht/postfach/document/{id}");
+        let target = url::Url::parse(&self.url(&path, &[])).map_err(|_| invalid())?;
+        ensure_ffb(&target)?;
+        let resp = client.get(target).send().await?;
+        ensure_ffb(resp.url())?;
+        let status = resp.status();
+        let body = super::read_body_limited(resp, super::MAX_DOC_BYTES).await?;
+        if !status.is_success() {
+            return Err(rejected(status));
+        }
+        Ok(body.starts_with(b"%PDF").then_some(body))
+    }
+
+    /// Postfach PDFs not in `known`, newest first. A failed download ends the
+    /// run; what was loaded until then is kept and the rest follows next time.
+    async fn documents(
+        &self,
+        depot_ref: &str,
+        today: &str,
+        known: &mut KnownDocuments,
+    ) -> CoreResult<Vec<RemoteDocument>> {
+        self.page("/api/kundenansicht/postfach/overview", &[])
+            .await?;
+        let end = de_date(today).unwrap_or_default();
+        let mut next = Some(self.url(
+            "/api/kundenansicht/postfach/query",
+            &[
+                ("datumVon", POSTFACH_START),
+                ("datumBis", end.as_str()),
+                ("applicationCategory", "UNDEFINED"),
+                ("wkn", ""),
+            ],
+        ));
+        let mut rows = Vec::new();
+        let mut pages = 0;
+        while let Some(url) = next.take() {
+            let html = self.get(&url).await?;
+            rows.extend(parse_postfach(&html));
+            pages += 1;
+            if pages < MAX_PAGES {
+                next = next_page(&html).map(|href| format!("{BASE}{href}"));
+            }
+        }
+        rows.retain(|r| !known.contains(&r.id));
+        rows.truncate(MAX_DOCUMENT_DOWNLOADS);
+        let mut out = Vec::new();
+        for row in rows {
+            let bytes = match self.download(&row.id).await {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => continue,
+                Err(_) => break,
+            };
+            known.insert(row.id.clone());
+            out.push(RemoteDocument {
+                account_ref: depot_ref.to_string(),
+                booking_external_id: None,
+                title: row.kind.clone(),
+                doc_type: document_type(&row).into(),
+                mime_type: "application/pdf".into(),
+                file_name: document_file_name(&row),
+                bytes,
+                source_url: format!("ffb:postfach:{}", row.id),
+                date: row.date.clone(),
+            });
+        }
+        Ok(out)
+    }
+
     async fn fetch_depot(
         &self,
         ctx: &ConnectContext,
@@ -585,7 +704,7 @@ impl FfbConnector {
         {
             positions.extend(parse_holdings(&vl, true)?);
         }
-        let end = site_date(today).unwrap_or_default();
+        let end = de_date(today).unwrap_or_default();
         let invested = match self
             .page(
                 "/api/kundenansicht/depotentwicklung/positionenView",
@@ -631,7 +750,7 @@ impl FfbConnector {
         });
 
         let since = ctx.since_for(&depot_ref).to_string();
-        let from = site_date(&since).unwrap_or_else(|| "01.01.2008".into());
+        let from = de_date(&since).unwrap_or_else(|| "01.01.2008".into());
         let mut next = Some(self.url(
             "/api/kundenansicht/transaktion/query/",
             &[
@@ -667,7 +786,7 @@ impl BankConnector for FfbConnector {
                 message: tr("FFB: Login/Benutzername und Passwort/PIN erforderlich.").into(),
             });
         }
-        let client = http_client()?;
+        let client = http_client_same_host()?;
         let resp = client.get(format!("{BASE}/login/login.jsp")).send().await?;
         let page_url = resp.url().clone();
         ensure_ffb(&page_url)?;
@@ -692,9 +811,7 @@ impl BankConnector for FfbConnector {
         }
         let session = session_id(&final_url)
             .or_else(|| session_id(&html))
-            .ok_or_else(|| CoreError::Protocol {
-                message: tr("FFB: Anmeldung nicht abgeschlossen. Die FFB verlangt möglicherweise eine zusätzliche Bestätigung, die GiroCrab noch nicht unterstützt.").into(),
-            })?;
+            .ok_or_else(|| CoreError::protocol(tr("FFB: Anmeldung nicht abgeschlossen. Die FFB verlangt möglicherweise eine zusätzliche Bestätigung, die GiroCrab noch nicht unterstützt.")))?;
         self.client = Some(client);
         self.session = session;
         Ok(Phase::Ready)
@@ -706,8 +823,37 @@ impl BankConnector for FfbConnector {
 
     async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult> {
         let today = super::today();
+        let mut known = KnownDocuments::from_state(&ctx.state);
+
+        // "Kontoauszüge abrufen": documents only.
+        if let Documents::StatementsOnly(only) = &ctx.documents {
+            let overview = self
+                .page("/api/kundenansicht/depotuebersicht/single/overview", &[])
+                .await?;
+            let (depot_no, _) = parse_overview(&overview)?;
+            if *only != format!("{REF_PREFIX}depot:{depot_no}") {
+                return Ok(FetchResult::default());
+            }
+            let documents = self.documents(only, &today, &mut known).await?;
+            return Ok(FetchResult {
+                documents,
+                state: known.to_state(),
+                ..Default::default()
+            });
+        }
+
         let mut out = FetchResult::default();
         self.fetch_depot(ctx, &today, &mut out).await?;
+        let due = ctx.documents.due_statements();
+        let depot_ref = out.accounts.first().map(|a| a.external_ref.clone());
+        if let Some(depot_ref) = depot_ref.filter(|r| due.contains(r)) {
+            // Optional: a failed document list never fails the sync.
+            if let Ok(documents) = self.documents(&depot_ref, &today, &mut known).await {
+                out.documents = documents;
+                out.statements_fetched = due.to_vec();
+                out.state = known.to_state();
+            }
+        }
         Ok(out)
     }
 
@@ -761,7 +907,7 @@ mod tests {
               <div> {wkn} / {isin} </div><div><a class="nonline" href="javascript:void(0)"> Beispiel KVG </a></div></td>
               <td class="fRight"><a href="{link}"> {qty} </a></td>
               <td class="fRight"><a href="{link}"> {price} </a></td>
-              <td class="fRight"> 14.11.2026 </td>
+              <td class="fRight"> 10.03.2026 </td>
               <td class="fRight"><a href="{link}"><div>{value}</div><div class="cTextGrau">{native}</div></a></td>
               <td class="fRight"><a href="/action/enterWarenkorbKauf?wkn={wkn}"><img alt="Kaufen"/></a></td></tr>"#,
             short = if name.len() > 20 {
@@ -825,30 +971,30 @@ mod tests {
                 r#"class="parentRow" id="9000000001""#,
                 Some("2026900000000101"),
                 [
-                    "03.11.2026",
+                    "05.03.2026",
                     "Kauf aus Sparplan",
                     FUND_A,
-                    "02.11.2026 67,6300 USD",
-                    "2,466",
-                    "150,00 EUR 166,78 USD",
+                    "04.03.2026 55,5500 USD",
+                    "1,875",
+                    "120,00 EUR 133,33 USD",
                     "0,00 % 100 %",
                 ],
             ),
             tx_row(
                 r#"class="grauezeile parentRow" id="9000000002""#,
                 None,
-                ["30.09.2026", "Erträgnis", FUND_A, "", "", "40,39 EUR", ""],
+                ["17.02.2026", "Erträgnis", FUND_A, "", "", "31,17 EUR", ""],
             ),
             tx_row(
                 r#"name="9000000002""#,
                 Some("2026900000000200"),
                 [
-                    "30.09.2026",
+                    "17.02.2026",
                     "Ertrag",
                     FUND_A,
-                    "30.09.2026 0,0000 USD",
+                    "17.02.2026 0,0000 USD",
                     "0,000",
-                    "40,39 EUR 45,86 USD",
+                    "31,17 EUR 36,12 USD",
                     "",
                 ],
             ),
@@ -856,12 +1002,12 @@ mod tests {
                 r#"name="9000000002""#,
                 Some("2026900000000201"),
                 [
-                    "30.09.2026",
+                    "17.02.2026",
                     "Ertrag Wiederanlage",
                     FUND_A,
-                    "30.09.2026 105,1000 USD",
-                    "0,356",
-                    "33,13 EUR 37,39 USD",
+                    "17.02.2026 88,2000 USD",
+                    "0,512",
+                    "27,44 EUR 37,39 USD",
                     "0,00 % 100 %",
                 ],
             ),
@@ -872,9 +1018,9 @@ mod tests {
                     "08.10.2026",
                     "Entgeltbelastung",
                     FUND_B,
-                    "07.10.2026 104,7800 EUR",
-                    "0,283",
-                    "25,92 EUR",
+                    "01.03.2026 77,3300 EUR",
+                    "0,641",
+                    "19,84 EUR",
                     "",
                 ],
             ),
@@ -882,10 +1028,10 @@ mod tests {
                 r#"class="parentRow" id="9000000004""#,
                 Some("2026900000000401"),
                 [
-                    "19.01.2026",
+                    "21.01.2026",
                     "Vorabpauschale Abrechnung Lastschrift",
                     FUND_B,
-                    "19.01.2026 0,0000 EUR",
+                    "21.01.2026 0,0000 EUR",
                     "0,000",
                     "0,00 EUR",
                     "",
@@ -894,18 +1040,18 @@ mod tests {
             tx_row(
                 r#"class="parentRow" id="9000000005""#,
                 None,
-                ["13.10.2020", "Entgelt", "", "", "", "4,74 EUR", ""],
+                ["12.05.2020", "Entgelt", "", "", "", "3,55 EUR", ""],
             ),
             tx_row(
                 r#"name="9000000005""#,
                 Some("2020900000000501"),
                 [
-                    "13.10.2020",
+                    "12.05.2020",
                     "Entgeltbelastung (Storniert)",
                     FUND_B,
-                    "12.10.2020 229,8897 EUR",
-                    "0,021",
-                    "4,74 EUR",
+                    "11.05.2020 199,1234 EUR",
+                    "0,042",
+                    "3,55 EUR",
                     "",
                 ],
             ),
@@ -916,27 +1062,27 @@ mod tests {
                     "11.12.2020",
                     "Storno Verkauf",
                     FUND_B,
-                    "12.10.2020 229,8897 EUR",
-                    "0,021",
-                    "4,74 EUR",
+                    "11.05.2020 199,1234 EUR",
+                    "0,042",
+                    "3,55 EUR",
                     "",
                 ],
             ),
             tx_row(
                 r#"class="parentRow" id="9000000006""#,
                 None,
-                ["02.01.2026", "Übertragung", "", "", "", "", ""],
+                ["06.01.2026", "Übertragung", "", "", "", "", ""],
             ),
             tx_row(
                 r#"name="9000000006""#,
                 Some("2026900000000601"),
                 [
-                    "02.01.2026",
+                    "06.01.2026",
                     "Übertrag intern Abgang",
                     FUND_B,
-                    "02.01.2026 0,0000 EUR",
-                    "25,419",
-                    "3.706,34 EUR",
+                    "06.01.2026 0,0000 EUR",
+                    "19,377",
+                    "2.468,02 EUR",
                     "",
                 ],
             ),
@@ -944,12 +1090,12 @@ mod tests {
                 r#"name="9000000006""#,
                 Some("2026900000000602"),
                 [
-                    "02.01.2026",
+                    "06.01.2026",
                     "Übertrag intern Zugang unentgeltlich",
                     FUND_B,
-                    "02.01.2026 0,0000 EUR",
-                    "25,419",
-                    "3.706,34 EUR",
+                    "06.01.2026 0,0000 EUR",
+                    "19,377",
+                    "2.468,02 EUR",
                     "",
                 ],
             ),
@@ -1036,9 +1182,9 @@ mod tests {
                     "DE000TEST001",
                     "DE",
                     "0",
-                    "158,090",
-                    "163,8200 EUR",
-                    "25.898,30 EUR",
+                    "120,500",
+                    "150,2500 EUR",
+                    "18.105,13 EUR",
                     "",
                 ),
                 holding_row(
@@ -1047,13 +1193,13 @@ mod tests {
                     "IE00TEST0001",
                     "DE",
                     "0",
-                    "300,768",
-                    "101,7417 USD",
-                    "27.783,41 EUR",
-                    "30.600,65 USD",
+                    "250,125",
+                    "98,7654 USD",
+                    "21.111,22 EUR",
+                    "24.444,55 USD",
                 ),
             ],
-            "53.681,71 EUR",
+            "39.216,35 EUR",
         );
         let h = parse_holdings(&page, false).unwrap();
         assert_eq!(h.len(), 2, "header and sum row are skipped");
@@ -1064,8 +1210,8 @@ mod tests {
             ("A0TES1", "DE000TEST001")
         );
         assert_eq!(a.name, "Beispiel Deutschland Aktien");
-        assert!((a.quantity - 158.09).abs() < 1e-9);
-        assert_eq!((a.current_price_cents, a.value_cents), (16_382, 2_589_830));
+        assert!((a.quantity - 120.5).abs() < 1e-9);
+        assert_eq!((a.current_price_cents, a.value_cents), (15_025, 1_810_513));
         assert_eq!(a.currency, "");
         assert_eq!(a.native_value_cents, None);
         let (_, b) = &h[1];
@@ -1073,15 +1219,15 @@ mod tests {
             b.name, "Beispiel Welt Aktien UCITS ETF (Dist)",
             "full name from the title, not the truncated text"
         );
-        assert_eq!(b.value_cents, 2_778_341);
+        assert_eq!(b.value_cents, 2_111_122);
         assert_eq!(
             b.current_price_cents,
-            (2_778_341.0f64 / 300.768).round() as i64,
+            (2_111_122.0f64 / 250.125).round() as i64,
             "EUR price from the EUR value"
         );
         assert_eq!(b.currency, "USD");
-        assert_eq!(b.native_price_cents, Some(10_174));
-        assert_eq!(b.native_value_cents, Some(3_060_065));
+        assert_eq!(b.native_price_cents, Some(9_877));
+        assert_eq!(b.native_value_cents, Some(2_444_455));
     }
 
     #[test]
@@ -1093,20 +1239,22 @@ mod tests {
                 "DE000TEST001",
                 "VL",
                 "4",
-                "5,111",
-                "163,8200 EUR",
-                "837,28 EUR",
+                "3,333",
+                "150,2500 EUR",
+                "500,79 EUR",
                 "",
             )],
-            "837,28 EUR",
+            "500,79 EUR",
         );
         let h = parse_holdings(&page, true).unwrap();
         assert_eq!(h[0].0, "VL-4-A0TES1");
         assert_eq!(h[0].1.name, "Beispiel Deutschland Aktien (VL)");
-        assert!(parse_holdings("<div>Keine Bestände</div>", false)
-            .unwrap()
-            .is_empty());
-        let broken = page.replace("5,111", "n/a");
+        assert!(
+            parse_holdings("<div>Keine Bestände</div>", false)
+                .unwrap()
+                .is_empty()
+        );
+        let broken = page.replace("3,333", "n/a");
         assert!(parse_holdings(&broken, true).is_err());
     }
 
@@ -1122,11 +1270,11 @@ mod tests {
         };
         let html = format!(
             "{}{}",
-            row("DE-0-A0TES1", "13.441,68"),
+            row("DE-0-A0TES1", "11.111,11"),
             row("VL-4-A0TES1", "747,90")
         );
         let m = parse_invested(&html);
-        assert_eq!(m.get("DE-0-A0TES1"), Some(&1_344_168));
+        assert_eq!(m.get("DE-0-A0TES1"), Some(&1_111_111));
         assert_eq!(m.get("VL-4-A0TES1"), Some(&74_790));
     }
 
@@ -1193,7 +1341,7 @@ mod tests {
         let t = &buy.transaction;
         assert_eq!(
             (t.booking_date.as_str(), t.settlement_date.as_str()),
-            ("2026-11-03", "2026-11-02")
+            ("2026-03-05", "2026-03-04")
         );
         assert_eq!(
             (t.wkn.as_str(), t.isin.as_str()),
@@ -1204,21 +1352,21 @@ mod tests {
             "full name from the holdings"
         );
         assert_eq!(t.direction, SecurityDirection::Buy);
-        assert!((t.quantity - 2.466).abs() < 1e-9);
-        assert_eq!((t.value_cents, t.currency.as_str()), (15_000, "EUR"));
-        assert_eq!(t.price_cents, (15_000.0f64 / 2.466).round() as i64);
-        assert!((t.fx_rate.unwrap() - 166.78 / 150.0).abs() < 1e-9);
+        assert!((t.quantity - 1.875).abs() < 1e-9);
+        assert_eq!((t.value_cents, t.currency.as_str()), (12_000, "EUR"));
+        assert_eq!(t.price_cents, (12_000.0f64 / 1.875).round() as i64);
+        assert!((t.fx_rate.unwrap() - 133.33 / 120.0).abs() < 1e-9);
 
         let dividend = &tx[1].transaction;
         assert_eq!(
             (dividend.direction, dividend.value_cents, dividend.quantity),
-            (SecurityDirection::Dividend, 4_039, 0.0)
+            (SecurityDirection::Dividend, 3_117, 0.0)
         );
         assert_eq!(tx[1].external_id, "ffb:2026900000000200");
         let fee = &tx[3].transaction;
         assert_eq!(
             (fee.direction, fee.value_cents),
-            (SecurityDirection::Fee, 2_592)
+            (SecurityDirection::Fee, 1_984)
         );
         assert_eq!(
             fee.name, "Beispiel Euro Anleihen",
@@ -1243,7 +1391,7 @@ mod tests {
         assert_eq!(ids(&all), ids(&again));
         let unique: HashSet<_> = ids(&all).into_iter().collect();
         assert_eq!(unique.len(), all.len());
-        let (recent, _) = parse_transactions(&page, "d", "2026-10-01", &none).unwrap();
+        let (recent, _) = parse_transactions(&page, "d", "2026-02-20", &none).unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].external_id, all[0].external_id);
     }
@@ -1284,33 +1432,66 @@ mod tests {
         .unwrap();
         assert_eq!(
             next.as_deref(),
-            Some("/api/kundenansicht/transaktion/query/;jsessionid=X?transactionType=&d-49751-p=2&datumVon=01.01.2026")
+            Some(
+                "/api/kundenansicht/transaktion/query/;jsessionid=X?transactionType=&d-49751-p=2&datumVon=01.01.2026"
+            )
         );
-        assert!(parse_transactions(
-            "<p>Es wurden keine Transaktionen gefunden</p>",
-            "d",
-            "2000-01-01",
-            &HashMap::new()
-        )
-        .unwrap()
-        .0
-        .is_empty());
+        assert!(
+            parse_transactions(
+                "<p>Es wurden keine Transaktionen gefunden</p>",
+                "d",
+                "2000-01-01",
+                &HashMap::new()
+            )
+            .unwrap()
+            .0
+            .is_empty()
+        );
+    }
+
+    const POSTFACH: &str = r#"<div class='tabellenkopf'>Ergebnis Ihrer Suche: 3 Dokumente<br/>
+      <a href="/api/kundenansicht/postfach/query/;jsessionid=X?applicationCategory=UNDEFINED&amp;d-49751-p=2&amp;datumVon=01.01.2000" class="pagingbanner">N&auml;chste&nbsp;<img src="/images/pfeil_re_w.gif" /></a></div>
+      <table cellspacing="1" id="view" class="liste"><thead><tr><th>Gelesen</th><th>Datum</th><th>Kategorie</th><th>Dokumenttyp</th><th>WKN</th><th></th><th>Bestellung</th></tr></thead><tbody>
+      <tr><td><div class="icon-haken" /></td><td><span class="">06.02.2026</span></td><td><span class="">Depot</span></td><td><span class="">Quartalsdepotauszug</span></td><td><span title=""></span></td>
+        <td><a href="/api/kundenansicht/postfach/document/900000001;jsessionid=X" target="_top"><img src="/images/buttons/icon_pdf.gif" /></a></td><td><input type="checkbox" onchange="javascript:postageOrderSelection( this, '900000001' );" /></td></tr>
+      <tr class="grauezeile"><td></td><td><span class="unread">05.02.2026</span></td><td><span>Steuerunterlagen</span></td><td><span>Steuerbescheinigung PA (Steuerinland)</span></td><td></td>
+        <td><a href="/api/kundenansicht/postfach/document/900000002;jsessionid=X"><img /></a></td><td></td></tr>
+      <tr><td></td><td><span>04.02.2026</span></td><td><span>Abwicklungskonto</span></td><td><span>Konto Auszuege</span></td><td></td>
+        <td><a href="/api/kundenansicht/postfach/document/900000003;jsessionid=X"><img /></a></td><td></td></tr>
+      <tr><td></td><td><span>03.02.2026</span></td><td><span>Depot</span></td><td><span>Fondsabrechnung</span></td><td><span title="A0TEST">A0TEST</span></td>
+        <td><a href="/api/kundenansicht/postfach/document/900000004;jsessionid=X"><img /></a></td><td></td></tr>
+      </tbody></table>"#;
+
+    #[test]
+    fn reads_postfach_documents_and_the_next_page() {
+        let rows = parse_postfach(POSTFACH);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].id, "900000001");
+        assert_eq!(rows[0].date, "2026-02-06");
+        let types: Vec<_> = rows.iter().map(document_type).collect();
+        assert_eq!(types, ["kontoauszug", "steuer", "kontoauszug", "postbox"]);
+        assert_eq!(
+            document_file_name(&rows[1]),
+            "2026-02-05_Steuerbescheinigung_PA__Steuerinland__900000002.pdf"
+        );
+        let next = next_page(POSTFACH).unwrap();
+        assert!(next.starts_with("/api/kundenansicht/postfach/query/;jsessionid=X?"));
+        assert!(next.contains("&d-49751-p=2&"), "{next}");
+        assert!(parse_postfach("<p>Es wurden keine Dokumente gefunden</p>").is_empty());
     }
 
     #[test]
     fn numbers_and_dates() {
         assert_eq!(parse_decimal("1.234,567"), Some(1234.567));
-        assert_eq!(parse_decimal(" 0,021 "), Some(0.021));
+        assert_eq!(parse_decimal(" 0,042 "), Some(0.042));
         assert_eq!(parse_decimal(""), None);
         assert_eq!(
-            money("150,00 EUR 166,78 USD"),
-            vec![(15_000, "EUR".into()), (16_678, "USD".into())]
+            money("120,00 EUR 133,33 USD"),
+            vec![(12_000, "EUR".into()), (13_333, "USD".into())]
         );
-        assert_eq!(money("02.11.2026 67,6300 USD"), vec![(6_763, "USD".into())]);
+        assert_eq!(money("04.03.2026 55,5500 USD"), vec![(5_555, "USD".into())]);
         assert_eq!(money("-0,01 EUR"), vec![(-1, "EUR".into())]);
-        assert_eq!(money("13.441,68 €"), vec![(1_344_168, "EUR".into())]);
-        assert_eq!(site_date("2026-01-05").as_deref(), Some("05.01.2026"));
-        assert_eq!(site_date("x"), None);
+        assert_eq!(money("11.111,11 €"), vec![(1_111_111, "EUR".into())]);
     }
 
     #[test]
@@ -1320,7 +1501,10 @@ mod tests {
             session: "S1".into(),
         };
         assert_eq!(
-            c.url("/api/kundenansicht/transaktion/query/", &[("datumVon", "01.01.2026"), ("product", "")]),
+            c.url(
+                "/api/kundenansicht/transaktion/query/",
+                &[("datumVon", "01.01.2026"), ("product", "")]
+            ),
             "https://www.ffb.de/api/kundenansicht/transaktion/query/;jsessionid=S1?datumVon=01.01.2026&product="
         );
     }

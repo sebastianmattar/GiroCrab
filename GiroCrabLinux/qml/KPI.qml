@@ -26,7 +26,7 @@ Rectangle {
             SFIcon { visible: kpi.disclosure; symbol: "chevron.right"; size: 9; color: Theme.tertiary }
             Item { Layout.fillWidth: kpi.disclosure }
         }
-        Text { text: kpi.value; font.pixelSize: Theme.title3; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: kpi.tint; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
+        Text { text: kpi.value; font.pixelSize: Theme.title3; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: kpi.tint; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true } }
         Item { Layout.fillHeight: true; implicitHeight: 2 }
         Text { text: kpi.subtitle; font.pixelSize: Theme.caption2; color: Theme.tertiary; wrapMode: Text.WordWrap; maximumLineCount: 2; Layout.fillWidth: true }
     }

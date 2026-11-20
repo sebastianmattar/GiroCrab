@@ -18,22 +18,22 @@
 //! Scalable web profile. See docs/scalable-capital-connector.md.
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::dpop::DpopKey;
 use super::{
-    http_client_same_host, BankConnector, Challenge, ChallengeKind, ChallengeResponse,
-    ConnectContext, FetchResult, Phase, RemoteAccount, RemoteHolding, RemoteSecurityTransaction,
-    RemoteTransaction,
+    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, FetchResult, Phase,
+    RemoteAccount, RemoteHolding, RemoteSecurityTransaction, RemoteTransaction,
+    http_client_same_host,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::models::{AccountKind, Holding, SecurityDirection, SecurityTransaction};
 use crate::money::{json_number_to_cents, json_number_to_cents_rounded};
-use crate::secret::SecretString;
+use crate::secret::{SecretJson, SecretString};
 
 /// `https://` on `scalable.capital` or one of its subdomains, no user info.
 fn is_scalable_https(uri: &str) -> bool {
@@ -116,7 +116,7 @@ impl Default for ScalableConnector {
 }
 
 fn now() -> i64 {
-    chrono::Utc::now().timestamp()
+    jiff::Timestamp::now().as_second()
 }
 
 fn log(msg: &str) {
@@ -140,21 +140,15 @@ fn str_of(v: &Value) -> String {
 /// `2026-11-10T12:48:01.123Z` (or epoch seconds) -> local `YYYY-MM-DD`.
 fn local_date(v: &Value) -> String {
     if let Some(s) = v.as_str() {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-            return dt
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d")
-                .to_string();
+        if let Ok(ts) = s.parse::<jiff::Timestamp>() {
+            return crate::dates::iso(crate::dates::local_date(ts));
         }
         return s.chars().take(10).collect();
     }
-    if let Some(secs) = v.as_i64() {
-        if let Some(dt) = chrono::DateTime::from_timestamp(secs, 0) {
-            return dt
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d")
-                .to_string();
-        }
+    if let Some(secs) = v.as_i64()
+        && let Ok(ts) = jiff::Timestamp::from_second(secs)
+    {
+        return crate::dates::iso(crate::dates::local_date(ts));
     }
     String::new()
 }
@@ -163,12 +157,9 @@ fn since_epoch(since: &str) -> Option<i64> {
     if since <= "1970-01-01" {
         return None;
     }
-    let d = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d").ok()?;
-    let local = d
-        .and_hms_opt(0, 0, 0)?
-        .and_local_timezone(chrono::Local)
-        .single()?;
-    Some(local.timestamp())
+    let d = jiff::civil::Date::strptime("%Y-%m-%d", since).ok()?;
+    let local = d.to_zoned_datetime(jiff::tz::TimeZone::system()).ok()?;
+    Some(local.timestamp().as_second())
 }
 
 fn fmt_quantity(v: &Value) -> String {
@@ -385,11 +376,7 @@ pub(crate) fn map_transaction(
         amount_cents: amount,
         currency: {
             let c = str_of(&item["currency"]);
-            if c.is_empty() {
-                "EUR".into()
-            } else {
-                c
-            }
+            if c.is_empty() { "EUR".into() } else { c }
         },
         counterparty,
         counterparty_iban: String::new(),
@@ -475,11 +462,7 @@ pub(crate) fn map_security_transaction(
     };
     let currency = {
         let c = str_of(&item["currency"]);
-        if c.is_empty() {
-            "EUR".to_string()
-        } else {
-            c
-        }
+        if c.is_empty() { "EUR".to_string() } else { c }
     };
     Some(RemoteSecurityTransaction {
         account_ref: depot_ref.to_string(),
@@ -665,10 +648,6 @@ impl ScalableConnector {
         self.key.as_ref().ok_or(CoreError::SessionClosed)
     }
 
-    fn state_json(&self) -> Value {
-        serde_json::to_value(&self.session).unwrap_or(Value::Null)
-    }
-
     /// POST a form to the issuer with a DPoP proof (one nonce retry).
     /// `Ok(Err(e))` is an OAuth-level error (4xx with a JSON body).
     async fn oauth_form(
@@ -795,7 +774,7 @@ impl ScalableConnector {
                                 "Scalable-Sitzung abgelaufen ({0}) – bitte erneut anmelden.",
                                 &[&e.error],
                             ),
-                        })
+                        });
                     }
                 }
             }
@@ -1501,7 +1480,7 @@ impl ScalableConnector {
 #[async_trait]
 impl BankConnector for ScalableConnector {
     async fn begin(&mut self, ctx: &ConnectContext) -> CoreResult<Phase> {
-        self.session = serde_json::from_value(ctx.state.clone()).unwrap_or_default();
+        self.session = ctx.state.decode().unwrap_or_default();
         if self.session_usable() {
             match DpopKey::from_hex(self.session.dpop_key_hex.expose()) {
                 Ok(k) => self.key = Some(k),
@@ -1547,11 +1526,7 @@ impl BankConnector for ScalableConnector {
             .await?;
         let account_id = {
             let a = str_of(&ids["account"]["id"]);
-            if a.is_empty() {
-                person_id.clone()
-            } else {
-                a
-            }
+            if a.is_empty() { person_id.clone() } else { a }
         };
         let portfolios: Vec<String> = ids["account"]["brokerPortfolios"]
             .as_array()
@@ -1566,7 +1541,14 @@ impl BankConnector for ScalableConnector {
         // First sync of a connection: the whole history (the API has no range
         // limit and a depot needs its full purchase history). Later syncs are
         // incremental via the app-wide window in `ctx.since`.
-        let first_sync = ctx.state.get("login_at").is_none();
+        #[derive(Deserialize)]
+        struct LoginAt {
+            login_at: Option<serde::de::IgnoredAny>,
+        }
+        let first_sync = ctx
+            .state
+            .decode::<LoginAt>()
+            .map_or(true, |s| s.login_at.is_none());
         let since = if first_sync {
             "1970-01-01"
         } else {
@@ -1582,7 +1564,7 @@ impl BankConnector for ScalableConnector {
         if let Err(e) = self.fetch_fixed_term(&account_id, &mut out).await {
             log(&format!("fixed-term fetch failed: {e}"));
         }
-        out.state = Some(self.state_json());
+        out.state = SecretJson::encode(&self.session).ok();
         Ok(out)
     }
 }

@@ -46,7 +46,7 @@ FormSection {
         visible: s.isDatabase
         label: qsTr("Art")
         AppComboBox {
-            readonly property var options: [{ id: "backup", title: "GiroCrab" }, { id: "database", title: "MoneyMoney" }]
+            readonly property var options: [{ id: "backup", title: "GiroCrab" }, { id: "database", title: qsTr("Datenbank") }]
             model: options
             textRole: "title"
             currentIndex: Math.max(0, options.findIndex(o => o.id === s.source))

@@ -22,13 +22,7 @@ Sheet {
     readonly property var popularNames: ["ING", "DKB", "comdirect", "Postbank", "Consorsbank", "N26", "C24", "Revolut", "bunq", "Trade Republic", "Scalable Capital", "PayPal"]
     readonly property var modeOrder: ["FinTs", "OwnApi", "Psd2"]
 
-    /// Connectors whose sign-in the Linux UI has no flow for yet (they would open the wrong
-    /// browser login): EquatePlus (#720, EquatePlusUI.swift) is left out of the search.
-    readonly property var linuxUnsupported: ["EquatePlus"]
-    function search(q, limit) {
-        return AppModel.core("search_banks", { query: q, live_psd2: [], per_group_limit: limit || 12 })
-            .filter(r => linuxUnsupported.indexOf(r.connector) < 0)
-    }
+    function search(q, limit) { return AppModel.core("search_banks", { query: q, live_psd2: [], per_group_limit: limit || 12 }) }
     readonly property bool searching: query.trim() !== ""
     readonly property var results: searching ? search(query) : []
     function key(s) { return s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "") }
@@ -71,7 +65,8 @@ Sheet {
         const kind = selected.connector || (selected.mode === "FinTs" ? "FinTsGeneric" : "EnableBanking")
         const d = AppModel.descriptor(kind)
         if (!d) return []
-        return d.required_settings.filter(k => { const e = AppModel.settingEntry(k); return !(e && e.has_value) && !(k === "fints.product_id" && AppModel.fintsProductIDSource !== "") })
+        // AddBankAssistant.swift › missingSettings: the FinTS product ID is never asked for (#842/#865)
+        return AppModel.userRequiredKeys(d.required_settings).filter(k => { const e = AppModel.settingEntry(k); return !(e && e.has_value) })
     }
     // RAH-10: the settings (FinTS product registration) come first, then the key file
     readonly property bool isLastStep: (step === "setup" && !isRah10) || (step === "access" && missingSettings.length === 0)

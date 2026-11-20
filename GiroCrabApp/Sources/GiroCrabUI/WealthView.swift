@@ -232,7 +232,8 @@ struct WealthView: View {
     @State private var securityTransactions: [SecurityTransaction] = []
     @State private var positionsSort = DepotSort()
     @State private var compositionFilter: Set<String>?
-    @State private var contentWidth: CGFloat = 0
+    /// Wide enough for the table layouts.
+    @State private var wide = false
     @State private var classified: [Int64: [ClassifiedAsset]] = [:]
     @State private var editingClassification: ClassificationEditRequest?
     /// Yesterday's value of one piece per automatically priced Sachwert (item id): the day change.
@@ -393,7 +394,7 @@ struct WealthView: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+            .onGeometryChange(for: Bool.self) { [textScale] in $0.size.width >= 740 * textScale } action: { wide = $0 }
         }
         .background(Theme.canvas)
         // positions and transactions can change while the depot total stays the same: a finished
@@ -864,7 +865,6 @@ struct WealthView: View {
     /// The securities and Sachwerte tabs use the same building blocks as the depot and Sachwerte views:
     /// the composition card, the figure tiles and the positions table.
     private var sharedHoldingsScope: Bool { scope == .securities || scope == .tangibles }
-    private var wide: Bool { contentWidth >= 740 * textScale }
 
     /// Grouping and drawing are the card's; its grouping is the wealth grouping ("by position" is the account view).
     private var compositionMode: Binding<DepotCompositionMode> {

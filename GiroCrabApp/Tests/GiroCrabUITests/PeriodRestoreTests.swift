@@ -8,8 +8,8 @@ import GiroCrabCore
 final class PeriodRestoreTests: XCTestCase {
     private let key = AppModel.lastPeriodKey
 
-    override func setUp() { UserDefaults.standard.removeObject(forKey: key) }
-    override func tearDown() { UserDefaults.standard.removeObject(forKey: key) }
+    override func setUp() { AppDefaults.store.removeObject(forKey: key) }
+    override func tearDown() { AppDefaults.store.removeObject(forKey: key) }
 
     func testChosenPeriodIsRestoredOnLaunch() {
         let model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
@@ -23,10 +23,10 @@ final class PeriodRestoreTests: XCTestCase {
 
     func testWithoutSavedChoiceAndInDemoStartsWithAll() {
         XCTAssertEqual(AppModel(options: LaunchOptions(arguments: [], environment: [:])).period, .all)
-        UserDefaults.standard.set("months12", forKey: key)
+        AppDefaults.store.set("months12", forKey: key)
         // demo starts stay reproducible for screenshots
         XCTAssertEqual(AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:])).period, .all)
-        UserDefaults.standard.set("year:9", forKey: key)
+        AppDefaults.store.set("year:9", forKey: key)
         XCTAssertEqual(AppModel(options: LaunchOptions(arguments: [], environment: [:])).period, .all)
     }
 

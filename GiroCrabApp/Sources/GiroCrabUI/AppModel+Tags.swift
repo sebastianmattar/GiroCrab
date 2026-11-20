@@ -49,7 +49,7 @@ extension AppModel {
     /// The header offers the tag filter once tags exist (or a filter is still on);
     /// not in „Neue Umsätze“, which ignores the list filters.
     var showsTagFilter: Bool {
-        sidebarSelection != .newBookings && (!tags.isEmpty || tagFilter.isActive)
+        shownSelection != .newBookings && (!tags.isEmpty || tagFilter.isActive)
     }
 
     /// Label of the header's tag button. Never names a tag (the header is part of
@@ -183,7 +183,7 @@ extension AppModel {
     /// (of the multiple-selection card when the booking is part of one).
     func editTags(for booking: Booking) {
         #if os(macOS)
-        UserDefaults.standard.set(true, forKey: ViewLayout.inspectorKey)
+        AppDefaults.store.set(true, forKey: ViewLayout.inspectorKey)
         #endif
         // a multiple selection that contains the booking stays (its card has the field)
         if !selectedBookingIDs.contains(booking.id) { selectedBookingID = booking.id }

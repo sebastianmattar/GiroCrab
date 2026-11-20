@@ -111,7 +111,7 @@ Item {
             font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.tertiary
             x: chart.plotWidth + 4
             y: Math.max(0, Math.min(chart.height - chart.axisHeight - height, chart.yAt(modelData) - height / 2))
-            Sensitive {}
+            Sensitive { amounts: true }
         }
     }
     // chartXAxis: about six month labels ("MMM yy"), centred under their month
@@ -152,7 +152,7 @@ Item {
             Text { anchors.horizontalCenter: parent.horizontalCenter; font.pixelSize: Theme.caption; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                    color: parent.parent.bar && parent.parent.bar.cents < 0 ? Theme.outflow : Theme.text
                    text: parent.parent.bar ? Fmt.money(parent.parent.bar.cents) : ""
-                   Sensitive {} }
+                   Sensitive { amounts: true } }
         }
     }
     MouseArea {

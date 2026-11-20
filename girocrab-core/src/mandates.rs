@@ -5,9 +5,9 @@
 //! mandate is `OOFF`, otherwise the first collection is `FRST` and every later
 //! one `RCUR`. The creditor ID is kept per account.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::connectors::fints::pain008::{validate_creditor_id, DebitScheme, SequenceType};
+use crate::connectors::fints::pain008::{DebitScheme, SequenceType, validate_creditor_id};
 use crate::connectors::fints::sepa::{is_sepa_identifier, validate_bic};
 use crate::dates::now_ms;
 use crate::error::{CoreError, CoreResult};
@@ -21,10 +21,10 @@ mod merge;
 mod pain;
 mod returns;
 pub use collect::{CollectionItem, DebitFile, DirectDebitRequest};
-pub use csv::{parse_mandate_csv, MandateCsvImport, MandateCsvRow, MandateImportResult};
+pub use csv::{MandateCsvImport, MandateCsvRow, MandateImportResult, parse_mandate_csv};
 pub(crate) use merge::merge_attached;
+pub use returns::{MandateBooking, return_reason};
 pub(crate) use returns::{mandate_return_ack, merge_ack};
-pub use returns::{return_reason, MandateBooking};
 
 const MANDATES: &str = "
 CREATE TABLE IF NOT EXISTS mandates (
@@ -176,7 +176,7 @@ fn check(input: &MandateInput) -> CoreResult<()> {
             "Die Mandatsreferenz enthält Zeichen, die SEPA nicht erlaubt (nur Buchstaben ohne Umlaute, Ziffern und / - ? : ( ) . , ' + Leerzeichen).",
         )));
     }
-    if chrono::NaiveDate::parse_from_str(&input.signed_date, "%Y-%m-%d").is_err() {
+    if jiff::civil::Date::strptime("%Y-%m-%d", &input.signed_date).is_err() {
         return Err(CoreError::invalid(tr(
             "Das Datum der Mandatsunterschrift fehlt.",
         )));
@@ -441,10 +441,10 @@ pub(crate) fn store_mandate(
             if n == 0 {
                 return Err(CoreError::invalid(tr("Das Mandat gibt es nicht mehr.")));
             }
-            if let Some((acc, old_ref)) = old {
-                if acc != input.account_id || old_ref != reference {
-                    merge::mark_deleted(db, acc, &old_ref, now)?;
-                }
+            if let Some((acc, old_ref)) = old
+                && (acc != input.account_id || old_ref != reference)
+            {
+                merge::mark_deleted(db, acc, &old_ref, now)?;
             }
             merge::unmark_deleted(db, input.account_id, &reference)?;
             id

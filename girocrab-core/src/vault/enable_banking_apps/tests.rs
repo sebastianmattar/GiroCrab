@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use rsa::pkcs8::{EncodePrivateKey, LineEnding};
 use rsa::PrivateKey;
+use rsa::pkcs8::{EncodePrivateKey, LineEnding};
 
 use super::*;
 use crate::connectors::enable_banking::EnableBankingConnector;
@@ -89,9 +89,10 @@ fn second_application_does_not_move_existing_logins() {
     assert_eq!(kid_for(&v, bank1), "app-a");
 
     let bank2 = login(&v, "enablebanking:DE:N26", "Bank 2");
-    assert!(v
-        .set_connection_enable_banking_app(bank2, "app-b".into(), pem_b.clone())
-        .unwrap());
+    assert!(
+        v.set_connection_enable_banking_app(bank2, "app-b".into(), pem_b.clone())
+            .unwrap()
+    );
     assert_eq!(kid_for(&v, bank1), "app-a");
     assert_eq!(kid_for(&v, bank2), "app-b");
 
@@ -165,21 +166,24 @@ fn changing_a_logins_application_drops_only_its_session() {
     set_session(&v, bank2);
 
     // the same application as before: nothing changes
-    assert!(!v
-        .set_connection_enable_banking_app(bank1, " app-a ".into(), pem_a.clone())
-        .unwrap());
+    assert!(
+        !v.set_connection_enable_banking_app(bank1, " app-a ".into(), pem_a.clone())
+            .unwrap()
+    );
     assert!(has_session(&v, bank1));
 
-    assert!(v
-        .set_connection_enable_banking_app(bank1, "app-b".into(), pem())
-        .unwrap());
+    assert!(
+        v.set_connection_enable_banking_app(bank1, "app-b".into(), pem())
+            .unwrap()
+    );
     assert!(!has_session(&v, bank1));
     assert!(has_session(&v, bank2));
 
     // back to the default
-    assert!(v
-        .set_connection_enable_banking_app(bank1, String::new(), String::new())
-        .unwrap());
+    assert!(
+        v.set_connection_enable_banking_app(bank1, String::new(), String::new())
+            .unwrap()
+    );
     let app = v.connection_enable_banking_app(bank1).unwrap().unwrap();
     assert!(!app.own);
     assert_eq!(app.application_id, "app-a");

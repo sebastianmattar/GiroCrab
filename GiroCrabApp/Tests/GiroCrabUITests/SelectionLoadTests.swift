@@ -66,6 +66,7 @@ final class SelectionLoadTests: XCTestCase {
         model.interactiveSidebarSelection = .account(account.id)
         XCTAssertEqual(model.sidebarSelection, .account(account.id))
         XCTAssertTrue(model.isLoadingSelection)
+        XCTAssertEqual(model.shownSelection, .account(account.id), "the placeholder shows under the new title")
         XCTAssertTrue(model.bookings.isEmpty, "nothing of the previous selection shows while loading")
         XCTAssertTrue(model.dayGroups.isEmpty)
         XCTAssertTrue(model.history.isEmpty)
@@ -94,16 +95,25 @@ final class SelectionLoadTests: XCTestCase {
         XCTAssertEqual(model.bookings.map(\.id), before)
         XCTAssertEqual(model.history.map(\.balanceCents), history)
         XCTAssertFalse(model.hasMoreBookings, "no paging into the previous selection while loading")
+        // #1396: the old data keeps its own title and header, not the new one over it
+        XCTAssertEqual(model.shownSelection, .allAccounts)
+        XCTAssertEqual(model.title, String(localized: "Alle Konten"))
+        XCTAssertTrue(model.showsOverview)
 
         let expected = try expectedIDs()
-        var sawEmpty = false
+        var sawEmpty = false, sawMixed = false
         for _ in 0..<300 where model.bookings.map(\.id) != expected {
             sawEmpty = sawEmpty || model.bookings.isEmpty || model.isLoadingSelection
+            sawMixed = sawMixed || model.shownSelection != .allAccounts
             try await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertEqual(model.bookings.map(\.id), expected)
         XCTAssertFalse(sawEmpty)
+        XCTAssertFalse(sawMixed, "the title switched before the data")
         XCTAssertFalse(model.isLoadingSelection)
+        XCTAssertEqual(model.shownSelection, .account(account.id))
+        XCTAssertEqual(model.title, account.name)
+        XCTAssertFalse(model.showsOverview)
         try assertMatchesSynchronousLoad()
     }
 
@@ -136,6 +146,7 @@ final class SelectionLoadTests: XCTestCase {
         let expected = try expectedIDs()
         XCTAssertEqual(model.bookings.map(\.id), expected)
         XCTAssertFalse(model.isLoadingSelection)
+        XCTAssertEqual(model.shownSelection, .account(account.id))
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(model.bookings.map(\.id), expected)
         try assertMatchesSynchronousLoad()
@@ -149,5 +160,163 @@ final class SelectionLoadTests: XCTestCase {
         try await awaitBookings(expected)
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(model.bookings.map(\.id), expected)
+    }
+
+    /// Geplant shows no booking list: it loads none, and the list of the account before stays.
+    /// Back to an account, the column keeps Geplant until that account's data is in (#1396).
+    func testNonBookingColumnLoadsNoBookingsAndSwitchesBackWithItsData() async throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.sidebarSelection = .account(account.id)
+        let accountBookings = model.bookings.map(\.id)
+
+        model.interactiveSidebarSelection = .planned
+        XCTAssertNil(model.selectionLoadTask)
+        XCTAssertEqual(model.mainColumn, .planned)
+        XCTAssertEqual(model.shownSelection, .planned)
+        XCTAssertEqual(model.bookings.map(\.id), accountBookings)
+
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertEqual(model.mainColumn, .planned, "no booking column before its data")
+        XCTAssertEqual(model.shownSelection, .planned)
+        for _ in 0..<300 where model.shownSelection != .account(account.id) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(model.mainColumn, .bookings)
+        XCTAssertEqual(model.bookings.map(\.id), try expectedIDs())
+    }
+
+    /// A click on Geplant drops a booking load still running for the selection before it.
+    func testNonBookingColumnCancelsPendingLoad() async throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let before = model.bookings.map(\.id)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertNotNil(model.selectionLoadTask)
+        model.interactiveSidebarSelection = .directDebits
+        XCTAssertNil(model.selectionLoadTask)
+        XCTAssertEqual(model.mainColumn, .directDebits)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(model.bookings.map(\.id), before)
+    }
+
+    /// The account filter of a category view narrows the sidebar sums only there: on Geplant,
+    /// which loads no bookings, the sums still drop it (#406).
+    func testNonBookingColumnDropsCategoryAccountFilterFromSums() throws {
+        let category = try XCTUnwrap(model.categories.first)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.sidebarSelection = .category(category.id)
+        model.categoryAccountFilter = [account.id]
+        XCTAssertNotNil(model.categorySumNote)
+        let filtered = model.categories.map(\.totalCents)
+
+        model.interactiveSidebarSelection = .planned
+        XCTAssertNil(model.categorySumNote)
+        let shown = model.categories.map(\.totalCents)
+        XCTAssertNotEqual(shown, filtered, "the demo vault has bookings outside the filtered account")
+        model.reloadCategories()
+        XCTAssertEqual(model.categories.map(\.totalCents), shown)
+    }
+
+    /// Category view with an account filter → account (still loading) → Geplant: the cancelled
+    /// account load would have dropped the filter from the sums, so Geplant does it.
+    func testNonBookingColumnDropsFilterOfCategoryStillShown() throws {
+        try assertGeplantDropsFilterAfterAccountClick(placeholderDelay: .seconds(30))
+    }
+
+    /// The same once the placeholder is up: the column already shows the account, the sums
+    /// are still the category's.
+    func testNonBookingColumnDropsFilterBehindThePlaceholder() throws {
+        try assertGeplantDropsFilterAfterAccountClick(placeholderDelay: .zero)
+    }
+
+    private func assertGeplantDropsFilterAfterAccountClick(placeholderDelay: Duration) throws {
+        model.selectionPlaceholderDelay = placeholderDelay
+        let category = try XCTUnwrap(model.categories.first)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.sidebarSelection = .category(category.id)
+        model.categoryAccountFilter = [account.id]
+        let filtered = model.categories.map(\.totalCents)
+
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertNotNil(model.selectionLoadTask)
+        model.interactiveSidebarSelection = .planned
+        let shown = model.categories.map(\.totalCents)
+        XCTAssertNotEqual(shown, filtered)
+        model.reloadCategories()
+        XCTAssertEqual(model.categories.map(\.totalCents), shown)
+    }
+
+    /// „Neue Umsätze“ orders the stream by account card; leaving it regroups the same
+    /// bookings by day even when the list itself is reloaded before the column switches.
+    func testLeavingNewBookingsRegroupsTheStreamByDay() {
+        model.sidebarSelection = .newBookings
+        model.sidebarSelection = .allAccounts
+        XCTAssertEqual(model.dayGroups.flatMap(\.bookings).map(\.id), model.bookings.map(\.id))
+        XCTAssertEqual(Set(model.dayGroups.map(\.date)).count, model.dayGroups.count, "one header per day")
+    }
+
+    private struct LoadFailure: Error {}
+
+    /// A switch that fails before the placeholder: the new title over an empty list and
+    /// „–“ tiles, never the previous selection's figures.
+    func testFailedSwitchBeforePlaceholderShowsNoPreviousData() throws {
+        model.selectionPlaceholderDelay = .seconds(30)
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertEqual(model.shownSelection, .allAccounts)
+        XCTAssertFalse(model.selectionFiguresMissing)
+
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.shownSelection, .account(account.id))
+        XCTAssertTrue(model.bookings.isEmpty)
+        XCTAssertTrue(model.history.isEmpty)
+        XCTAssertTrue(model.selectionFiguresMissing, "the tiles show „–“")
+        XCTAssertFalse(model.isLoadingSelection)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    /// The same after the placeholder took over: it stays empty, without the loading state.
+    func testFailedSwitchBehindPlaceholderShowsNoPreviousData() throws {
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.interactiveSidebarSelection = .account(account.id)
+        XCTAssertTrue(model.isLoadingSelection)
+
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.shownSelection, .account(account.id))
+        XCTAssertTrue(model.bookings.isEmpty)
+        XCTAssertTrue(model.selectionFiguresMissing)
+        XCTAssertFalse(model.isLoadingSelection)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    /// A failed refresh of the selection shown (sync, merge) keeps list, chart and tiles.
+    func testFailedRefreshKeepsShownData() throws {
+        let bookings = model.bookings.map(\.id), history = model.history.map(\.balanceCents)
+        XCTAssertFalse(bookings.isEmpty)
+        model.startSelectionLoad(keepingShown: true)
+        XCTAssertNotNil(model.selectionLoadTask)
+
+        model.failSelectionLoad(LoadFailure())
+        XCTAssertEqual(model.shownSelection, .allAccounts)
+        XCTAssertEqual(model.bookings.map(\.id), bookings)
+        XCTAssertEqual(model.history.map(\.balanceCents), history)
+        XCTAssertFalse(model.selectionFiguresMissing)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    /// Geplant loads no bookings, but the recurring data and salary cycle are those of all accounts.
+    func testNonBookingColumnRecomputesRecurringForAllAccounts() throws {
+        let account = try XCTUnwrap(model.allAccounts.first { $0.kind == .checking })
+        model.sidebarSelection = .allAccounts
+        let allSeries = model.recurring.map(\.lastBookingId)
+        let allCycle = model.salaryCycle?.lastDate
+        let allOpen = model.recurringMonth?.openExpenseCents
+
+        model.sidebarSelection = .account(account.id)
+        model.sidebarSelection = .planned
+        XCTAssertEqual(model.recurring.map(\.lastBookingId), allSeries)
+        XCTAssertEqual(model.salaryCycle?.lastDate, allCycle)
+        XCTAssertEqual(model.recurringMonth?.openExpenseCents, allOpen)
     }
 }

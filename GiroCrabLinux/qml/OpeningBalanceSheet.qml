@@ -126,7 +126,7 @@ Sheet {
                     FormRow {
                         label: qsTr("Startsaldo")
                         TextField { id: amountField; Layout.preferredWidth: 220; placeholderText: qsTr("z. B. %1").arg(Fmt.plain(125000))
-                                    text: sheet.amountText; onTextEdited: sheet.amountText = text }
+                                    text: sheet.amountText; onTextEdited: sheet.amountText = text; Sensitive { amounts: true; when: parent.text !== "" } }
                     }
                     FormRow {
                         label: qsTr("Ab Stichtag")
@@ -149,6 +149,7 @@ Sheet {
                             text: sheet.targetText; onTextEdited: sheet.targetText = text
                             // Return in the Kontostand field calibrates instead of saving
                             onAccepted: sheet.calibrate()
+                            Sensitive { amounts: true; when: parent.text !== "" }
                         }
                     }
                     RowLayout {
@@ -157,16 +158,16 @@ Sheet {
                 }
                 FormSection {
                     title: qsTr("Vorschau")
-                    FormRow { visible: sheet.account !== null; label: qsTr("Kontostand bisher")
+                    FormRow { visible: sheet.account !== null; label: qsTr("Kontostand bisher"); amounts: true
                               value: sheet.account ? Fmt.money(sheet.account.balance_cents, sheet.currency) : "" }
                     RowLayout {
                         visible: sheet.preview !== null && sheet.amount !== null
                         Layout.fillWidth: true
                         Text { text: qsTr("Kontostand danach"); font.pixelSize: Theme.body; font.weight: Font.Bold; color: Theme.text; Layout.fillWidth: true }
                         Text { text: sheet.preview && sheet.amount !== null ? Fmt.money(sheet.amount + sheet.preview.sum_cents, sheet.currency) : ""
-                               font.pixelSize: Theme.body; font.weight: Font.Bold; font.features: { "tnum": 1 }; color: Theme.text }
+                               font.pixelSize: Theme.body; font.weight: Font.Bold; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                     }
-                    FormRow { visible: sheet.preview !== null && sheet.amount !== null; label: qsTr("Umsätze ab Stichtag")
+                    FormRow { visible: sheet.preview !== null && sheet.amount !== null; label: qsTr("Umsätze ab Stichtag"); amounts: true
                               value: sheet.preview ? sheet.preview.counted + " · " + Fmt.money(sheet.preview.sum_cents, sheet.currency) : "" }
                     FormRow { visible: sheet.preview !== null && sheet.amount !== null && sheet.preview.older > 0; label: qsTr("Ältere Umsätze (im Startsaldo enthalten)")
                               value: sheet.preview ? String(sheet.preview.older) : "" }

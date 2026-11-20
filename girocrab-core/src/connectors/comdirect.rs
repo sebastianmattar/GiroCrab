@@ -13,11 +13,11 @@
 
 use async_trait::async_trait;
 use base64::Engine;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    http_client, BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext,
-    FetchResult, Phase, RemoteAccount, RemoteTransaction,
+    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, FetchResult, Phase,
+    RemoteAccount, RemoteTransaction, http_client_same_host, paginate,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -54,13 +54,13 @@ impl ComdirectConnector {
 
     fn client(&mut self) -> CoreResult<reqwest::Client> {
         if self.client.is_none() {
-            self.client = Some(http_client()?);
+            self.client = Some(http_client_same_host()?);
         }
         Ok(self.client.clone().unwrap())
     }
 
     fn request_info(&self) -> String {
-        let req_id = chrono::Local::now().format("%H%M%S%3f").to_string();
+        let req_id = jiff::ZonedDateTime::now().strftime("%H%M%S%3f").to_string();
         json!({"clientRequestId": {"sessionId": self.session_uuid, "requestId": req_id}})
             .to_string()
     }
@@ -131,13 +131,27 @@ impl ComdirectConnector {
         Ok(())
     }
 
-    async fn get(&mut self, path: &str) -> CoreResult<Value> {
+    /// Booked transactions of one account since `since`; a failing page fails
+    /// the sync (see [`super::Paged::complete`]).
+    async fn booked(&self, account_id: &str, since: &str) -> CoreResult<Vec<Value>> {
+        paginate(TX_MAX_PAGES, 0, |first| async move {
+            let page = self
+                .get(&format!(
+                    "/api/banking/v1/accounts/{account_id}/transactions?transactionState=BOOKED&paging-first={first}&paging-count={TX_PAGE}&min-bookingDate={since}"
+                ))
+                .await?;
+            Ok(next_page(page, first, TX_PAGE))
+        })
+        .await?
+        .complete()
+    }
+
+    /// GET after `begin` (which creates the client).
+    async fn get(&self, path: &str) -> CoreResult<Value> {
         if !is_api_path(path) {
-            return Err(CoreError::InvalidInput {
-                message: "unsafe comdirect API path".into(),
-            });
+            return Err(CoreError::invalid("unsafe comdirect API path"));
         }
-        let client = self.client()?;
+        let client = self.client.as_ref().ok_or(CoreError::SessionClosed)?;
         let resp = client
             .get(format!("{BASE}{path}"))
             .bearer_auth(self.token.expose())
@@ -201,37 +215,26 @@ impl ComdirectConnector {
 
     /// The PostBox PDFs created on or after `since` (empty = all), as listed by
     /// the bank; advertisements are left out. `None` when the listing failed.
-    pub(crate) async fn postbox_entries(&mut self, since: &str) -> Option<Vec<Value>> {
-        let mut entries: Vec<Value> = Vec::new();
-        // The v2 route may be missing for some contracts: the first page picks the route.
-        let mut route = None;
-        let mut first = 0usize;
-        for _ in 0..POSTBOX_MAX_PAGES {
-            let page = match route {
-                Some(r) => self.get(&postbox_path(r, first)).await.ok(),
-                None => {
-                    let mut found = None;
-                    for r in [POSTBOX_V2, POSTBOX_V1] {
-                        if let Ok(v) = self.get(&postbox_path(r, first)).await {
-                            route = Some(r);
-                            found = Some(v);
-                            break;
-                        }
-                    }
-                    found
-                }
+    pub(crate) async fn postbox_entries(&self, since: &str) -> Option<Vec<Value>> {
+        // A later page failing keeps the earlier ones. The cursor carries the
+        // route: v2 may be missing for some contracts, so the first page picks it.
+        let listed = paginate(POSTBOX_MAX_PAGES, (None, 0), |(route, first)| async move {
+            let (route, page) = match route {
+                Some(r) => (r, self.get(&postbox_path(r, first)).await?),
+                None => match self.get(&postbox_path(POSTBOX_V2, first)).await {
+                    Ok(page) => (POSTBOX_V2, page),
+                    Err(_) => (
+                        POSTBOX_V1,
+                        self.get(&postbox_path(POSTBOX_V1, first)).await?,
+                    ),
+                },
             };
-            let Some(page) = page else {
-                route?;
-                break;
-            };
-            let got = page["values"].as_array().map_or(0, Vec::len);
-            entries.extend(page["values"].as_array().cloned().unwrap_or_default());
-            first += got;
-            if !has_more_pages(&page, first, got, POSTBOX_PAGE) {
-                break;
-            }
-        }
+            let (values, next) = next_page(page, first, POSTBOX_PAGE);
+            Ok((values, next.map(|next| (Some(route), next))))
+        })
+        .await
+        .ok()?;
+        let mut entries = listed.items;
         entries.retain(|d| {
             let date = postbox_date(d);
             d["mimeType"].as_str().unwrap_or("application/pdf") == "application/pdf"
@@ -414,9 +417,7 @@ impl BankConnector for ComdirectConnector {
             .and_then(|h| h.to_str().ok())
             .map(serde_json::from_str)
             .transpose()?
-            .ok_or_else(|| CoreError::Protocol {
-                message: "missing x-once-authentication-info".into(),
-            })?;
+            .ok_or_else(|| CoreError::protocol("missing x-once-authentication-info"))?;
         self.challenge_id = info["id"].as_str().unwrap_or_default().to_string();
         self.challenge_link = info["link"]["href"].as_str().map(|s| s.to_string());
         let typ = info["typ"].as_str().unwrap_or("");
@@ -461,9 +462,9 @@ impl BankConnector for ComdirectConnector {
                 poll_interval_seconds: 0,
             },
             other => {
-                return Err(CoreError::Protocol {
-                    message: format!("unsupported comdirect TAN type '{other}'"),
-                })
+                return Err(CoreError::protocol(format!(
+                    "unsupported comdirect TAN type '{other}'"
+                )));
             }
         };
         self.challenge = Some(c.clone());
@@ -489,9 +490,9 @@ impl BankConnector for ComdirectConnector {
             }
             ChallengeResponse::Code(tan) => self.activate_session(Some(tan.expose())).await?,
             ChallengeResponse::ConfirmPayee => {
-                return Err(CoreError::Protocol {
-                    message: "comdirect: no payee confirmation pending".into(),
-                })
+                return Err(CoreError::protocol(
+                    "comdirect: no payee confirmation pending",
+                ));
             }
         }
         self.secondary_token(ctx).await?;
@@ -541,27 +542,9 @@ impl BankConnector for ComdirectConnector {
                 balance_cents: json_number_to_cents(&item["balance"]["value"]).unwrap_or(0),
                 balance_date: super::today(),
             });
-            let mut index = 0usize;
             let mut ids = super::ContentIds::default();
-            loop {
-                let page = self
-                    .get(&format!(
-                        "/api/banking/v1/accounts/{id}/transactions?transactionState=BOOKED&paging-first={index}&paging-count={TX_PAGE}&min-bookingDate={}",
-                        ctx.since
-                    ))
-                    .await?;
-                let values = page["values"].as_array().cloned().unwrap_or_default();
-                for t in &values {
-                    let mut rt = map_transaction(t, &id);
-                    if rt.external_id.is_empty() {
-                        rt.external_id = ids.next(&rt);
-                    }
-                    out.transactions.push(rt);
-                    index += 1;
-                }
-                if !has_more_pages(&page, index, values.len(), TX_PAGE) {
-                    break;
-                }
+            for t in &self.booked(&id, &ctx.since).await? {
+                out.transactions.push(booked_transaction(t, &id, &mut ids));
             }
             // Not yet booked (card holds, pending transfers). Best effort: an error or a
             // missing right just means no holds; the booked bookings stay untouched.
@@ -573,27 +556,17 @@ impl BankConnector for ComdirectConnector {
             {
                 let mut hold_ids = super::ContentIds::default();
                 for t in page["values"].as_array().cloned().unwrap_or_default() {
-                    let mut rt = map_transaction(&t, &id);
-                    if rt.booking_date.is_empty() {
-                        rt.booking_date = if rt.value_date.is_empty() {
-                            super::today()
-                        } else {
-                            rt.value_date.clone()
-                        };
-                    }
-                    if rt.booking_text.is_empty() {
-                        rt.booking_text = tr("Vorgemerkt").into();
-                    }
-                    rt.external_id = format!("{HOLD_PREFIX}{}", hold_ids.next(&rt));
-                    out.transactions.push(rt);
+                    out.transactions
+                        .push(hold_transaction(&t, &id, &mut hold_ids));
                 }
             } else {
                 holds_ok = false;
             }
         }
         // PostBox documents (optional, errors are ignored; not when document retrieval is off)
-        if ctx.settings.contains_key(super::DOCUMENTS_OFF) {
-        } else if let Some(first) = out.accounts.first().map(|a| a.external_ref.clone()) {
+        if ctx.documents.enabled()
+            && let Some(first) = out.accounts.first().map(|a| a.external_ref.clone())
+        {
             let docs = self.postbox(&first, &ctx.since).await;
             out.documents.extend(docs);
         }
@@ -691,20 +664,22 @@ impl BankConnector for ComdirectConnector {
     }
 
     async fn finish(&mut self, _ctx: &ConnectContext) {
-        if !self.token.is_empty() {
-            if let Ok(c) = self.client() {
-                let _ = c
-                    .delete(format!("{BASE}/oauth/revoke"))
-                    .bearer_auth(self.token.expose())
-                    .send()
-                    .await;
-            }
+        if !self.token.is_empty()
+            && let Ok(c) = self.client()
+        {
+            let _ = c
+                .delete(format!("{BASE}/oauth/revoke"))
+                .bearer_auth(self.token.expose())
+                .send()
+                .await;
         }
         self.token = SecretString::default();
     }
 }
 
 const TX_PAGE: usize = 500;
+/// Upper bound for booking pages per account (100,000 bookings).
+const TX_MAX_PAGES: usize = 200;
 const POSTBOX_PAGE: usize = 50;
 /// Upper bound for PostBox listing pages (500 documents).
 const POSTBOX_MAX_PAGES: usize = 10;
@@ -715,17 +690,23 @@ fn postbox_path(route: &str, first: usize) -> String {
     format!("{route}?paging-first={first}&paging-count={POSTBOX_PAGE}")
 }
 
-/// Whether another page follows. `fetched` = entries received so far, `got` = size
-/// of this page. Without `paging.matches` a full page means "maybe more" (the
-/// next request then ends with an empty page).
-fn has_more_pages(page: &Value, fetched: usize, got: usize, page_size: usize) -> bool {
-    if got == 0 {
-        return false;
-    }
-    match page["paging"]["matches"].as_u64() {
-        Some(total) => (fetched as u64) < total,
-        None => got >= page_size,
-    }
+/// The entries of one offset-paged answer that started at `first`, and the
+/// offset of the next page (`None` after the last one). Without
+/// `paging.matches` a full page means "maybe more" (the next request then
+/// ends with an empty page). A body that is not an object (array, string,
+/// error page) counts as an empty last page.
+fn next_page(mut page: Value, first: usize, page_size: usize) -> (Vec<Value>, Option<usize>) {
+    // `get_mut`, not `page["values"]`: `IndexMut` panics on a non-object
+    let Some(Value::Array(values)) = page.get_mut("values").map(Value::take) else {
+        return (Vec::new(), None);
+    };
+    let fetched = first + values.len();
+    let more = !values.is_empty()
+        && match page["paging"]["matches"].as_u64() {
+            Some(total) => (fetched as u64) < total,
+            None => values.len() >= page_size,
+        };
+    (values, more.then_some(fetched))
 }
 
 /// A SEPA reference; the placeholder `NOTPROVIDED` counts as "unknown".
@@ -763,6 +744,72 @@ fn map_transaction(t: &Value, account_ref: &str) -> RemoteTransaction {
         mandate_id: sepa_ref(&t["directDebitMandateId"]),
         creditor_id: sepa_ref(&t["directDebitCreditorId"]),
         ..Default::default()
+    }
+}
+
+/// A booked entry with its id: the bank's `reference`, else a content id.
+/// The card merchant is filled in only afterwards, so the id stays the one
+/// earlier versions stored (#1135).
+fn booked_transaction(
+    t: &Value,
+    account_ref: &str,
+    ids: &mut super::ContentIds,
+) -> RemoteTransaction {
+    let mut rt = map_transaction(t, account_ref);
+    if rt.external_id.is_empty() {
+        rt.external_id = ids.next(&rt);
+    }
+    fill_card_merchant(&mut rt);
+    rt
+}
+
+/// A not yet booked entry (card hold, pending transfer) with its hold id and a
+/// date and text to show. Like [`booked_transaction`], the card merchant comes
+/// after the id.
+fn hold_transaction(
+    t: &Value,
+    account_ref: &str,
+    ids: &mut super::ContentIds,
+) -> RemoteTransaction {
+    let mut rt = map_transaction(t, account_ref);
+    if rt.booking_date.is_empty() {
+        rt.booking_date = if rt.value_date.is_empty() {
+            super::today()
+        } else {
+            rt.value_date.clone()
+        };
+    }
+    if rt.booking_text.is_empty() {
+        rt.booking_text = tr("Vorgemerkt").into();
+    }
+    rt.external_id = format!("{HOLD_PREFIX}{}", ids.next(&rt));
+    fill_card_merchant(&mut rt);
+    rt
+}
+
+/// The merchant of a comdirect Visa debit card payment. Neither the REST API
+/// nor FinTS name a counterparty for these bookings (GitHub #1135); the
+/// purpose reads `<merchant>, <place …> … comdirect Visa-Debitkarte <time>`.
+/// Returns the text before the first comma, `None` for any other purpose or
+/// when that comma does not come before the card note.
+pub(crate) fn visa_debit_merchant(purpose: &str) -> Option<String> {
+    const CARD: &str = "visa-debitkarte";
+    let (head, rest) = purpose.split_once(',')?;
+    if head.to_lowercase().contains(CARD) || !rest.to_lowercase().contains(CARD) {
+        return None;
+    }
+    let name = head.trim();
+    (name.chars().count() <= 60 && name.chars().any(char::is_alphabetic)).then(|| name.to_string())
+}
+
+/// Gives a booking without counterparty the merchant of its card payment
+/// (see [`visa_debit_merchant`]); a counterparty from the bank stays. Call it
+/// after the id is set: content ids include the counterparty.
+pub(crate) fn fill_card_merchant(t: &mut RemoteTransaction) {
+    if t.counterparty.trim().is_empty()
+        && let Some(merchant) = visa_debit_merchant(&t.purpose)
+    {
+        t.counterparty = merchant;
     }
 }
 
@@ -1045,13 +1092,36 @@ mod tests {
 
     #[test]
     fn paging_continues_without_matches_only_on_full_page() {
-        let with = |m: u64| serde_json::json!({"paging": {"matches": m}});
-        assert!(super::has_more_pages(&with(1200), 500, 500, 500));
-        assert!(!super::has_more_pages(&with(500), 500, 500, 500));
-        let none = serde_json::json!({});
-        assert!(super::has_more_pages(&none, 500, 500, 500));
-        assert!(!super::has_more_pages(&none, 120, 120, 500));
-        assert!(!super::has_more_pages(&none, 500, 0, 500));
+        let next = |first: usize, got: usize, matches: Option<u64>| {
+            let page = serde_json::json!({
+                "values": vec![serde_json::json!({}); got],
+                "paging": {"matches": matches},
+            });
+            let (values, next) = super::next_page(page, first, 500);
+            assert_eq!(values.len(), got);
+            next
+        };
+        assert_eq!(next(0, 500, Some(1200)), Some(500));
+        assert_eq!(next(500, 500, Some(1200)), Some(1000));
+        assert_eq!(next(0, 500, Some(500)), None);
+        assert_eq!(next(0, 500, None), Some(500));
+        assert_eq!(next(0, 120, None), None);
+        assert_eq!(next(500, 0, None), None);
+    }
+
+    #[test]
+    fn paging_ends_on_a_body_that_is_not_an_object() {
+        for page in [
+            serde_json::json!([{"values": []}]),
+            serde_json::json!("<html>Wartung</html>"),
+            serde_json::json!(42),
+            serde_json::json!(null),
+            serde_json::json!({"values": "x"}),
+        ] {
+            let (values, next) = super::next_page(page, 0, 500);
+            assert!(values.is_empty());
+            assert_eq!(next, None);
+        }
     }
 
     #[test]
@@ -1180,5 +1250,106 @@ mod tests {
         assert_eq!(t.booking_date, "");
         assert_eq!(t.value_date, "2026-11-12");
         assert!(t.external_id.is_empty());
+    }
+
+    /// A Visa debit card payment as comdirect sends it (#1135): no creditor
+    /// name, the merchant first in 35-character remittance lines.
+    fn card_payment(creditor: &str, lines: &[&str]) -> serde_json::Value {
+        let info: String = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{:02}{l:<35}", i + 1))
+            .collect();
+        serde_json::json!({
+            "reference": "R1", "bookingDate": "2026-11-14", "valutaDate": "2026-11-14",
+            "amount": {"value": "-23.40", "unit": "EUR"},
+            "creditor": {"holderName": creditor},
+            "remittanceInfo": info.trim_end(),
+            "transactionType": {"key": "DIRECT_DEBIT", "text": "Lastschrift / Belastung"}
+        })
+    }
+
+    #[test]
+    fn visa_debit_payment_gets_its_merchant_as_counterparty() {
+        let lines = [
+            "Beispielladen GmbH, Musterstadt DE",
+            "Kartenzahlung am 14.11.2026",
+            "comdirect Visa-Debitkarte 12:34:56",
+        ];
+        let mut ids = crate::connectors::ContentIds::default();
+        let t = super::booked_transaction(&card_payment("", &lines), "acc1", &mut ids);
+        assert_eq!(t.counterparty, "Beispielladen GmbH");
+        assert_eq!(t.external_id, "R1");
+        // the purpose stays as the bank sent it
+        assert_eq!(
+            t.purpose,
+            "Beispielladen GmbH, Musterstadt DE Kartenzahlung am 14.11.2026 comdirect Visa-Debitkarte 12:34:56"
+        );
+        // a name from the bank is kept
+        let named =
+            super::booked_transaction(&card_payment("Muster Markt", &lines), "acc1", &mut ids);
+        assert_eq!(named.counterparty, "Muster Markt");
+    }
+
+    #[test]
+    fn card_merchant_does_not_change_content_ids() {
+        // ids without the bank's reference come from the content, which includes
+        // the counterparty: they must stay the ones stored before #1135
+        let lines = [
+            "Beispielladen GmbH, Musterstadt DE",
+            "comdirect Visa-Debitkarte 12:34:56",
+        ];
+        let mut no_ref = card_payment("", &lines);
+        no_ref["reference"] = serde_json::Value::Null;
+        let before = |t: &serde_json::Value| {
+            let mut ids = crate::connectors::ContentIds::default();
+            ids.next(&super::map_transaction(t, "acc1"))
+        };
+        let booked = super::booked_transaction(
+            &no_ref,
+            "acc1",
+            &mut crate::connectors::ContentIds::default(),
+        );
+        assert_eq!(booked.counterparty, "Beispielladen GmbH");
+        assert_eq!(booked.external_id, before(&no_ref));
+        // a hold: the date it gets is part of its id, the merchant is not
+        no_ref["bookingDate"] = serde_json::Value::Null;
+        let hold = super::hold_transaction(
+            &no_ref,
+            "acc1",
+            &mut crate::connectors::ContentIds::default(),
+        );
+        assert_eq!(hold.counterparty, "Beispielladen GmbH");
+        let mut unnamed = super::map_transaction(&no_ref, "acc1");
+        unnamed.booking_date = "2026-11-14".into();
+        unnamed.booking_text = "Lastschrift / Belastung".into();
+        let id = crate::connectors::ContentIds::default().next(&unnamed);
+        assert_eq!(hold.external_id, format!("{}{id}", super::HOLD_PREFIX));
+    }
+
+    #[test]
+    fn visa_debit_merchant_only_for_card_payments() {
+        use super::visa_debit_merchant as merchant;
+        assert_eq!(
+            merchant("PAYPAL *SHOP, 4029357733 DE ... comdirect Visa-Debitkarte 08:15:00")
+                .as_deref(),
+            Some("PAYPAL *SHOP")
+        );
+        // no card payment, no comma, or nothing readable before the comma
+        assert_eq!(merchant("Miete Januar, Wohnung 3"), None);
+        assert_eq!(
+            merchant("Beispielladen comdirect Visa-Debitkarte 12:34:56"),
+            None
+        );
+        assert_eq!(
+            merchant("1234, Musterstadt comdirect Visa-Debitkarte"),
+            None
+        );
+        assert_eq!(merchant(", Musterstadt comdirect Visa-Debitkarte"), None);
+        // the only comma comes after the card note: no merchant from that part
+        assert_eq!(
+            merchant("Beispielladen Musterstadt comdirect Visa-Debitkarte 12:34:56, Ref 1"),
+            None
+        );
     }
 }

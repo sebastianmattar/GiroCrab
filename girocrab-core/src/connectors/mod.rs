@@ -23,6 +23,7 @@ pub mod broker_documents;
 pub mod bunq;
 pub mod comdirect;
 pub(crate) mod comdirect_postbox;
+pub(crate) mod consorsbank_archive;
 pub mod demo;
 pub mod dpop;
 pub mod easybank;
@@ -51,12 +52,15 @@ pub mod volkswagen_bank;
 pub(crate) mod account_selection;
 pub use account_selection::ConnectionAccountChoice;
 mod catalog;
+mod html;
+mod paging;
 mod persist;
 mod sync_session;
 mod transfer_session;
 mod types;
 
 pub use catalog::*;
+pub(crate) use paging::{Paged, paginate};
 pub use persist::*;
 pub use sync_session::*;
 pub use transfer_session::*;
@@ -90,14 +94,17 @@ pub(crate) fn http_client() -> CoreResult<reqwest::Client> {
 /// Redirect policy for clients that send credentials (login forms, tokens, API
 /// keys): follows a redirect only inside the same host, so a bank or portal
 /// answer (or a man in the middle) cannot make the client replay a login body,
-/// session token or refresh token to a different host. A cross-host redirect
-/// ends the chain; the 3xx answer is then returned as it is.
+/// session token or refresh token to a different host. Scheme and port must stay
+/// the same too (no https -> http downgrade, no other service on the host). A
+/// redirect to another origin ends the chain; the 3xx answer is then returned as it is.
 pub(crate) fn same_host_redirects() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
-        let same = attempt
-            .previous()
-            .last()
-            .is_some_and(|prev| prev.host_str() == attempt.url().host_str());
+        let next = attempt.url();
+        let same = attempt.previous().last().is_some_and(|prev| {
+            prev.scheme() == next.scheme()
+                && prev.host_str() == next.host_str()
+                && prev.port_or_known_default() == next.port_or_known_default()
+        });
         if same && attempt.previous().len() < 10 {
             attempt.follow()
         } else {
@@ -108,13 +115,7 @@ pub(crate) fn same_host_redirects() -> reqwest::redirect::Policy {
 
 /// [`http_client`] with [`same_host_redirects`], for connectors that post credentials.
 pub(crate) fn http_client_same_host() -> CoreResult<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .user_agent(concat!(
-            "GiroCrab/",
-            env!("CARGO_PKG_VERSION"),
-            " (open source; +https://github.com/)"
-        ))
-        .timeout(std::time::Duration::from_secs(60))
+    Ok(client_builder(Duration::from_secs(60))
         .cookie_store(true)
         .redirect(same_host_redirects())
         .build()?)
@@ -136,17 +137,15 @@ pub(crate) fn ensure_secure_fints_url(url: &str) -> CoreResult<()> {
         if fints_presets::is_valid_fints_url(url.trim()) {
             return Ok(());
         }
-        return Err(CoreError::Protocol {
-            message: "FinTS URL is not a public https address".to_string(),
-        });
+        return Err(CoreError::protocol(
+            "FinTS URL is not a public https address",
+        ));
     }
     #[cfg(test)]
     if lower.starts_with("http://127.0.0.1") || lower.starts_with("http://localhost") {
         return Ok(());
     }
-    Err(CoreError::Protocol {
-        message: "FinTS URL must use https://".to_string(),
-    })
+    Err(CoreError::protocol("FinTS URL must use https://"))
 }
 
 /// Upper bound for JSON / text / FinTS responses.
@@ -198,9 +197,7 @@ pub(crate) async fn read_json_or_null(resp: reqwest::Response) -> serde_json::Va
     }
 }
 
-pub(crate) fn today() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
-}
+pub(crate) use crate::dates::today_iso as today;
 
 #[cfg(test)]
 mod tests;

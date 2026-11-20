@@ -83,7 +83,7 @@ pub(super) fn card_amount_cents(a: &Value) -> Option<i64> {
 }
 
 /// Allowed authorisation that has not been cleared (booked) or expired yet.
-pub(super) fn is_open_hold(a: &Value, now: chrono::NaiveDateTime) -> bool {
+pub(super) fn is_open_hold(a: &Value, now: jiff::civil::DateTime) -> bool {
     if a["decision"].as_str() != Some("ALLOWED") {
         return false;
     }
@@ -98,7 +98,7 @@ pub(super) fn is_open_hold(a: &Value, now: chrono::NaiveDateTime) -> bool {
     }
     let expired = |k: &str| {
         a[k].as_str()
-            .and_then(|t| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f").ok())
+            .and_then(|t| jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", t).ok())
             .is_some_and(|t| t < now)
     };
     !(expired("reservation_expiry_time") || expired("clearing_expiry_time"))
@@ -184,8 +184,7 @@ pub(super) fn is_request_payment(p: &Value) -> bool {
 /// reference, so match the amount and the answer time (the payment is
 /// created in the same instant; observed: 0.1 s apart).
 pub(super) fn match_request_response(p: &Value, responses: &[Value]) -> Option<i64> {
-    let ts =
-        |v: &Value| chrono::NaiveDateTime::parse_from_str(v.as_str()?, "%Y-%m-%d %H:%M:%S%.f").ok();
+    let ts = |v: &Value| jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", v.as_str()?).ok();
     let paid = ts(&p["created"])?;
     let cents = json_number_to_cents(&p["amount"]["value"]).ok()?.abs();
     responses
@@ -197,7 +196,10 @@ pub(super) fn match_request_response(p: &Value, responses: &[Value]) -> Option<i
                 .is_ok_and(|c| c.abs() == cents)
         })
         .filter_map(|r| {
-            let gap = (ts(&r["time_responded"])? - paid).num_milliseconds().abs();
+            let gap = ts(&r["time_responded"])?
+                .duration_since(paid)
+                .as_millis()
+                .abs();
             (gap <= 120_000).then_some((gap, r["id"].as_i64()?))
         })
         .min()
@@ -344,11 +346,11 @@ pub(super) fn receipt_document(
 pub(super) fn statement_document(
     account: &RemoteAccount,
     account_id: i64,
-    first: chrono::NaiveDate,
-    last: chrono::NaiveDate,
+    first: jiff::civil::Date,
+    last: jiff::civil::Date,
     bytes: Vec<u8>,
 ) -> crate::documents::RemoteDocument {
-    let month = first.format("%Y-%m").to_string();
+    let month = first.strftime("%Y-%m").to_string();
     crate::documents::RemoteDocument {
         account_ref: account.external_ref.clone(),
         booking_external_id: None,
@@ -358,21 +360,20 @@ pub(super) fn statement_document(
         file_name: format!("{month}_bunq_{}.pdf", slug(&account.name)),
         bytes,
         source_url: format!("bunq:statement:{account_id}:{month}"),
-        date: last.format("%Y-%m-%d").to_string(),
+        date: crate::dates::iso(last),
     }
 }
 
 /// The `n` most recent completed calendar months as (first day, last day), newest first.
 pub(super) fn completed_months(
-    today: chrono::NaiveDate,
+    today: jiff::civil::Date,
     n: u32,
-) -> Vec<(chrono::NaiveDate, chrono::NaiveDate)> {
-    use chrono::Datelike;
+) -> Vec<(jiff::civil::Date, jiff::civil::Date)> {
     let mut out = Vec::new();
-    let mut first_of_this = today.with_day(1).unwrap_or(today);
+    let mut first_of_this = today.first_of_month();
     for _ in 0..n {
-        let last = first_of_this.pred_opt().unwrap_or(first_of_this);
-        let first = last.with_day(1).unwrap_or(last);
+        let last = first_of_this.yesterday().unwrap_or(first_of_this);
+        let first = last.first_of_month();
         out.push((first, last));
         first_of_this = first;
     }
@@ -381,9 +382,9 @@ pub(super) fn completed_months(
 
 /// bunq timestamps are UTC ("2026-11-10 12:34:56.123456"); bookings use the local date.
 pub(super) fn local_date(ts: &str) -> Option<String> {
-    let naive = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S%.f").ok()?;
-    let local = naive.and_utc().with_timezone(&chrono::Local);
-    Some(local.format("%Y-%m-%d").to_string())
+    let naive = jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", ts).ok()?;
+    let utc = jiff::tz::TimeZone::UTC.to_timestamp(naive).ok()?;
+    Some(crate::dates::iso(crate::dates::local_date(utc)))
 }
 
 pub(super) fn booking_text(kind: &str, sub_type: &str) -> String {

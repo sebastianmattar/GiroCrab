@@ -7,8 +7,9 @@
 use regex::{Regex, RegexBuilder};
 
 use crate::error::{CoreError, CoreResult};
+use crate::i18n::tr;
 use crate::models::{MatchKind, Rule, RuleField};
-use crate::search_expr::{ExprInput, Prepared, SearchExpr};
+use crate::search_expr::{ExprInput, Prepared, SearchExpr, SearchExprError};
 
 /// The text fields of a transaction a rule can look at.
 pub struct RuleInput<'a> {
@@ -117,13 +118,30 @@ pub const MAX_PATTERN_LEN: usize = 2048;
 
 impl CompiledRule {
     pub fn compile(rule: Rule) -> CoreResult<Self> {
+        Self::compile_with(rule, SearchExpr::parse)
+    }
+
+    /// Like [`compile`](Self::compile), but an expression may not use fields
+    /// GiroCrab doesn't store. Imported rules keep them (they never match);
+    /// a rule saved from the editor may not.
+    pub(crate) fn compile_supported(rule: Rule) -> CoreResult<Self> {
+        Self::compile_with(rule, SearchExpr::parse_supported)
+    }
+
+    fn compile_with(
+        rule: Rule,
+        parse_expr: fn(&str) -> Result<SearchExpr, SearchExprError>,
+    ) -> CoreResult<Self> {
+        // Parse an expression before the byte check: the parser has its own,
+        // lower limit in characters and its message names it.
+        let expr = match rule.match_kind {
+            MatchKind::Expression => Some(parse_expr(&rule.pattern)?),
+            MatchKind::Keyword | MatchKind::Regex => None,
+        };
         if rule.pattern.len() > MAX_PATTERN_LEN {
-            return Err(CoreError::invalid(format!(
-                "rule pattern longer than {MAX_PATTERN_LEN} bytes"
-            )));
+            return Err(CoreError::invalid(tr("Das Suchmuster ist zu lang.")));
         }
-        if rule.match_kind == MatchKind::Expression {
-            let expr = SearchExpr::parse(&rule.pattern)?;
+        if let Some(expr) = expr {
             return Ok(CompiledRule {
                 rule,
                 matcher: Matcher::Expr(expr),
@@ -433,5 +451,28 @@ mod tests {
         t.amount_cents = 500;
         assert_eq!(set.categorise(&t), None, "max amount 0 still applies");
         assert!(RuleSet::new(vec![rule("(REWE", MatchKind::Expression)]).is_err());
+    }
+
+    #[test]
+    fn overlong_pattern_is_rejected_in_the_ui_language() {
+        use crate::i18n::{Lang, with_language};
+        let long = "a".repeat(MAX_PATTERN_LEN + 1);
+        for (kind, expected) in [
+            (MatchKind::Keyword, "The pattern is too long."),
+            (MatchKind::Regex, "The pattern is too long."),
+            (
+                MatchKind::Expression,
+                "The search expression is too long (at most 2000 characters).",
+            ),
+        ] {
+            let result = with_language(Lang::En, || CompiledRule::compile(rule(&long, kind)));
+            let Err(CoreError::InvalidInput { message }) = result else {
+                panic!("{kind:?}: expected InvalidInput");
+            };
+            assert_eq!(message, expected, "{kind:?}");
+        }
+        assert!(
+            CompiledRule::compile(rule(&"a".repeat(MAX_PATTERN_LEN), MatchKind::Keyword)).is_ok()
+        );
     }
 }

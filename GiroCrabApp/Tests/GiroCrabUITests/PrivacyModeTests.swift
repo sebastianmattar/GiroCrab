@@ -20,6 +20,14 @@ final class PrivacyModeTests: XCTestCase {
         XCTAssertEqual(PrivacyMode.redaction(enabled: true, scope: .personal), [.personal, .amounts])
     }
 
+    /// #1007: switching privacy mode on without picking a scope hides names and purposes too.
+    func testDefaultScopeHidesPersonalData() {
+        XCTAssertEqual(PrivacyMode.defaultScope, .personal)
+        let redaction = PrivacyMode.redaction(enabled: true, scope: PrivacyMode.defaultScope)
+        XCTAssertTrue(redaction.contains(.personal))
+        XCTAssertTrue(redaction.contains(.amounts))
+    }
+
     func testLaunchOptionsPrivacyFlags() {
         XCTAssertTrue(LaunchOptions(arguments: ["app"]).redaction.isEmpty)
 

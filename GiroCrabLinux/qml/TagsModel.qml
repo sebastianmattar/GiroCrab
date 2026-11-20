@@ -128,6 +128,13 @@ QtObject {
         }
         if (!changed.length) return
         showTag(tagID, changed, adding)
+        if (TagFilter.isActive && AppModel.sidebarSelection !== "newBookings") {
+            if (AppModel.selectedBookingID !== null && changed.indexOf(AppModel.selectedBookingID) >= 0) {
+                const cur = AppModel.bookings.find(b => b.id === AppModel.selectedBookingID)
+                if (cur) AppModel.stickyBooking = cur
+            }
+            AppModel.reloadBookings()
+        }
         reload()
         const name = historyName || (adding ? qsTr("Tag hinzufügen") : qsTr("Tag entfernen"))
         UndoManager.register(name, () => tm.changeTag(tagID, changed, !adding, name))

@@ -181,14 +181,14 @@ pub fn parse<'a>(
     let mut txs = Vec::new();
     let mut balance = None;
     for s in segments {
-        if balance.is_none() {
-            if let Some(cents) = signed(s.get(3, 1), s.get(3, 0)) {
-                balance = Some(CardBalance {
-                    cents,
-                    currency: s.get(3, 2).to_string(),
-                    date: iso_date(s.get(3, 3)).unwrap_or_default(),
-                });
-            }
+        if balance.is_none()
+            && let Some(cents) = signed(s.get(3, 1), s.get(3, 0))
+        {
+            balance = Some(CardBalance {
+                cents,
+                currency: s.get(3, 2).to_string(),
+                date: iso_date(s.get(3, 3)).unwrap_or_default(),
+            });
         }
         let l = layout(s);
         for el in s.elements.iter().skip(6) {

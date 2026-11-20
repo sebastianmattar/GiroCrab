@@ -35,3 +35,51 @@ final class DocumentFiltersTests: XCTestCase {
         XCTAssertEqual(DocumentFilters.apply(list, type: nil, year: nil).count, 3)
     }
 }
+
+/// Bank connection filter of "Belege & PostBox" (#1042).
+@MainActor
+final class DocumentsConnectionFilterTests: XCTestCase {
+    private func model() -> AppModel {
+        AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
+    }
+
+    func testConnectionFilterNarrowsAccountMenuAndResetsForeignAccount() throws {
+        let model = model()
+        let withConnection = model.accountsByID.values.filter { $0.connectionId != nil }
+        let first = try XCTUnwrap(withConnection.first)
+        let cid = try XCTUnwrap(first.connectionId)
+        model.selectDocumentsConnection(cid)
+        let offered = model.documentsAccountSections.flatMap(\.accounts)
+        XCTAssertFalse(offered.isEmpty)
+        XCTAssertTrue(offered.allSatisfy { $0.connectionId == cid })
+
+        // an account of the chosen connection stays selected …
+        model.documentsAccountFilter = first.id
+        model.selectDocumentsConnection(cid)
+        XCTAssertEqual(model.documentsAccountFilter, first.id)
+        // … one of another connection (or "Ohne Konto") is reset
+        if let other = withConnection.first(where: { $0.connectionId != cid }) {
+            model.documentsAccountFilter = other.id
+            model.selectDocumentsConnection(cid)
+            XCTAssertNil(model.documentsAccountFilter)
+        }
+        model.documentsAccountFilter = AppModel.documentsWithoutAccount
+        model.selectDocumentsConnection(cid)
+        XCTAssertNil(model.documentsAccountFilter)
+    }
+
+    func testWithoutAccountEntryShowsOnlyDocumentsWithoutAccount() {
+        let model = model()
+        model.selectDocumentsConnection(AppModel.documentsWithoutAccount)
+        XCTAssertTrue(model.allDocuments(connectionId: model.documentsConnectionFilter).allSatisfy { $0.accountId == nil })
+        // the full account menu is untouched by "Ohne Konto"
+        XCTAssertEqual(model.documentsAccountSections.count, model.accountMenuSections.count)
+    }
+
+    func testListOnlyHoldsDocumentsOfTheChosenConnection() throws {
+        let model = model()
+        let cid = try XCTUnwrap(model.accountsByID.values.compactMap(\.connectionId).first)
+        let docs = model.allDocuments(connectionId: cid)
+        XCTAssertTrue(docs.allSatisfy { d in d.accountId.flatMap { model.accountsByID[$0]?.connectionId } == cid })
+    }
+}

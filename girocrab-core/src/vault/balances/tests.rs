@@ -231,12 +231,8 @@ fn computed_balance_counts_pending_and_stops_at_the_opening_date() {
 fn header_chart_agrees_with_the_list_on_a_computed_balance() {
     let v = vault("rb-chart");
     let a = account(&v, "Import", None);
-    let today = chrono::Local::now().date_naive();
-    let day = |back: i64| {
-        (today - chrono::Duration::days(back))
-            .format("%Y-%m-%d")
-            .to_string()
-    };
+    let today = crate::dates::today();
+    let day = |back: i64| crate::dates::iso(today - crate::dates::days(back));
     add(&v, a, "b1", &day(3), -1_000);
     add(&v, a, "b2", &day(2), 400);
     add(&v, a, "pending-1", &day(0), -50);
@@ -291,7 +287,9 @@ fn legacy_advanzia_hold_never_changes_a_reported_balance_or_running_history() {
     );
     let db = v.db().unwrap();
     assert_eq!(super::booked_after(&db, a, "2026-03-02").unwrap(), 0);
-    assert!(super::booked_per_day(&db, &[a], "2026-03-02", None)
-        .unwrap()
-        .is_empty());
+    assert!(
+        super::booked_per_day(&db, &[a], "2026-03-02", None)
+            .unwrap()
+            .is_empty()
+    );
 }

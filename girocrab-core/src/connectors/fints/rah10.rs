@@ -1,7 +1,7 @@
 //! RAH-10 message protection. No payment jobs are enabled by this module.
 //! Protocol reference: HBCI4Java HBCIPassportRAH10, Sig and Crypt.
-use aes::cipher::{block_padding::NoPadding, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
-use rsa::{hazmat, traits::PublicKeyParts, BoxedUint, PrivateKey, PublicKey};
+use aes::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit, block_padding::NoPadding};
+use rsa::{BoxedUint, PrivateKey, PublicKey, hazmat, traits::PublicKeyParts};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -10,11 +10,12 @@ use super::{
     syntax::{self, SegmentBuilder, Value},
 };
 use crate::error::{CoreError, CoreResult};
+use crate::i18n::tr;
 
 fn error() -> CoreError {
-    CoreError::Protocol {
-        message: "RAH-10-Nachricht unvollständig oder kryptografisch nicht verifiziert.".into(),
-    }
+    CoreError::protocol(tr(
+        "RAH-10-Nachricht unvollständig oder kryptografisch nicht verifiziert.",
+    ))
 }
 fn crypto(_: impl std::fmt::Debug) -> CoreError {
     error()
@@ -116,9 +117,9 @@ impl Rah10 {
                 .map(|(i, _)| i)
                 .collect();
             if matches.is_empty() {
-                return Err(CoreError::InvalidInput {
-                    message: "Öffentliche Bankschlüssel fehlen. Bitte im Einrichtungsdialog die Bankschlüssel abrufen und ihre Prüfwerte unabhängig mit der Commerzbank-Quelle vergleichen.".into(),
-                });
+                return Err(CoreError::invalid(tr(
+                    "Öffentliche Bankschlüssel fehlen. Bitte im Einrichtungsdialog die Bankschlüssel abrufen und ihre Prüfwerte unabhängig mit der Commerzbank-Quelle vergleichen.",
+                )));
             }
             if matches.len() != 1 {
                 return Err(error());
@@ -151,8 +152,8 @@ impl Rah10 {
         }
         let counter = self.next_signature;
         self.next_signature += 1; // consumed even if sending fails
-        let now = chrono::Local::now();
-        let timestamp = format!("1:{}:{}", now.format("%Y%m%d"), now.format("%H%M%S"));
+        let now = jiff::ZonedDateTime::now();
+        let timestamp = format!("1:{}:{}", now.strftime("%Y%m%d"), now.strftime("%H%M%S"));
         let reference = counter.to_string();
         let i = &self.identity;
         let keyname = |kind, number, version| {
@@ -286,7 +287,9 @@ impl Rah10 {
         }
         let ranges = segment_ranges(&plain)?;
         let inner = syntax::parse(&plain)?;
+        // Every returned segment must lie inside the span the signature check uses.
         if inner.len() < 3
+            || inner.len() != ranges.len()
             || inner[0].id() != "HNSHK"
             || inner.last().map(|s| s.id()) != Some("HNSHA")
         {
@@ -321,10 +324,15 @@ impl Rah10 {
 }
 
 // Exact segment ranges, skipping escaped bytes and length-delimited binary values.
+// Uses the framing rules of `syntax::parse`: '@len@' starts a binary value only at the
+// start of a component, and line breaks before a segment are ignored. The signed span
+// and the returned segments must come from the same framing.
 fn segment_ranges(data: &[u8]) -> CoreResult<Vec<(usize, usize)>> {
     let mut result = Vec::new();
     let mut start = 0;
     let mut offset = 0;
+    let mut component_start = true;
+    let mut segment_start = true;
     while offset < data.len() {
         match data[offset] {
             b'?' => {
@@ -332,8 +340,10 @@ fn segment_ranges(data: &[u8]) -> CoreResult<Vec<(usize, usize)>> {
                 if offset > data.len() {
                     return Err(error());
                 }
+                component_start = false;
+                segment_start = false;
             }
-            b'@' => {
+            b'@' if component_start => {
                 let length_start = offset + 1;
                 let end = data[length_start..]
                     .iter()
@@ -348,13 +358,27 @@ fn segment_ranges(data: &[u8]) -> CoreResult<Vec<(usize, usize)>> {
                     .checked_add(length)
                     .filter(|&n| n <= data.len())
                     .ok_or_else(error)?;
+                component_start = false;
+                segment_start = false;
+            }
+            b':' | b'+' => {
+                offset += 1;
+                component_start = true;
+                segment_start = false;
             }
             b'\'' => {
                 offset += 1;
                 result.push((start, offset));
                 start = offset;
+                component_start = true;
+                segment_start = true;
             }
-            _ => offset += 1,
+            b'\r' | b'\n' if segment_start => offset += 1,
+            _ => {
+                offset += 1;
+                component_start = false;
+                segment_start = false;
+            }
         }
     }
     if start != data.len() {

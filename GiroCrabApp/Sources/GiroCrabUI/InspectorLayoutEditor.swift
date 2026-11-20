@@ -7,11 +7,12 @@ struct InspectorSectionCard: View {
     let booking: Booking
     /// In the edit mode a card that would not show for this booking stands in as a placeholder.
     var placeholderWhenEmpty = false
+    var scrollToNote: (() -> Void)?
 
     var body: some View {
         switch section {
         case .receipt: ReceiptCard(booking: booking)
-        case .note: NoteCard(booking: booking)
+        case .note: NoteCard(booking: booking, scrollToNote: scrollToNote)
         case .tags: TagsCard(booking: booking)
         case .salary:
             if booking.amountCents > 0 {

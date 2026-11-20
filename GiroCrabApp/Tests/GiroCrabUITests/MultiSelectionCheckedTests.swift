@@ -10,7 +10,7 @@ final class MultiSelectionCheckedTests: XCTestCase {
     private var model: AppModel!
 
     override func setUp() async throws {
-        UserDefaults.standard.removeObject(forKey: AutoReviewDelay.defaultsKey)
+        AppDefaults.store.removeObject(forKey: AutoReviewDelay.defaultsKey)
         model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
         XCTAssertEqual(model.vaultState, .open)
         model.statusFilter = .all

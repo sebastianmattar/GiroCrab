@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreError;
+use crate::i18n::tr;
 
 /// File extension of a vault (without the dot).
 pub const VAULT_EXTENSION: &str = "girocrab";
@@ -65,12 +66,12 @@ fn entry_for(path: PathBuf) -> Option<VaultEntry> {
 fn validate_name(name: &str) -> Result<String, CoreError> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(CoreError::invalid(
+        return Err(CoreError::invalid(tr(
             "Der Name des Tresors darf nicht leer sein",
-        ));
+        )));
     }
     if name.chars().count() > MAX_NAME_CHARS {
-        return Err(CoreError::invalid("Der Name des Tresors ist zu lang"));
+        return Err(CoreError::invalid(tr("Der Name des Tresors ist zu lang")));
     }
     if name.starts_with('.')
         || name.ends_with('.')
@@ -78,9 +79,9 @@ fn validate_name(name: &str) -> Result<String, CoreError> {
             c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })
     {
-        return Err(CoreError::invalid(
+        return Err(CoreError::invalid(tr(
             "Der Name des Tresors enthält unzulässige Zeichen",
-        ));
+        )));
     }
     Ok(name.to_string())
 }
@@ -122,11 +123,9 @@ impl VaultResources {
     /// interrupted run never leaves sidecars of a vanished vault behind
     /// unnoticed). Other vaults are never touched. Missing files are fine.
     pub fn delete(&self) -> Result<(), CoreError> {
-        if !has_vault_extension(&self.main) || self.main.file_name().is_none() {
-            return Err(CoreError::invalid("Keine Tresor-Datei"));
-        }
-        if self.main.is_dir() {
-            return Err(CoreError::invalid("Keine Tresor-Datei"));
+        if !has_vault_extension(&self.main) || self.main.file_name().is_none() || self.main.is_dir()
+        {
+            return Err(CoreError::invalid(tr("Keine Tresor-Datei")));
         }
         for p in self.sidecars.iter().chain(std::iter::once(&self.main)) {
             match std::fs::remove_file(p) {
@@ -176,9 +175,9 @@ pub fn create_vault(dir: &Path, name: &str) -> Result<VaultEntry, CoreError> {
         .any(|v| v.name.to_lowercase() == name.to_lowercase());
     let path = dir.join(format!("{name}.{VAULT_EXTENSION}"));
     if clash {
-        return Err(CoreError::invalid(
+        return Err(CoreError::invalid(tr(
             "Ein Tresor mit diesem Namen existiert bereits",
-        ));
+        )));
     }
     std::fs::OpenOptions::new()
         .write(true)
@@ -186,12 +185,12 @@ pub fn create_vault(dir: &Path, name: &str) -> Result<VaultEntry, CoreError> {
         .open(&path)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
-                CoreError::invalid("Ein Tresor mit diesem Namen existiert bereits")
+                CoreError::invalid(tr("Ein Tresor mit diesem Namen existiert bereits"))
             } else {
                 io_err(&path, e)
             }
         })?;
-    entry_for(path).ok_or_else(|| CoreError::invalid("Ungültiger Tresorname"))
+    entry_for(path).ok_or_else(|| CoreError::invalid(tr("Ungültiger Tresorname")))
 }
 
 /// Deletes the vault `entry` with all its sidecars; other vaults stay untouched.
@@ -250,6 +249,19 @@ mod tests {
         }
         assert_eq!(list_vaults(&dir).unwrap().len(), 1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn duplicate_name_is_reported_in_the_ui_language() {
+        use crate::i18n::{Lang, with_language};
+        let dir = temp_dir("duplicate-en");
+        create_vault(&dir, "Privat").unwrap();
+        let result = with_language(Lang::En, || create_vault(&dir, "privat"));
+        std::fs::remove_dir_all(&dir).ok();
+        let Err(CoreError::InvalidInput { message }) = result else {
+            panic!("expected InvalidInput");
+        };
+        assert_eq!(message, "A vault with this name already exists");
     }
 
     #[test]

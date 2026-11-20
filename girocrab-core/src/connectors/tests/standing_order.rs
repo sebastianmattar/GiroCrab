@@ -102,31 +102,14 @@ fn job(action: Action, order_id: &str) -> StandingOrderJob {
 async fn run(vault: &Arc<Vault>, account_id: i64, order: StandingOrderJob) {
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
-        secret: crate::secret::SecretString::new(String::new()),
-        settings: Default::default(),
-        state: serde_json::Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
-    };
-    let summary = TransferJob {
-        source_iban: order.source_iban.clone(),
-        source_owner: "A".into(),
-        recipient_name: order.recipient_name.clone(),
-        recipient_iban: order.recipient_iban.clone(),
-        recipient_bic: None,
-        amount_cents: order.amount_cents,
-        purpose: order.purpose.clone(),
-        instant: false,
-        execution_date: None,
-        end_to_end_id: "GCSO".into(),
+        ..Default::default()
     };
     let s = TransferSession::new(
         Arc::clone(vault),
         Box::new(Accepting),
         ctx,
         OrderKind::Standing(order),
-        summary,
         account_id,
     );
     assert!(matches!(
@@ -183,12 +166,16 @@ fn listing_filters_by_account_and_finds_one_by_row_id() {
 #[test]
 fn limits_are_unknown_without_parameters_from_the_bank() {
     let (vault, account_id) = vault_with_order();
-    assert!(vault
-        .standing_order_limits(account_id, Action::Create)
-        .unwrap()
-        .is_none());
-    assert!(vault
-        .standing_order_limits(9999, Action::Change)
-        .unwrap()
-        .is_none());
+    assert!(
+        vault
+            .standing_order_limits(account_id, Action::Create)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        vault
+            .standing_order_limits(9999, Action::Change)
+            .unwrap()
+            .is_none()
+    );
 }

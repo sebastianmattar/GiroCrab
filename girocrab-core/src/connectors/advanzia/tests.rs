@@ -54,11 +54,13 @@ fn parser_rejects_schema_status_dates_currency_and_conflicting_ids() {
     ] {
         assert!(parse_captures(&[raw]).is_err());
     }
-    assert!(parse_captures(&[
-        body("APPROVED", "same", "1", "TEST SHOP"),
-        body("APPROVED", "same", "2", "TEST SHOP")
-    ])
-    .is_err());
+    assert!(
+        parse_captures(&[
+            body("APPROVED", "same", "1", "TEST SHOP"),
+            body("APPROVED", "same", "2", "TEST SHOP")
+        ])
+        .is_err()
+    );
     assert!(parse_captures(&[]).is_err());
 }
 #[test]
@@ -231,24 +233,27 @@ fn two_vaults_and_two_logins_have_distinct_persistent_namespaces() {
 fn wrong_card_or_invalid_balance_does_not_partially_import() {
     let (v, id, _d) = setup();
     sync(&v, id, vec![body("APPROVED", "a", "-1", "TEST SHOP")], "-1").unwrap();
-    assert!(v
-        .clone()
-        .import_advanzia_capture(
+    assert!(
+        v.clone()
+            .import_advanzia_capture(
+                id,
+                "00000000-0000-4000-8000-000000000002".into(),
+                v.advanzia_profile(id).unwrap().profile_id,
+                vec![body("APPROVED", "b", "-2", "TEST SHOP")],
+                "-3".into(),
+                None
+            )
+            .is_err()
+    );
+    assert!(
+        sync(
+            &v,
             id,
-            "00000000-0000-4000-8000-000000000002".into(),
-            v.advanzia_profile(id).unwrap().profile_id,
             vec![body("APPROVED", "b", "-2", "TEST SHOP")],
-            "-3".into(),
-            None
+            "null"
         )
-        .is_err());
-    assert!(sync(
-        &v,
-        id,
-        vec![body("APPROVED", "b", "-2", "TEST SHOP")],
-        "null"
-    )
-    .is_err());
+        .is_err()
+    );
     assert_eq!(rows(&v).len(), 1);
     assert_eq!(v.list_accounts().unwrap()[0].balance_cents, -100);
 }
@@ -279,17 +284,18 @@ fn explicit_target_is_bound_atomically_and_existing_work_is_kept() {
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].id, target);
     assert_eq!(a[0].name, "Invented imported card");
-    assert!(v
-        .clone()
-        .import_advanzia_capture(
-            id,
-            BANK.into(),
-            v.advanzia_profile(id).unwrap().profile_id,
-            vec![body("APPROVED", "q", "-2", "TEST SHOP")],
-            "-2".into(),
-            Some(target)
-        )
-        .is_err());
+    assert!(
+        v.clone()
+            .import_advanzia_capture(
+                id,
+                BANK.into(),
+                v.advanzia_profile(id).unwrap().profile_id,
+                vec![body("APPROVED", "q", "-2", "TEST SHOP")],
+                "-2".into(),
+                Some(target)
+            )
+            .is_err()
+    );
     assert_eq!(rows(&v).len(), 1);
 }
 #[test]
@@ -314,9 +320,11 @@ async fn adapter_never_logs_in_or_fetches_without_browser() {
         s.start().await,
         Err(CoreError::BrowserLoginRequired { .. })
     ));
-    assert!(super::super::bank_catalog()
-        .iter()
-        .any(|b| b.kind == ConnectorKind::Advanzia));
+    assert!(
+        super::super::bank_catalog()
+            .iter()
+            .any(|b| b.kind == ConnectorKind::Advanzia)
+    );
     assert_eq!(
         ConnectorKind::from_str("advanzia"),
         Some(ConnectorKind::Advanzia)
@@ -331,17 +339,18 @@ fn changing_login_rotates_profile_and_rejects_the_previous_session() {
         .unwrap();
     let new = v.advanzia_profile(id).unwrap().profile_id;
     assert_ne!(old, new);
-    assert!(v
-        .clone()
-        .import_advanzia_capture(
-            id,
-            BANK.into(),
-            old,
-            vec![body("APPROVED", "p", "-1", "TEST SHOP")],
-            "-1".into(),
-            None
-        )
-        .is_err());
+    assert!(
+        v.clone()
+            .import_advanzia_capture(
+                id,
+                BANK.into(),
+                old,
+                vec![body("APPROVED", "p", "-1", "TEST SHOP")],
+                "-1".into(),
+                None
+            )
+            .is_err()
+    );
     assert!(rows(&v).is_empty());
 }
 #[test]
@@ -500,9 +509,11 @@ fn authentication_method_is_persisted_per_connection_and_survives_import() {
 #[test]
 fn bank_picker_finds_the_supported_portal_without_claiming_all_mastercards() {
     for query in ["Advanzia", "mein.advanzia.com"] {
-        assert!(super::super::bank_directory::search(query, vec![], 10)
-            .iter()
-            .any(|bank| bank.connector == Some(ConnectorKind::Advanzia)));
+        assert!(
+            super::super::bank_directory::search(query, vec![], 10)
+                .iter()
+                .any(|bank| bank.connector == Some(ConnectorKind::Advanzia))
+        );
     }
     assert!(
         !super::super::bank_directory::search("Gebuehrenfrei", vec![], 10)

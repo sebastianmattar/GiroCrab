@@ -2,11 +2,11 @@
 //! credentials/cookies never cross this bridge. Snapshot checked live 2026-11-14.
 use std::{collections::HashSet, sync::Arc};
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rusqlite::{params, OptionalExtension};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 
-use super::{store_fetch, FetchResult, RemoteAccount, SyncSummary};
+use super::{FetchResult, RemoteAccount, SyncSummary, store_fetch};
 use crate::{
     error::{CoreError, CoreResult},
     i18n::tr,
@@ -17,9 +17,7 @@ use crate::{
 mod snapshot;
 
 fn invalid(message: &'static str) -> CoreError {
-    CoreError::InvalidInput {
-        message: tr(message).into(),
-    }
+    CoreError::invalid(tr(message))
 }
 
 fn field<'a>(v: &'a Value, pointer: &str) -> CoreResult<&'a str> {
@@ -86,7 +84,9 @@ fn overview(v: &Value) -> CoreResult<FetchResult> {
         .iter()
         .any(|k| row[*k].as_bool() == Some(true))
         {
-            return Err(invalid("FNZ: Bestände sind ausgeblendet oder veraltet. Es wurden keine Salden aktualisiert."));
+            return Err(invalid(
+                "FNZ: Bestände sind ausgeblendet oder veraltet. Es wurden keine Salden aktualisiert.",
+            ));
         }
         let number = field(account, "/externalDepotNumber/externalDepotNumber")?;
         let amount = field(row, "/depotInventorySumAccountCurrency/value")?;
@@ -118,7 +118,7 @@ fn overview(v: &Value) -> CoreResult<FetchResult> {
             },
             balance_cents: cents,
             // The overview has no valuation timestamp: this is the retrieval date.
-            balance_date: chrono::Utc::now().date_naive().to_string(),
+            balance_date: crate::dates::utc_date(jiff::Timestamp::now()).to_string(),
         });
     }
     if accounts.is_empty() {
@@ -242,7 +242,7 @@ impl Vault {
             .as_str()
             .unwrap_or_default()
             .get(..10)
-            .filter(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok())
+            .filter(|d| jiff::civil::Date::strptime("%Y-%m-%d", d).is_ok())
             .unwrap_or_default();
         let db = self.db()?;
         let (account_id, excluded) = db.query_row(
@@ -408,29 +408,33 @@ mod tests {
                 .len(),
             1
         );
-        assert!(v
-            .clone()
-            .import_fnz_document(conn, doc.clone(), b"%PDF-1.7\nsynthetic".to_vec())
-            .unwrap());
-        assert!(!v
-            .clone()
-            .import_fnz_document(conn, doc.clone(), b"%PDF-1.7\nsynthetic".to_vec())
-            .unwrap());
-        assert!(v
-            .clone()
-            .import_fnz_document(conn, metadata("bad", "D1"), b"<html>login</html>".to_vec())
-            .is_err());
-        assert!(v
-            .clone()
-            .import_fnz_document(
-                conn,
-                metadata("unknown", "missing"),
-                b"%PDF-1.7\nsynthetic".to_vec()
-            )
-            .is_err());
+        assert!(
+            v.clone()
+                .import_fnz_document(conn, doc.clone(), b"%PDF-1.7\nsynthetic".to_vec())
+                .unwrap()
+        );
+        assert!(
+            !v.clone()
+                .import_fnz_document(conn, doc.clone(), b"%PDF-1.7\nsynthetic".to_vec())
+                .unwrap()
+        );
+        assert!(
+            v.clone()
+                .import_fnz_document(conn, metadata("bad", "D1"), b"<html>login</html>".to_vec())
+                .is_err()
+        );
+        assert!(
+            v.clone()
+                .import_fnz_document(
+                    conn,
+                    metadata("unknown", "missing"),
+                    b"%PDF-1.7\nsynthetic".to_vec()
+                )
+                .is_err()
+        );
         let mut changed = fixture();
-        changed["ownerGroups"][0]["investmentDepots"][0]["depotInventorySumAccountCurrency"]
-            ["value"] = json!("2000.00");
+        changed["ownerGroups"][0]["investmentDepots"][0]["depotInventorySumAccountCurrency"]["value"] =
+            json!("2000.00");
         v.clone()
             .import_fnz_overview(conn, changed.to_string())
             .unwrap();
@@ -445,11 +449,12 @@ mod tests {
             200000
         );
         assert_eq!(v.list_holdings(depot.id).unwrap().len(), 1);
-        assert!(v
-            .clone()
-            .pending_fnz_documents(conn, list)
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.clone()
+                .pending_fnz_documents(conn, list)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             v.db()
                 .unwrap()
@@ -462,11 +467,12 @@ mod tests {
             .add_bank_connection(ConnectorKind::Fnz, "Other FNZ".into(), "other".into())
             .unwrap();
         // Not yet known in this connection: nothing to download.
-        assert!(v
-            .clone()
-            .pending_fnz_documents(other, format!("[{doc}]"))
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.clone()
+                .pending_fnz_documents(other, format!("[{doc}]"))
+                .unwrap()
+                .is_empty()
+        );
         v.clone()
             .import_fnz_overview(other, fixture().to_string())
             .unwrap();
@@ -492,14 +498,16 @@ mod tests {
         let wrong = v
             .add_bank_connection(ConnectorKind::PayPal, "Other Bank".into(), "test".into())
             .unwrap();
-        assert!(v
-            .clone()
-            .import_fnz_overview(wrong, fixture().to_string())
-            .is_err());
-        assert!(v
-            .clone()
-            .pending_fnz_documents(conn, "[{}]".into())
-            .is_err());
+        assert!(
+            v.clone()
+                .import_fnz_overview(wrong, fixture().to_string())
+                .is_err()
+        );
+        assert!(
+            v.clone()
+                .pending_fnz_documents(conn, "[{}]".into())
+                .is_err()
+        );
         drop(v);
         let _ = std::fs::remove_file(path);
     }

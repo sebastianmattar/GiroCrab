@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{Connection, params, params_from_iter};
 
 use super::PENDING_SQL;
 use crate::error::CoreError;

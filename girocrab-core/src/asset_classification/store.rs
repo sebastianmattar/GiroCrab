@@ -4,7 +4,7 @@ use crate::{
     error::{CoreError, CoreResult},
     vault::Vault,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::collections::HashMap;
 
 pub(crate) const SCHEMA: &str = "
@@ -94,7 +94,7 @@ fn tangible_assets(vault: &Vault, account_id: i64) -> CoreResult<Vec<ClassifiedA
 /// Positions and their import metadata come from one statement, so a row can never be
 /// paired with the metadata of another one.
 fn security_assets(db: &Connection, account_id: i64) -> CoreResult<Vec<ClassifiedAsset>> {
-    use crate::vault::accounts::{holding_from_row, HOLDING_COLUMNS, HOLDING_FILTER};
+    use crate::vault::accounts::{HOLDING_COLUMNS, HOLDING_FILTER, holding_from_row};
     let overrides = user_overrides(db)?;
     let mut q = db.prepare(&format!(
         "SELECT {HOLDING_COLUMNS}, c.asset_class, c.instrument, COALESCE(c.direct_crypto, 0)
@@ -127,18 +127,16 @@ fn security_assets(db: &Connection, account_id: i64) -> CoreResult<Vec<Classifie
 }
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput {
-        message: crate::i18n::tr("Ungültiger Klassifizierungsschlüssel.").into(),
-    }
+    CoreError::invalid(crate::i18n::tr("Ungültiger Klassifizierungsschlüssel."))
 }
 fn validate_key(db: &Connection, key: &str) -> CoreResult<()> {
-    if let Some(isin) = key.strip_prefix("isin:") {
-        if normalized_isin(isin).as_deref() == Some(isin) {
-            return Ok(());
-        }
+    if let Some(isin) = key.strip_prefix("isin:")
+        && normalized_isin(isin).as_deref() == Some(isin)
+    {
+        return Ok(());
     }
-    if let Some(t) = key.strip_prefix("crypto:") {
-        if crypto_ticker(
+    if let Some(t) = key.strip_prefix("crypto:")
+        && crypto_ticker(
             &Holding {
                 wkn: t.into(),
                 ..Default::default()
@@ -147,9 +145,8 @@ fn validate_key(db: &Connection, key: &str) -> CoreResult<()> {
         )
         .as_deref()
             == Some(t)
-        {
-            return Ok(());
-        }
+    {
+        return Ok(());
     }
     if let Some(uuid) = key.strip_prefix("asset:") {
         let exists: bool = db.query_row(

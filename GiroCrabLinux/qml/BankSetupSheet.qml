@@ -38,7 +38,8 @@ Sheet {
         SyncPromptButtons {
             Layout.fillWidth: true
             defaultTitle: qsTr("Speichern & abrufen")
-            defaultEnabled: sheet.request !== null && sheet.request.keys.every(k => (sheet.values[k] || "").trim() !== "")
+            // The FinTS product ID is an optional override and never blocks the button (#842).
+            defaultEnabled: sheet.request !== null && sheet.request.keys.every(k => k === "fints.product_id" || (sheet.values[k] || "").trim() !== "")
             onCancel: AppModel.cancelSetupRequest()
             onAccept: AppModel.completeSetup(sheet.request, sheet.values)
         }

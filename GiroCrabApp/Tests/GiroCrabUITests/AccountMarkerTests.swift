@@ -11,7 +11,7 @@ final class AccountMarkerTests: XCTestCase {
 
     override func setUp() async throws {
         for k in ["sidebar.accountView", "sidebar.collapsedUserGroups", "sidebar.collapsedKindGroups"] {
-            UserDefaults.standard.removeObject(forKey: k)
+            AppDefaults.store.removeObject(forKey: k)
         }
         model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
         XCTAssertEqual(model.vaultState, .open)

@@ -21,7 +21,7 @@ use std::os::unix::ffi::OsStrExt;
 
 use cxx_qt_lib::{QQmlApplicationEngine, QQuickStyle, QString, QUrl};
 
-extern "C" {
+unsafe extern "C" {
     fn girocrab_prepare_qt();
     fn girocrab_create_app(argc: c_int, argv: *mut *mut c_char, version: *const c_char);
     fn girocrab_exec_app() -> c_int;
@@ -69,10 +69,10 @@ fn main() {
     // SAFETY: the engine is dropped; nothing uses the application any more.
     unsafe { girocrab_destroy_app() };
     // „App zurücksetzen“: QML `Settings` may have written values back while closing.
-    if dispatch::app_was_reset() {
-        if let Err(e) = dispatch::remove_settings_file() {
-            eprintln!("GiroCrab: {e}");
-        }
+    if dispatch::app_was_reset()
+        && let Err(e) = dispatch::remove_settings_file()
+    {
+        eprintln!("GiroCrab: {e}");
     }
     // "Neu starten" (Settings › Allgemein › Sprache): the settings are written, start anew.
     i18n::relaunch_if_requested();

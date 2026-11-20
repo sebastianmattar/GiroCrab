@@ -9,7 +9,7 @@
 //!   GIROCRAB_DEMO_SEED=1 cargo run
 
 use std::path::PathBuf;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 
 fn main() {
     let app = std::env::var("GIROCRAB_APP_BIN")
@@ -25,12 +25,12 @@ fn main() {
     // Make relative screenshot paths relative to the caller's directory.
     let cwd = std::env::current_dir().unwrap_or_default();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(i) = args.iter().position(|a| a == "--screenshot") {
-        if let Some(p) = args.get_mut(i + 1) {
-            let pb = PathBuf::from(&*p);
-            if pb.is_relative() {
-                *p = cwd.join(pb).to_string_lossy().to_string();
-            }
+    if let Some(i) = args.iter().position(|a| a == "--screenshot")
+        && let Some(p) = args.get_mut(i + 1)
+    {
+        let pb = PathBuf::from(&*p);
+        if pb.is_relative() {
+            *p = cwd.join(pb).to_string_lossy().to_string();
         }
     }
     match Command::new(&app).args(&args).status() {

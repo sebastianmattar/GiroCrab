@@ -203,7 +203,7 @@ Item {
                                 ToolTip.text: qsTr("Manuell zugeordnet – die Regel ändert das nicht")
                             }
                             Text { text: Fmt.money(pr.modelData.amount_cents); font.pixelSize: Theme.callout + 1; font.features: { "tnum": 1 }
-                                   color: pr.modelData.amount_cents > 0 ? Theme.inflow : Theme.outflow }
+                                   color: pr.modelData.amount_cents > 0 ? Theme.inflow : Theme.outflow; Sensitive { amounts: true } }
                         }
                     }
                 }

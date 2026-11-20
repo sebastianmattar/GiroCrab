@@ -6,11 +6,11 @@ import XCTest
 @MainActor
 final class CategoriesCollapseTests: XCTestCase {
     override func setUp() async throws {
-        UserDefaults.standard.removeObject(forKey: "sidebar.categoriesCollapsed")
+        AppDefaults.store.removeObject(forKey: "sidebar.categoriesCollapsed")
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: "sidebar.categoriesCollapsed")
+        AppDefaults.store.removeObject(forKey: "sidebar.categoriesCollapsed")
     }
 
     func testCategoriesStartOpenAndCollapsedStateIsRemembered() {

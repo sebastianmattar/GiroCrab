@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    connectors::{store_fetch, FetchResult, RemoteAccount, RemoteHolding},
+    connectors::{FetchResult, RemoteAccount, RemoteHolding, store_fetch},
     models::{AccountKind, ConnectorKind},
     vault::Vault,
 };
@@ -175,9 +175,10 @@ fn invalid_and_blank_identity_cannot_create_shared_overrides() {
         "asset:missing",
         "name:Apple",
     ] {
-        assert!(v
-            .set_asset_class_override(key.into(), Some(AssetClass::Other))
-            .is_err());
+        assert!(
+            v.set_asset_class_override(key.into(), Some(AssetClass::Other))
+                .is_err()
+        );
     }
     assert_eq!(
         v.db()
@@ -210,9 +211,10 @@ fn same_isin_in_two_depots_shares_choice_but_not_values() {
         rows.iter().map(|r| r.holding.value_cents).sum::<i64>(),
         20000
     );
-    assert!(rows
-        .iter()
-        .all(|r| r.classification.asset_class == AssetClass::Other));
+    assert!(
+        rows.iter()
+            .all(|r| r.classification.asset_class == AssetClass::Other)
+    );
     assert_eq!(v.list_holdings(account).unwrap().len(), 1);
 }
 #[test]

@@ -77,13 +77,13 @@ ColumnLayout {
                                     border.color: parent.cents > 0 ? "transparent" : Theme.border; border.width: 1.5
                                 }
                                 ToolTip.visible: tipArea.containsMouse
-                                ToolTip.text: cents > 0 ? Fmt.monthLabel(modelData) + ": " + Fmt.money(cents) : qsTr("nicht ausgeführt")
+                                ToolTip.text: cents > 0 ? Fmt.monthLabel(modelData) + ": " + AppModel.masking(Fmt.money(cents), AppModel.redactAmounts) : qsTr("nicht ausgeführt")
                                 MouseArea { id: tipArea; anchors.fill: parent; hoverEnabled: true }
                             }
                         }
                         Text { text: Fmt.money(planItem.modelData.monthly_cents); font.pixelSize: Theme.callout + 1; font.features: { "tnum": 1 }
                                horizontalAlignment: Text.AlignRight; Layout.minimumWidth: dash.sumColumnWidth
-                               color: planItem.modelData.active ? Theme.text : Theme.tertiary; Sensitive {} }
+                               color: planItem.modelData.active ? Theme.text : Theme.tertiary; Sensitive { amounts: true } }
                     }
                 }
             }
@@ -91,7 +91,7 @@ ColumnLayout {
             RowLayout { Layout.topMargin: 8
                 Text { text: qsTr("Summe aktive Pläne"); font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true }
                 Text { text: dash.d ? Fmt.money(dash.d.total_monthly_cents) : ""; font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.text
-                       horizontalAlignment: Text.AlignRight; Layout.minimumWidth: dash.sumColumnWidth; Sensitive {} } }
+                       horizontalAlignment: Text.AlignRight; Layout.minimumWidth: dash.sumColumnWidth; Sensitive { amounts: true } } }
         }
     }
 
@@ -103,7 +103,7 @@ ColumnLayout {
             RowLayout {
                 SFIcon { symbol: "gift"; size: 14; color: Theme.text }
                 Text { text: qsTr("Trade Republic Perks"); font.pixelSize: Theme.subheadline + 1; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true }
-                Text { text: dash.d ? qsTr("diesen Monat %1").arg(Fmt.money(dash.d.perks_this_month_cents)) : ""; font.pixelSize: Theme.caption; color: Theme.secondary; Sensitive {} } }
+                Text { text: dash.d ? qsTr("diesen Monat %1").arg(Fmt.money(dash.d.perks_this_month_cents)) : ""; font.pixelSize: Theme.caption; color: Theme.secondary; Sensitive { amounts: true } } }
             RowLayout {
                 spacing: 12; Layout.fillWidth: true
                 Repeater {
@@ -115,7 +115,7 @@ ColumnLayout {
                         implicitHeight: perk.implicitHeight + 20; radius: 9; color: Theme.canvas
                         ColumnLayout { id: perk; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 10; spacing: 4
                             Text { text: modelData[0]; font.pixelSize: Theme.caption; font.weight: Font.Medium; color: Theme.secondary }
-                            Text { text: Fmt.money(modelData[1]); font.pixelSize: Theme.title3; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.invest; Sensitive {} }
+                            Text { text: Fmt.money(modelData[1]); font.pixelSize: Theme.title3; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.invest; Sensitive { amounts: true } }
                             Text { text: qsTr("%1 Ausführungen").arg(modelData[2]); font.pixelSize: Theme.caption2; color: Theme.tertiary }
                             Text { text: modelData[3]; font.pixelSize: Theme.caption2; color: Theme.secondary; wrapMode: Text.WordWrap; Layout.fillWidth: true } }
                     }
@@ -168,7 +168,7 @@ ColumnLayout {
                         width: chart.width; height: 1
                         y: chart.yFor(value)
                         Text { anchors.verticalCenter: parent.verticalCenter; width: chart.axisWidth - 6; horizontalAlignment: Text.AlignRight
-                               text: Fmt.count(parent.value); font.pixelSize: Theme.caption2; color: Theme.secondary; font.features: { "tnum": 1 }; Sensitive {} }
+                               text: Fmt.count(parent.value); font.pixelSize: Theme.caption2; color: Theme.secondary; font.features: { "tnum": 1 }; Sensitive { amounts: true } }
                         Rectangle { x: chart.axisWidth; width: chart.width - chart.axisWidth; height: 1; color: Theme.border }
                     }
                 }

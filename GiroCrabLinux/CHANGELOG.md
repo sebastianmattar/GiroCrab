@@ -8,6 +8,79 @@ Verhalten und Texte kommen dabei 1:1 aus der Mac-App, auf Deutsch und Englisch. 
 Einstellungen › Sicherheit steht deshalb „Kern-Version“: Die Nummer gehört zum Kern, nicht zum
 Funktionsumfang der Oberfläche.
 
+## Funktionsstand 0.8.6 (in Arbeit)
+
+### EquatePlus (#720)
+
+- **Mitarbeiter-Aktienprogramme über EquatePlus:** Anmeldung im Browserfenster (bestätigt mit
+  EquateAccess oder der angebotenen Alternative), danach **„Programme und Bestände abrufen“**:
+  Jedes Programm wird ein eigenes Depot mit verfügbaren und gesperrten Beständen. Bisher führte
+  ein EquatePlus-Zugang unter Linux in den falschen Anmeldeablauf.
+- **„Dokumente laden …“** lädt die PDFs der Bibliothek (Bestätigungen, Auszüge,
+  Steuerbescheinigungen), nur noch fehlende. Sie liegen in **„Belege & PostBox“** (Suche:
+  equateplus), beim Programm-Depot nur bei eindeutigem Programmnamen. Einzelne defekte Dokumente
+  halten den Lauf nicht an; die Meldung nennt die häufigsten Gründe.
+- **Abgewählte Konten werden ausgeblendet:** In der Kontenauswahl eines Zugangs archiviert das
+  Abwählen das Konto (nicht mehr abgerufen, nicht in der Summe, Daten bleiben), und die
+  Seitenleiste blendet archivierte Konten aus; das Archiv-Symbol zeigt sie wieder an. Im
+  Bearbeiten-Fenster eines Zugangs speichern „Speichern“ und „Speichern & abrufen“ die
+  Kontenauswahl mit; ein Abruf startet erst danach.
+- Die Skripte im Browser sind die der Mac-App (`scripts/gen-equateplus-qml.py`, abgeglichen von
+  `scripts/test-equateplus-linux.cjs`). Mit einem echten EquatePlus-Zugang noch nicht getestet.
+### Automatischer Abruf (#546, #567)
+
+- **Einstellungen › Allgemein › Abruf › „Automatischer Abruf“:** Aus (Standard), jede Stunde oder
+  alle 2, 4, 6, 12 oder 24 Stunden. GiroCrab ruft die Kontostände im gewählten Abstand ab, solange
+  die App läuft und der Tresor entsperrt ist; bei gesperrtem Tresor wird der Abruf nach dem
+  Entsperren nachgeholt. Die Wahl bleibt über Neustarts erhalten.
+- Abgerufen werden nur Zugänge mit gespeicherter PIN oder gültiger Freigabe, nie mit einem
+  Anmeldedialog: Verlangt die Bank eine TAN oder neue Freigabe, wird der Abruf übersprungen und
+  im Abruf-Protokoll als „Automatisch“ vermerkt. Fehler erscheinen nur als Hinweis, ein Hinweis
+  zu neuen Buchungen nur, wenn sich etwas geändert hat. Die comdirect-PostBox bleibt außen vor.
+- Nicht in der Demo. Die Menüleiste mit Kontoständen der Mac-App gibt es unter Linux nicht.
+
+### FinTS-Produkt-ID nur noch optional (#842, #865, #789)
+
+- Die eigene FinTS-Produktregistrierung wird beim Hinzufügen einer Bank, im Dialog „… einrichten“
+  und in der Seitenleiste nie mehr als fehlend gemeldet und blockiert „Speichern & abrufen“ nicht.
+- Fehlt beim Abruf trotzdem eine Registrierung, wechselt GiroCrab auf die eingebaute und ruft
+  einmal neu ab. Ohne eingebaute Registrierung erscheint „Diese Version enthält keine
+  FinTS-Registrierung von GiroCrab. Tragen Sie Ihre eigene Registrierung ein.“ mit
+  **Eigene Registrierung eintragen …**.
+- **Eigene Registrierung eintragen …** stellt erst auf die eigene Registrierung um, wenn eine
+  gespeichert ist, und setzt den Cursor in das Feld unter Einstellungen › Banken.
+
+### Tags
+
+- **Buchungen nach Tags filtern und auswerten:** In der Filterzeile über der Buchungsliste
+  öffnet der Knopf **„Tags“** das Fenster „Nach Tags filtern“. Mehrere angekreuzte Tags zeigen
+  nur Buchungen, die alle tragen; „Ohne Tag“ zeigt Buchungen ohne Tag. Je Tag stehen Anzahl und
+  Summe für den Zeitraum und die übrigen Filter der Liste. Der Knopf nennt nur die Zahl der Tags,
+  der Druck nennt den Filter in der Kopfzeile.
+- **Tags verwalten:** Die Buchungszahl eines Tags zeigt beim Darüberfahren oder per Klick die
+  **Buchungen nach Konten**; ein Klick auf ein Konto zeigt dessen Buchungen mit diesem Tag in der
+  Liste.
+
+### Privatmodus (#719)
+
+- **Darstellung › Privatmodus** (Strg+Umschalt+H) und das **Auge in der Symbolleiste** blenden
+  Beträge aus, wenn Sie die App jemandem zeigen: Salden, Buchungsbeträge, Summen, Anteile,
+  Budgets, Kredittilgung, Depot und Vermögen, Achsenwerte und Ablesewerte der Diagramme.
+- **Einstellungen › Allgemein:** Schalter „Privatmodus“ und „Im Privatmodus ausblenden“ mit
+  **Beträge** oder **Beträge und persönliche Angaben** (dann auch Namen, Kontonummern und
+  Verwendungszwecke). Die Wahl bleibt über Neustarts erhalten.
+- Gilt im Hauptfenster, in den Sheets und in den Einstellungen; Tooltips mit Beträgen oder Namen
+  zeigen dann „•••“. „Problem melden“ schwärzt wie bisher und zusätzlich alles, was der
+  Privatmodus verdeckt.
+- Startoption `--privacy[=all]` für Screenshots.
+
+## Korrekturen (Kern 0.8.6)
+
+- **„PostBox jetzt abrufen“** (comdirect, #838) ruft die PostBox jetzt wirklich ab; die Anforderung
+  ging bisher vor jedem Abruf verloren.
+- **Eigene FinTS-Produktregistrierung:** Das Feld in Einstellungen › Banken steht wie in der Mac-App
+  ohne Rahmen rechtsbündig in der Zeile; nach dem Eintragen gilt „Eigene Registrierung“.
+
 ## Korrekturen (Kern 0.8.0)
 
 - **Belegvorschau:** In „Belege & PostBox“ füllt das PDF die Breite der Vorschau und bleibt beim
@@ -19,8 +92,6 @@ Funktionsumfang der Oberfläche.
   Passwort bzw. PIN samt „im Tresor speichern“; Easybank, Ford Money und Opel Direktbank bieten
   „Kontoauszüge abrufen“ an. Bei der Commerzbank mit Schlüsseldatei (RAH-10) fragt der Dialog nach
   dem „Passwort der Schlüsseldatei“, die Benutzerkennung ist fest.
-- **EquatePlus** erscheint unter Linux vorerst nicht im Bankkatalog: Sein Anmeldeablauf ist noch
-  nicht übernommen, die Auswahl öffnete das falsche Browserfenster.
 - **Regeln, die nur Tags setzen** (in der Mac-App angelegt), zeigen „→ Nur Tags“ und ihre Tags statt
   einer leeren Kategorie; im Formular steht „Keine (nur Tags)“.
 

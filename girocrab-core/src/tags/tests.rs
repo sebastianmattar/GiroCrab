@@ -551,11 +551,12 @@ fn tag_counts_per_account_add_up() {
     assert_eq!(per_account, [(giro, 2), (card, 1)]);
     let total: u32 = per_account.iter().map(|r| r.1).sum();
     assert_eq!(total, tag_id_count(&v, trip));
-    assert!(v
-        .tag_account_counts(trip)
-        .unwrap()
-        .iter()
-        .all(|r| !r.linked));
+    assert!(
+        v.tag_account_counts(trip)
+            .unwrap()
+            .iter()
+            .all(|r| !r.linked)
+    );
 
     // a loan without bookings of its own shows a linked rate of the Girokonto:
     // listed apart, the own accounts still add up to the tag's count

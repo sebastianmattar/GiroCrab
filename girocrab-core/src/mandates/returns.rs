@@ -8,7 +8,7 @@
 //! names the reference. On the creditor account a negative amount under a
 //! mandate is a return.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;

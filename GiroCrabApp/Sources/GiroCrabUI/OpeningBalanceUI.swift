@@ -43,18 +43,6 @@ extension AppModel {
     }
 }
 
-/// "Startsaldo …" in an account's context menu, only where it applies.
-struct OpeningBalanceMenuItem: View {
-    let model: AppModel
-    let account: Account
-
-    var body: some View {
-        if account.balanceDerived, !account.isArchived {
-            Button("Startsaldo …", systemImage: "clock.arrow.circlepath") { model.openOpeningBalance(account) }
-        }
-    }
-}
-
 extension View {
     /// The Startsaldo sheet, driven by `model.openingBalanceRequest`.
     func openingBalanceSheet(_ model: AppModel) -> some View {

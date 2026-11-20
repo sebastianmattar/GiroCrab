@@ -87,13 +87,13 @@ struct PrintOptions: Codable, Equatable {
 
     private static let defaults = PrintOptions()
 
-    static func load(_ defaults: UserDefaults = .standard) -> PrintOptions {
+    static func load(_ defaults: UserDefaults = AppDefaults.store) -> PrintOptions {
         guard let data = defaults.data(forKey: key),
               let o = try? JSONDecoder().decode(PrintOptions.self, from: data) else { return PrintOptions() }
         return o
     }
 
-    func save(_ defaults: UserDefaults = .standard) {
+    func save(_ defaults: UserDefaults = AppDefaults.store) {
         if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.key) }
     }
 }

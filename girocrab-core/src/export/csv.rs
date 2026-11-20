@@ -72,7 +72,7 @@ pub fn export_csv(
             csv_text(&l.name),
             csv_amount(l.balance_cents),
             csv_text(&l.currency),
-            csv_field(&l.date)
+            csv_text(&l.date)
         ));
     }
     let mut header = vec!["Datum", "Konto", "Name"];
@@ -100,12 +100,12 @@ pub fn export_csv(
     out.push_str("\r\n");
     for r in &rows {
         let mut cols = vec![
-            csv_field(&r.date),
+            csv_text(&r.date),
             csv_text(&r.account_name),
             csv_text(&r.counterparty),
         ];
         if columns.iban {
-            cols.push(csv_field(&r.counterparty_iban));
+            cols.push(csv_text(&r.counterparty_iban));
         }
         cols.push(csv_text(&r.purpose));
         if columns.category {
@@ -217,5 +217,40 @@ mod tests {
         let lean = export_csv(vec![row], ExportCsvColumns::default(), vec![]);
         assert!(lean.contains("Datum;Konto;Name;Verwendungszweck;Betrag;Währung\r\n"));
         assert!(!lean.contains("Woche"));
+    }
+
+    /// Date and IBAN come from bank data unchecked: they get the formula guard too.
+    #[test]
+    fn csv_guards_bank_supplied_dates_and_ibans() {
+        let row = ExportCsvRow {
+            date: "=1+1".into(),
+            account_name: "Giro".into(),
+            counterparty: "Laden".into(),
+            counterparty_iban: "=HYPERLINK(\"http://x.invalid\",\"a\")".into(),
+            purpose: "Einkauf".into(),
+            category: String::new(),
+            note: String::new(),
+            tags: String::new(),
+            amount_cents: -100,
+            currency: "EUR".into(),
+            day_balance_cents: None,
+            balance_cents: None,
+        };
+        let line = ExportCsvBalanceLine {
+            name: "Giro".into(),
+            balance_cents: 0,
+            currency: "EUR".into(),
+            date: "@now".into(),
+        };
+        let cols = ExportCsvColumns {
+            iban: true,
+            ..ExportCsvColumns::default()
+        };
+        let csv = export_csv(vec![row], cols, vec![line]);
+        assert!(csv.contains("# Giro;0,00;EUR;'@now\r\n"), "{csv}");
+        assert!(
+            csv.contains("'=1+1;Giro;Laden;\"'=HYPERLINK(\"\"http://x.invalid\"\",\"\"a\"\")\";"),
+            "{csv}"
+        );
     }
 }

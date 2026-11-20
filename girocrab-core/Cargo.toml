@@ -36,12 +36,12 @@ p256 = { version = "0.14", features = ["ecdsa"] }
 sha2 = "0.11"
 aes = { version = "0.9", features = ["zeroize"] }
 cbc = { version = "0.2", features = ["alloc", "zeroize"] }
-des = { version = "0.9", features = ["zeroize"] }
+des = { version = "0.9", features = ["zeroize"] } # required by FinTS RDH/RAH-10 key files; never used for vault encryption
 hmac = { version = "0.13", features = ["zeroize"] }
 pbkdf2 = "0.13"
 crypto-primes = { version = "0.7", default-features = false }
 sha1 = "0.11"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+jiff = "1.0.1"
 rand = "0.9"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "v5"] }
@@ -54,5 +54,12 @@ qrcode = { version = "0.14", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Android keeps its zone data in an APEX path jiff does not search, so without
+# the bundled copy "today" would silently be the UTC date there.
+[target.'cfg(target_os = "android")'.dependencies]
+jiff = { version = "1.0.1", features = ["tzdb-bundle-always"] }
+
 [dev-dependencies]
+# Independent XML parser for the payment invariant tests (#947); tests only.
+roxmltree = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }

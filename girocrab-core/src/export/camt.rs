@@ -1,12 +1,12 @@
 //! CAMT.053 account statements, read straight from the vault.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::iban::{has_iban_shape, normalize_iban};
 use crate::models::{Account, AccountKind};
-use crate::vault::{Vault, PENDING_SQL};
+use crate::vault::{PENDING_SQL, Vault};
 
 /// ISO 20022 message version of a CAMT.053 export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -97,17 +97,14 @@ impl Vault {
                 what: trf("Konto {0}", &[&request.account_id]),
             })?;
         if matches!(account.kind, AccountKind::Loan | AccountKind::Brokerage) {
-            return Err(CoreError::InvalidInput {
-                message: tr("CAMT.053 gibt es nicht für Darlehen und Depots: Ihr Saldo ergibt sich nicht aus eigenen Umsätzen.").to_string(),
-            });
+            return Err(CoreError::invalid(tr(
+                "CAMT.053 gibt es nicht für Darlehen und Depots: Ihr Saldo ergibt sich nicht aus eigenen Umsätzen.",
+            )));
         }
         let date_from = request.date_from.as_deref().map(parse_day).transpose()?;
         let date_to = request.date_to.as_deref().map(parse_day).transpose()?;
         let currency = account_currency(&account.currency);
-        let today = chrono::Local::now()
-            .date_naive()
-            .format("%Y-%m-%d")
-            .to_string();
+        let today = crate::dates::today_iso();
         let db = self.db()?;
         // `list_accounts` replaces a stored 0 of a credit card with the open
         // cycle's amount, counted over every row; the balance walk below counts
@@ -161,9 +158,9 @@ impl Vault {
         // "everything up to <past day>" stays a valid, empty statement.
         let from = date_from.or(first).unwrap_or_else(|| to.clone());
         if to < from {
-            return Err(CoreError::InvalidInput {
-                message: tr("Der Zeitraum endet vor seinem Beginn.").to_string(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Der Zeitraum endet vor seinem Beginn.",
+            )));
         }
         // Marked bookings: OPBD + entries = CLBD only holds when no booked
         // booking between the first and the last day is left out.
@@ -172,9 +169,9 @@ impl Vault {
                 .iter()
                 .any(|(id, e)| !e.pending && !ids.contains(id));
             if gap {
-                return Err(CoreError::InvalidInput {
-                    message: tr("CAMT.053 erfordert eine lückenlose Auswahl. Markiere alle Umsätze eines zusammenhängenden Zeitraums.").to_string(),
-                });
+                return Err(CoreError::invalid(tr(
+                    "CAMT.053 erfordert eine lückenlose Auswahl. Markiere alle Umsätze eines zusammenhängenden Zeitraums.",
+                )));
             }
         }
         let opening = booked_balance(&db, &account, &currency, &previous_day(&from))?;
@@ -193,18 +190,16 @@ impl Vault {
 
 fn parse_day(s: &str) -> CoreResult<String> {
     let day: String = s.trim().chars().take(10).collect();
-    chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d")
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .map_err(|_| CoreError::InvalidInput {
-            message: trf("Ungültiges Datum: {0}", &[&s]),
-        })
+    jiff::civil::Date::strptime("%Y-%m-%d", &day)
+        .map(crate::dates::iso)
+        .map_err(|_| CoreError::invalid(trf("Ungültiges Datum: {0}", &[&s])))
 }
 
 fn previous_day(day: &str) -> String {
-    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+    jiff::civil::Date::strptime("%Y-%m-%d", day)
         .ok()
-        .and_then(|d| d.pred_opt())
-        .map(|d| d.format("%Y-%m-%d").to_string())
+        .and_then(|d| d.yesterday().ok())
+        .map(crate::dates::iso)
         .unwrap_or_default()
 }
 
@@ -325,10 +320,7 @@ fn booked_balance(db: &Connection, a: &Account, currency: &str, day: &str) -> Co
     }
     let at: String = a.balance_date.chars().take(10).collect();
     let anchor = if at.is_empty() {
-        chrono::Local::now()
-            .date_naive()
-            .format("%Y-%m-%d")
-            .to_string()
+        crate::dates::today_iso()
     } else {
         at
     };
@@ -523,11 +515,11 @@ fn detect_return_reason(gvc: &str, purpose: &str, booking_text: &str) -> Option<
     {
         if token.len() == 4 {
             let upper = token.to_ascii_uppercase();
-            if let Some(&found) = CODES.iter().find(|&&c| c == upper) {
-                if is_return_context || matches!(found, "AC04" | "MD01" | "MD06" | "MS03" | "AM04")
-                {
-                    return Some(found);
-                }
+            if let Some(&found) = CODES.iter().find(|&&c| c == upper)
+                && (is_return_context
+                    || matches!(found, "AC04" | "MD01" | "MD06" | "MS03" | "AM04"))
+            {
+                return Some(found);
             }
         }
     }
@@ -592,7 +584,9 @@ fn entry_xml(b: &CamtEntry, account_currency: &str, owner: &str, version: CamtVe
         "<Domn><Cd>PMNT</Cd><Fmly><Cd>{family}</Cd><SubFmlyCd>{sub_family}</SubFmlyCd></Fmly></Domn>"
     );
     e += &if gvc.len() == 3 && gvc.bytes().all(|c| c.is_ascii_digit()) {
-        format!("<BkTxCd>{domain}<Prtry><Cd>{swift_code}+{gvc}+000</Cd><Issr>DK</Issr></Prtry></BkTxCd>")
+        format!(
+            "<BkTxCd>{domain}<Prtry><Cd>{swift_code}+{gvc}+000</Cd><Issr>DK</Issr></Prtry></BkTxCd>"
+        )
     } else {
         format!("<BkTxCd>{domain}</BkTxCd>")
     };

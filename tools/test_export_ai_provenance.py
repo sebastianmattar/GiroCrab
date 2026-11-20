@@ -98,6 +98,47 @@ class Reflection(unittest.TestCase):
         self.assertEqual((r["security_check"], r["perf_check"]), ([], []))
         self.assertFalse(r["perf_benchmark_mentioned"])
 
+    EMPTY = ("<!-- Nur bei KI: ausfüllen; Benchmark: category_perf -->\n### 🤖 AI Process Reflection\n"
+             "- **Human-Steering:** \n- **AI-Agency:** \n- **Review-Focus:** \n"
+             "- **Security-Check:** \n- **Perf-Check:** \n")
+
+    def test_empty_items_do_not_swallow_the_next_line(self):
+        # An unfilled PR template must not count as an answered reflection.
+        r = prov.parse_reflection(self.EMPTY, [])
+        self.assertFalse(r["present"])
+        self.assertEqual(r["human_steering"], [])
+        self.assertEqual(r["review_focus"], [])
+
+    def test_empty_trailer_does_not_swallow_the_next_line(self):
+        t = prov.parse_trailers("Security-Check:\nPerf-Check: p")
+        self.assertEqual(t, [("Perf-Check", "p")])
+
+    def test_label_with_sub_bullets(self):
+        # Format of real PRs (#777, #826, #894): the label on its own line, the answers indented below.
+        body = ("### 🤖 AI Process Reflection\n- **Human-Steering:** a\n- **AI-Agency:**\n"
+                "  - Hülle um den Konnektor\n  - `begin_quiet_sync`\n- **Review-Focus:**\n"
+                "  1. **Neue Enum-Variante.** Frontends prüfen\n- **Perf-Check:** \n\n## Tests\n  - nicht hier\n")
+        r = prov.parse_reflection(body, [])
+        self.assertEqual(r["ai_agency"], ["Hülle um den Konnektor", "`begin_quiet_sync`"])
+        self.assertEqual(r["review_focus"], ["**Neue Enum-Variante.** Frontends prüfen"])
+        self.assertEqual(r["perf_check"], [])
+
+    def test_indented_empty_item_does_not_swallow_next_item(self):
+        r = prov.parse_reflection("### 🤖 AI Process Reflection\n  - **Human-Steering:** \n  - **AI-Agency:** x\n", [])
+        self.assertEqual((r["human_steering"], r["ai_agency"]), ([], ["x"]))
+
+    def test_crlf_body(self):
+        # PR bodies written in the GitHub web editor use CRLF line endings.
+        r = prov.parse_reflection((self.FULL + self.EMPTY).replace("\n", "\r\n"), [])
+        self.assertEqual(r["human_steering"], ["a"])
+        self.assertEqual(r["perf_check"], ["No hot path touched"])
+        self.assertEqual(prov.parse_trailers("Security-Check:\r\nPerf-Check: p\r\n"), [("Perf-Check", "p")])
+
+    def test_html_comments_ignored(self):
+        r = prov.parse_reflection(self.EMPTY.replace("- **AI-Agency:** ", "- **AI-Agency:** <!-- was? -->"), [])
+        self.assertFalse(r["perf_benchmark_mentioned"])
+        self.assertEqual(r["ai_agency"], [])
+
     def test_category_perf_mention_detected(self):
         self.assertTrue(prov.parse_reflection("COPIES=600 cargo run --example category_perf: 12 ms", [])
                         ["perf_benchmark_mentioned"])

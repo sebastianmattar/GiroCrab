@@ -9,7 +9,7 @@ use crate::vault::Vault;
 
 #[test]
 fn errors_after_submit_leave_outcome_unknown() {
-    use super::{error_leaves_outcome_unknown as unknown, CoreError};
+    use super::{CoreError, error_leaves_outcome_unknown as unknown};
     assert!(unknown(&CoreError::Network {
         message: "x".into()
     }));
@@ -128,6 +128,65 @@ fn unread_depot_keeps_its_positions_and_value() {
     let acc = v.list_accounts().unwrap().pop().unwrap();
     assert_eq!(acc.balance_cents, 0);
     assert!(v.list_holdings(acc.id).unwrap().is_empty());
+}
+
+#[test]
+fn fetch_warnings_name_accounts_by_their_stored_name() {
+    // #1083: a FinTS failure names the account by its IBAN; the summary uses
+    // the name the account carries here (renamed by the user), never the IBAN.
+    let p_dir = crate::test_support::TempDir::new("girocrab-fetch-warnings");
+    let p = p_dir.join("v.db");
+    let v = Vault::open(p.to_string_lossy().to_string(), vec![3u8; 32]).unwrap();
+    let conn = v
+        .add_bank_connection(
+            ConnectorKind::FinTsGeneric,
+            "fints:50010517".into(),
+            "login".into(),
+        )
+        .unwrap();
+    let iban = "DE02120300000000202051";
+    let account = |balance_cents: i64| RemoteAccount {
+        external_ref: iban.into(),
+        name: "Verrechnungskonto".into(),
+        owner: String::new(),
+        iban: iban.into(),
+        account_number: String::new(),
+        currency: "EUR".into(),
+        kind: AccountKind::Checking,
+        balance_cents,
+        balance_date: "2026-11-10".into(),
+    };
+    let first = FetchResult {
+        accounts: vec![account(250_00)],
+        ..Default::default()
+    };
+    let s = store_fetch(&v, ConnectorKind::FinTsGeneric, conn, first).unwrap();
+    assert!(s.warnings.is_empty());
+    let id = v.list_accounts().unwrap().pop().unwrap().id;
+    v.rename_account(id, "Cash".into()).unwrap();
+
+    let failed = FetchResult {
+        accounts: vec![account(0)],
+        balances_unknown: vec![iban.into()],
+        warnings: vec![
+            format!("{iban}: Umsätze (HKCAZ/camt.052) – TAN verlangt"),
+            "Kontenliste (HKSPA) – abgelehnt".into(),
+        ],
+        ..Default::default()
+    };
+    let s = store_fetch(&v, ConnectorKind::FinTsGeneric, conn, failed).unwrap();
+    assert_eq!(
+        s.warnings,
+        vec![
+            "Cash: Umsätze (HKCAZ/camt.052) – TAN verlangt".to_string(),
+            "Kontenliste (HKSPA) – abgelehnt".to_string(),
+        ]
+    );
+    // the balance that was not read stays
+    assert_eq!(
+        v.list_accounts().unwrap().pop().unwrap().balance_cents,
+        250_00
+    );
 }
 
 #[test]
@@ -532,7 +591,7 @@ fn pending_batch_booking_is_replaced_by_the_banks_booking_whatever_its_iban() {
     };
     assert_eq!(pending(), 2);
     // A single payment of the same size is no batch booking: both stay pending.
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = crate::dates::today().to_string();
     let other = RemoteTransaction {
         account_ref: "f:1".into(),
         external_id: "bank-0".into(),
@@ -551,8 +610,8 @@ fn pending_batch_booking_is_replaced_by_the_banks_booking_whatever_its_iban() {
     let booked = RemoteTransaction {
         account_ref: "f:1".into(),
         external_id: "bank-1".into(),
-        booking_date: chrono::Local::now().date_naive().to_string(),
-        value_date: chrono::Local::now().date_naive().to_string(),
+        booking_date: crate::dates::today().to_string(),
+        value_date: crate::dates::today().to_string(),
         amount_cents: -3_550,
         currency: "EUR".into(),
         counterparty: "A".into(),
@@ -731,9 +790,10 @@ fn revoked_accounts_are_marked_and_new_ones_named() {
         ]
     );
     let accs = v.list_accounts().unwrap();
-    assert!(accs
-        .iter()
-        .any(|a| a.name == "Gemeinschaftskonto" && a.access_revoked));
+    assert!(
+        accs.iter()
+            .any(|a| a.name == "Gemeinschaftskonto" && a.access_revoked)
+    );
     std::fs::remove_file(path).ok();
 }
 
@@ -1054,11 +1114,12 @@ async fn magic_demo_login_syncs_without_network_or_product_id() {
         SyncStep::Finished { .. } => {}
         other => panic!("expected finish, got {other:?}"),
     }
-    assert!(v
-        .list_accounts()
-        .unwrap()
-        .iter()
-        .any(|a| a.connection_id == Some(id)));
+    assert!(
+        v.list_accounts()
+            .unwrap()
+            .iter()
+            .any(|a| a.connection_id == Some(id))
+    );
     // Any other login still needs the product ID.
     let other = v
         .add_fints_connection(
@@ -1126,6 +1187,191 @@ async fn demo_push_tan_flow_imports_and_categorises() {
     let _ = std::fs::remove_file(path);
 }
 
+/// "<Konto> abrufen" (#1124): only that account of the login is stored.
+#[tokio::test]
+async fn account_sync_stores_only_that_account() {
+    let (v, path) = demo_vault();
+    let conn = v
+        .list_bank_connections()
+        .unwrap()
+        .into_iter()
+        .find(|c| c.connector == ConnectorKind::VolksbankKasselGoettingen)
+        .unwrap();
+    let accounts: Vec<_> = v
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .filter(|a| a.connection_id == Some(conn.id))
+        .collect();
+    assert!(accounts.len() > 1, "the demo login has several accounts");
+    let giro = accounts
+        .iter()
+        .find(|a| a.name == "Musterbank Girokonto")
+        .unwrap();
+    let other = accounts.iter().find(|a| a.id != giro.id).unwrap();
+    let last_sync = |v: &Arc<Vault>| {
+        v.list_bank_connections()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == conn.id)
+            .unwrap()
+            .last_sync_unix
+    };
+    let synced_before = last_sync(&v);
+    async fn run(s: &SyncSession) -> SyncSummary {
+        let mut step = s.start().await.unwrap();
+        loop {
+            match step {
+                SyncStep::Finished { summary } => return summary,
+                _ => step = s.poll().await.unwrap(),
+            }
+        }
+    }
+    // The demo bank books its new entry on the giro account: syncing
+    // another account of the login leaves it out.
+    let s = v
+        .clone()
+        .begin_account_sync(other.id, "pin".into(), true)
+        .unwrap();
+    assert_eq!(run(&s).await.transactions_imported, 0);
+    let stored = |id: i64| {
+        v.list_accounts()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == id)
+            .unwrap()
+    };
+    assert_eq!(stored(giro.id).balance_cents, giro.balance_cents);
+    assert!(accounts.iter().all(|a| !stored(a.id).access_revoked));
+    // the login counts as synced only after a full sync (automatic sync)
+    assert_eq!(last_sync(&v), synced_before);
+    let s = v
+        .clone()
+        .begin_account_sync(giro.id, "pin".into(), true)
+        .unwrap();
+    assert_eq!(run(&s).await.transactions_imported, 1);
+    assert_eq!(stored(giro.id).balance_cents, giro.balance_cents - 27_65);
+    // an archived account is not synced at all: everything would be dropped
+    v.set_account_archived(other.id, true).unwrap();
+    assert!(matches!(
+        v.clone().begin_account_sync(other.id, "pin".into(), true),
+        Err(CoreError::InvalidInput { .. })
+    ));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn single_account_sync_of_a_moneymoney_ref_syncs_the_whole_login() {
+    use super::persist::single_account_ref;
+    let none = || -> CoreResult<Vec<String>> { Ok(vec![]) };
+    assert_eq!(
+        single_account_ref("DE02120300000000202051".into(), none).unwrap(),
+        Some("DE02120300000000202051".into())
+    );
+    // marked by "Abrufweg umstellen", or imported and not yet taken over (#1417)
+    for r in [
+        "moneymoney-db:switch:DE02120300000000202051",
+        "moneymoney-db:A1B2C3",
+    ] {
+        assert_eq!(single_account_ref(r.into(), none).unwrap(), None, "{r}");
+        let skipped = || -> CoreResult<Vec<String>> { Ok(vec![r.to_string()]) };
+        assert!(matches!(
+            single_account_ref(r.into(), skipped),
+            Err(CoreError::InvalidInput { .. })
+        ));
+    }
+}
+
+#[tokio::test]
+async fn account_sync_after_switching_takes_the_account_over() {
+    let (v, path) = demo_vault();
+    let conn = v
+        .list_bank_connections()
+        .unwrap()
+        .into_iter()
+        .find(|c| c.connector == ConnectorKind::VolksbankKasselGoettingen)
+        .unwrap();
+    let giro = v
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.connection_id == Some(conn.id) && a.name == "Musterbank Girokonto")
+        .unwrap();
+    let ext = |v: &Arc<Vault>| -> String {
+        v.db()
+            .unwrap()
+            .query_row(
+                "SELECT external_ref FROM accounts WHERE id = ?1",
+                [giro.id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let old = ext(&v);
+    // as "Abrufweg umstellen" leaves it: the account under the marked ref
+    v.db()
+        .unwrap()
+        .execute(
+            "UPDATE accounts SET external_ref = ?1 WHERE id = ?2",
+            params![format!("moneymoney-db:switch:{old}"), giro.id],
+        )
+        .unwrap();
+    let s = v
+        .clone()
+        .begin_account_sync(giro.id, "pin".into(), true)
+        .unwrap();
+    let mut step = s.start().await.unwrap();
+    let summary = loop {
+        match step {
+            SyncStep::Finished { summary } => break summary,
+            _ => step = s.poll().await.unwrap(),
+        }
+    };
+    // the whole login was synced: the account is taken over and gets its booking
+    assert_eq!(ext(&v), old);
+    assert_eq!(summary.transactions_imported, 1);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn only_among_names_the_account_of_a_single_account_sync() {
+    let refs = vec!["a".to_string(), "b".to_string()];
+    let mut ctx = ConnectContext::default();
+    assert_eq!(ctx.only_among(&refs), None);
+    ctx.only_account = Some("b".into());
+    assert_eq!(ctx.only_among(&refs), Some("b"));
+    // not among the bank's accounts under its stored ref: all, cut down later
+    ctx.only_account = Some("old-b".into());
+    assert_eq!(ctx.only_among(&refs), None);
+}
+
+#[test]
+fn keep_only_follows_a_renamed_ref_and_keeps_revocations() {
+    let account = |r: &str| RemoteAccount {
+        external_ref: r.into(),
+        name: String::new(),
+        owner: String::new(),
+        iban: String::new(),
+        account_number: String::new(),
+        currency: "EUR".into(),
+        kind: AccountKind::Checking,
+        balance_cents: 0,
+        balance_date: String::new(),
+    };
+    let mut data = FetchResult {
+        accounts: vec![account("new-a"), account("b")],
+        renamed_refs: vec![("a".into(), "new-a".into())],
+        revoked_refs: vec!["c".into()],
+        accounts_complete: true,
+        ..Default::default()
+    };
+    data.keep_only("a");
+    assert_eq!(data.accounts.len(), 1);
+    assert_eq!(data.accounts[0].external_ref, "new-a");
+    assert_eq!(data.revoked_refs, ["c"]);
+    assert!(!data.accounts_complete && data.single_account);
+}
+
 #[tokio::test]
 async fn demo_code_and_redirect_flows() {
     let (v, path) = demo_vault();
@@ -1182,6 +1428,79 @@ async fn demo_code_and_redirect_flows() {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn amounts_above_the_sepa_limit_are_rejected_before_the_tan() {
+    use crate::connectors::fints::sepa::MAX_AMOUNT_CENTS;
+    use crate::models::{StandingOrderAction, StandingOrderRequest};
+    let (v, path) = demo_vault();
+    let acc = v
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.name == "Musterbank Girokonto" && a.connection_id.is_some())
+        .unwrap();
+    let transfer =
+        |amount: i64, instant: bool, execution_date: Option<String>| SepaTransferRequest {
+            account_id: acc.id,
+            recipient_name: "Müller GmbH".into(),
+            recipient_iban: "DE89370400440532013000".into(),
+            recipient_bic: None,
+            amount_cents: amount,
+            purpose: "Rechnung 42".into(),
+            instant,
+            execution_date,
+        };
+    let later = crate::dates::iso(crate::dates::today() + crate::dates::days(10));
+    for (instant, date) in [(false, None), (true, None), (false, Some(later.clone()))] {
+        assert!(
+            v.clone()
+                .begin_transfer(
+                    transfer(MAX_AMOUNT_CENTS, instant, date.clone()),
+                    "pin".into(),
+                    true
+                )
+                .is_ok()
+        );
+        assert!(matches!(
+            v.clone().begin_transfer(
+                transfer(MAX_AMOUNT_CENTS + 1, instant, date),
+                "pin".into(),
+                true
+            ),
+            Err(CoreError::InvalidInput { .. })
+        ));
+    }
+    // A valid monthly schedule (first date on the execution day), so only the
+    // amount decides.
+    let first_of_month = (crate::dates::today() + crate::dates::days(40)).first_of_month();
+    let order = |amount: i64| StandingOrderRequest {
+        account_id: acc.id,
+        action: StandingOrderAction::Create,
+        order_row_id: None,
+        recipient_name: "Vermieter".into(),
+        recipient_iban: "DE89370400440532013000".into(),
+        recipient_bic: None,
+        amount_cents: amount,
+        purpose: "Miete".into(),
+        first_date: crate::dates::iso(first_of_month),
+        last_date: None,
+        time_unit: "M".into(),
+        interval: 1,
+        exec_day: 1,
+    };
+    assert!(
+        v.clone()
+            .begin_standing_order(order(MAX_AMOUNT_CENTS), "pin".into(), true)
+            .is_ok()
+    );
+    assert!(matches!(
+        v.clone()
+            .begin_standing_order(order(MAX_AMOUNT_CENTS + 1), "pin".into(), true),
+        Err(CoreError::InvalidInput { .. })
+    ));
+    let _ = std::fs::remove_file(path);
+}
+
 #[tokio::test(start_paused = true)]
 async fn demo_transfer_flow_adds_pending_booking_and_suggests_recipient() {
     let (v, path) = demo_vault();
@@ -1201,14 +1520,16 @@ async fn demo_transfer_flow_adds_pending_booking_and_suggests_recipient() {
         instant: true,
         execution_date: None,
     };
-    assert!(v
-        .clone()
-        .begin_transfer(req("DE89370400440532013001", 100), "pin".into(), true)
-        .is_err());
-    assert!(v
-        .clone()
-        .begin_transfer(req("DE89370400440532013000", 0), "pin".into(), true)
-        .is_err());
+    assert!(
+        v.clone()
+            .begin_transfer(req("DE89370400440532013001", 100), "pin".into(), true)
+            .is_err()
+    );
+    assert!(
+        v.clone()
+            .begin_transfer(req("DE89370400440532013000", 0), "pin".into(), true)
+            .is_err()
+    );
     let s = v
         .clone()
         .begin_transfer(req("DE89 3704 0044 0532 0130 00", 1250), "pin".into(), true)
@@ -1410,8 +1731,10 @@ mod batch_transfer;
 mod body_limit;
 mod content_id;
 mod direct_debit;
+mod import_takeover;
 mod payment_method;
 mod postbox;
+pub(crate) mod redirects;
 mod standing_order;
 mod statements_auto;
 mod transfer_cancel;
@@ -1665,10 +1988,11 @@ fn a_fetch_stores_no_documents_while_retrieval_is_off() {
         fetch_with_document(),
     )
     .unwrap();
-    assert!(v
-        .list_all_documents(crate::documents::DocumentFilter::default())
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.list_all_documents(crate::documents::DocumentFilter::default())
+            .unwrap()
+            .is_empty()
+    );
     // on again: the same delivery is stored
     v.set_documents_fetch(conn, true).unwrap();
     store_fetch(
@@ -1699,9 +2023,118 @@ fn portal_connections_list_nothing_to_download_while_retrieval_is_off() {
         .unwrap();
     v.set_documents_fetch(conn, false).unwrap();
     // not even a list that would be invalid is looked at
-    assert!(v
-        .clone()
-        .pending_fnz_documents(conn, "kein json".into())
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.clone()
+            .pending_fnz_documents(conn, "kein json".into())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn managed_hold_prefix_survives_same_amount_payment_until_removed_from_list() {
+    let _p_dir = crate::test_support::TempDir::new("girocrab-hold-1111");
+    let v = Vault::open(
+        _p_dir.join("v.db").to_string_lossy().to_string(),
+        vec![3u8; 32],
+    )
+    .unwrap();
+    let conn = v
+        .add_bank_connection(
+            ConnectorKind::PayPal,
+            String::new(),
+            "user@example.com".into(),
+        )
+        .unwrap();
+    let mut f1 = FetchResult::default();
+    f1.accounts.push(RemoteAccount {
+        external_ref: "paypal:EUR".into(),
+        name: "PayPal".into(),
+        owner: "user@example.com".into(),
+        iban: String::new(),
+        account_number: "user@example.com".into(),
+        currency: "EUR".into(),
+        kind: AccountKind::PaymentService,
+        balance_cents: 100_00,
+        balance_date: "2026-11-18".into(),
+    });
+    f1.hold_prefix = Some("pending-hold-paypal-".into());
+    f1.transactions.push(RemoteTransaction {
+        account_ref: "paypal:EUR".into(),
+        external_id: "pending-hold-paypal-H1".into(),
+        booking_date: "2026-11-18".into(),
+        value_date: "2026-11-18".into(),
+        amount_cents: -30_00,
+        currency: "EUR".into(),
+        counterparty: "Hotel".into(),
+        ..Default::default()
+    });
+    // Gleich hoher anderer Kauf am Folgetag ohne Gegen-IBAN
+    f1.transactions.push(RemoteTransaction {
+        account_ref: "paypal:EUR".into(),
+        external_id: "TX-OTHER-30".into(),
+        booking_date: "2026-11-19".into(),
+        value_date: "2026-11-19".into(),
+        amount_cents: -30_00,
+        currency: "EUR".into(),
+        counterparty: "Shop".into(),
+        ..Default::default()
+    });
+    let saved_accounts = f1.accounts.clone();
+    store_fetch(&v, ConnectorKind::PayPal, conn, f1).unwrap();
+
+    let active_holds = || -> Vec<String> {
+        let db = v.db().unwrap();
+        let mut q = db
+            .prepare("SELECT external_id FROM transactions WHERE external_id LIKE 'pending-hold-paypal-%' AND deleted_ms IS NULL")
+            .unwrap();
+        q.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert_eq!(active_holds(), vec!["pending-hold-paypal-H1"]);
+
+    // Erst wenn die Reservierung nicht mehr in der offenen Liste steht, wird sie gelöscht
+    let f2 = FetchResult {
+        accounts: saved_accounts,
+        hold_prefix: Some("pending-hold-paypal-".into()),
+        ..Default::default()
+    };
+    store_fetch(&v, ConnectorKind::PayPal, conn, f2).unwrap();
+    assert!(active_holds().is_empty());
+}
+
+#[test]
+fn sync_moves_a_retired_fints_url_to_the_current_endpoint() {
+    let (v, _path) = demo_vault();
+    let id = v
+        .add_fints_connection(
+            "30060601".into(),
+            "https://fints1.atruvia.de/cgi-bin/hbciservlet".into(),
+            "apoBank".into(),
+            "nutzer".into(),
+            String::new(),
+        )
+        .unwrap();
+    let _ = v.clone().begin_sync(id, "12345".into(), true);
+    assert_eq!(
+        v.get_setting("fints.url.30060601".into()).unwrap(),
+        Some("https://fints.apobank.de/FinTs30PinTanHttpGate".into())
+    );
+}
+
+#[test]
+fn single_account_ref_refuses_switched_account_excluded_in_selection() {
+    let res = crate::connectors::persist::single_account_ref(
+        "moneymoney-db:switch:DE89370400440532013000".into(),
+        || Ok(vec!["DE89370400440532013000".into()]),
+    );
+    assert!(res.is_err());
+    let ok = crate::connectors::persist::single_account_ref(
+        "moneymoney-db:switch:DE89370400440532013000".into(),
+        || Ok(vec!["OTHER".into()]),
+    )
+    .unwrap();
+    assert_eq!(ok, None);
 }

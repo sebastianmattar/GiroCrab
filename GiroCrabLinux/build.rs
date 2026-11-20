@@ -52,6 +52,11 @@ fn main() {
     english_strings(&manifest);
     help_catalog(&manifest);
     CxxQtBuilder::new_qml_module(QmlModule::new("GiroCrab").qml_files(qml))
+        // The default (`Some("")`) copies the crate's headers into the include path and watches the
+        // crate directory itself, which Cargo scans recursively, `target/` included: every build
+        // would then rerun this script (minutes of moc/qmlcachegen). The only crate header,
+        // cpp/webcookies.h, is included from its own directory and watched as a `cpp_file`.
+        .crate_include_root(None)
         .qt_module("Quick")
         .qt_module("QuickControls2")
         .qt_module("Widgets")

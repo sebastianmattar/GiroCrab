@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::{
     category_uuid_for_path, fill_missing_uuids, fold, merge_deletion, pick_match, survivor,

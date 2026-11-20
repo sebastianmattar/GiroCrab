@@ -14,13 +14,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use chrono::{Datelike, NaiveDate};
 use regex::Regex;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 
-use crate::connectors::{store_fetch, FetchResult, RemoteAccount, RemoteTransaction, SyncSummary};
-use crate::dates::{find_de_date, iso, month_from_name};
+use crate::connectors::{FetchResult, RemoteAccount, RemoteTransaction, SyncSummary, store_fetch};
+use crate::dates::{day_month_on_or_before, de_dates, iso, month_from_name};
 use crate::error::CoreError;
 use crate::i18n::{tr, trf};
 use crate::models::{AccountKind, ConnectorKind};
@@ -135,16 +134,16 @@ pub fn parse_date(s: &str) -> Option<String> {
     static MONTH_NAME_DAY: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})").unwrap());
     let s = s.trim();
-    let ymd = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).map(iso);
-    let year = |y: &str| -> Option<i32> {
-        let n: i32 = y.parse().ok()?;
-        Some(if y.len() == 2 { 2000 + n } else { n })
-    };
+    let ymd = |y, m, d| crate::dates::ymd(y, m, d).map(iso);
     if let Some(c) = ISO.captures(s) {
         return ymd(c[1].parse().ok()?, c[2].parse().ok()?, c[3].parse().ok()?);
     }
     if let Some(c) = DMY.captures(s) {
-        return ymd(year(&c[3])?, c[2].parse().ok()?, c[1].parse().ok()?);
+        return ymd(
+            crate::dates::year(&c[3])?,
+            c[2].parse().ok()?,
+            c[1].parse().ok()?,
+        );
     }
     if let Some(c) = DAY_MONTH_NAME.captures(s) {
         return ymd(
@@ -243,10 +242,10 @@ const INDICATOR_KEYS: &[&str] = &[
 
 fn get_ci<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
     for k in keys {
-        if let Some((_, v)) = obj.iter().find(|(name, _)| name.to_lowercase() == *k) {
-            if !v.is_null() {
-                return Some(v);
-            }
+        if let Some((_, v)) = obj.iter().find(|(name, _)| name.to_lowercase() == *k)
+            && !v.is_null()
+        {
+            return Some(v);
         }
     }
     None
@@ -270,16 +269,16 @@ fn value_text(v: &Value) -> Option<String> {
 }
 
 /// Largest amount accepted from portal JSON: 10 trillion euro in cents.
-const MAX_PORTAL_CENTS: f64 = 1e15;
+const MAX_PORTAL_CENTS: i64 = 1_000_000_000_000_000;
 
 fn value_cents(v: &Value) -> Option<i64> {
     match v {
-        Value::Number(n) => {
-            let cents = (n.as_f64()? * 100.0).round();
-            // no real account holds more than this; beyond it `as i64` would saturate
-            // and the sign handling (`abs`, `-`) downstream would overflow
-            (cents.is_finite() && cents.abs() <= MAX_PORTAL_CENTS).then_some(cents as i64)
-        }
+        // Rounded from the number's text (1.005 -> 101, not 100 as in f64).
+        // No real account holds more than the cap; the sign handling (`abs`,
+        // `-`) downstream would overflow near i64::MAX.
+        Value::Number(_) => crate::money::json_number_to_cents_rounded(v)
+            .ok()
+            .filter(|c| c.abs() <= MAX_PORTAL_CENTS),
         Value::String(s) => parse_amount(s),
         // a single-currency list such as Open Bank's `amounts: [{…}]`
         Value::Array(a) => a.first().and_then(value_cents),
@@ -571,10 +570,9 @@ fn find_balance(v: &Value, kind: ConnectorKind) -> Option<(String, i64)> {
                         ]
                         .iter()
                         .any(|x| kl.contains(x))
+                        && let Some(c) = value_cents(val).filter(|c| *c != 0)
                     {
-                        if let Some(c) = value_cents(val).filter(|c| *c != 0) {
-                            return Some((k.clone(), c));
-                        }
+                        return Some((k.clone(), c));
                     }
                 }
                 o.values().find_map(generic)
@@ -863,19 +861,28 @@ pub fn parse_statement_text(text: &str, kind: ConnectorKind) -> Vec<Parsed> {
     static LINE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"^\s*(\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2})?)\s+(?:(\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2})?)\s+)?(.+?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2})\s*(-|CR|H|S|\+)?\s*$").unwrap()
     });
-    // statement year from any full date or "Abrechnung … 2025"
-    let default_year = find_de_date(text).map_or_else(|| chrono::Local::now().year(), |d| d.year());
+    // A "DD.MM." line falls on or before the statement's latest date. Dates after
+    // today are fine print (new terms, card expiry), not the statement's.
+    let today = crate::dates::today();
+    let latest = de_dates(text)
+        .filter(|d| *d <= today)
+        .max()
+        .unwrap_or(today);
     let mut out = Vec::new();
     for line in text.lines() {
         let Some(c) = LINE.captures(line) else {
             continue;
         };
-        let date_s = if c[1].matches('.').count() == 2 && c[1].ends_with('.') {
-            format!("{}{}", &c[1], default_year)
-        } else {
-            c[1].to_string()
+        let date = match c[1].strip_suffix('.').and_then(|dm| dm.split_once('.')) {
+            Some((d, m)) => d
+                .parse()
+                .ok()
+                .zip(m.parse().ok())
+                .and_then(|(d, m)| day_month_on_or_before(d, m, latest))
+                .map(iso),
+            None => parse_date(&c[1]),
         };
-        let Some(date) = parse_date(&date_s) else {
+        let Some(date) = date else {
             continue;
         };
         let Some(raw) = parse_amount(&c[4]) else {
@@ -1174,10 +1181,8 @@ fn cards_fetch(
         && (cards.len() == 1
             || stored.is_empty()
             || stored.iter().any(|s| s.account_ref == base_ref));
-    if base_free {
-        if let Some(t) = target.iter_mut().find(|t| t.is_none()) {
-            *t = Some(base_ref.to_string());
-        }
+    if base_free && let Some(t) = target.iter_mut().find(|t| t.is_none()) {
+        *t = Some(base_ref.to_string());
     }
     let adjust_balances = cards.iter().all(|c| c.balance.is_none());
     let mut out = FetchResult {
@@ -1442,41 +1447,30 @@ pub(crate) fn merge_imported_split_parts(
             continue;
         }
         // the portal booking with this reference (exactly one, not split yet)
-        let bank: Vec<(i64, i64, bool, String)> = {
+        let bank: Vec<(i64, i64, bool)> = {
             let mut q = db.prepare(
-                "SELECT t.id, t.amount_cents, t.checked, t.category_source FROM transactions t
+                "SELECT t.id, t.amount_cents, t.checked FROM transactions t
                   WHERE t.account_id = ?1 AND t.deleted_ms IS NULL AND substr(t.external_id, 1, ?3) = ?2
                     AND NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id)",
             )?;
             let prefix = format!("id:{reference}---");
             let rows = q.query_map(params![account_id, prefix, prefix.len() as i64], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })?;
             rows.collect::<Result<_, _>>()?
         };
-        let [(bank_id, bank_cents, bank_checked, ref source)] = bank[..] else {
+        let [(bank_id, bank_cents, bank_checked)] = bank[..] else {
             continue;
         };
         if parts.iter().map(|p| p.1).sum::<i64>() != bank_cents {
             continue;
         }
-        for (_, cents, cat, note, _) in &parts {
-            db.execute(
-                "INSERT INTO transaction_splits(transaction_id, category_id, amount_cents, note) VALUES (?1, ?2, ?3, ?4)",
-                params![bank_id, cat, cents, note.trim()],
-            )?;
-        }
-        db.execute(
-            "UPDATE transactions SET splits_ms = ?2 WHERE id = ?1",
-            params![bank_id, now],
-        )?;
-        if source != "manual" {
-            db.execute(
-                "UPDATE transactions SET category_id = NULL, category_source = 'none', rule_id = NULL, category_ms = ?2
-                  WHERE id = ?1 AND category_id IS NOT NULL",
-                params![bank_id, now],
-            )?;
-        }
+        let lines: Vec<_> = parts
+            .iter()
+            .map(|(_, cents, cat, note, _)| (*cat, *cents, note.as_str()))
+            .collect();
+        crate::planning::store_splits(db, bank_id, &lines)?;
+        crate::planning::clear_split_category(db, bank_id)?;
         if !bank_checked && parts.iter().all(|p| p.4) {
             db.execute(
                 "UPDATE transactions SET checked = 1, checked_ms = ?2 WHERE id = ?1",
@@ -2071,6 +2065,16 @@ mod tests {
     }
 
     #[test]
+    fn json_amounts_round_from_their_text_not_from_f64() {
+        use serde_json::json;
+        // 1.005 * 100.0 is 100.4999… in f64
+        assert_eq!(super::value_cents(&json!(1.005)), Some(101));
+        assert_eq!(super::value_cents(&json!(-0.285)), Some(-29));
+        assert_eq!(super::value_cents(&json!(42)), Some(4200));
+        assert_eq!(super::value_cents(&json!(1e10)), Some(1_000_000_000_000));
+    }
+
+    #[test]
     fn candidate_keys_are_names_only() {
         // the debug log may name fields, never their amounts
         let v = serde_json::json!({
@@ -2240,6 +2244,33 @@ mod tests {
         assert_eq!(p.len(), 2);
         assert_eq!((p[0].date.as_str(), p[0].cents), ("2025-04-03", -2350));
         assert_eq!(p[1].cents, 10000);
+    }
+
+    #[test]
+    fn pdf_lines_without_year_before_the_statement_date() {
+        let dates = |t: &str| -> Vec<String> {
+            parse_statement_text(t, ConnectorKind::AmericanExpress)
+                .into_iter()
+                .map(|p| p.date)
+                .collect()
+        };
+        assert_eq!(
+            dates("Abrechnung vom 05.01.2026\n28.12. Hotel 120,00\n03.01. Taxi 12,00\n"),
+            ["2025-12-28", "2026-01-03"]
+        );
+        // A period names its start first; the end date decides.
+        assert_eq!(
+            dates("Zeitraum 01.12.2025 - 05.01.2026\n28.12. Hotel 120,00\n03.01. Taxi 12,00\n"),
+            ["2025-12-28", "2026-01-03"]
+        );
+        assert_eq!(
+            dates("Abrechnung vom 15.12.2025\n01.12. Hotel 120,00\n15.12. Taxi 12,00\n"),
+            ["2025-12-01", "2025-12-15"]
+        );
+        assert_eq!(
+            dates("Abrechnung vom 05.01.2026\n28.12. Hotel 120,00\nZinsänderung ab 01.04.2099\n"),
+            ["2025-12-28"]
+        );
     }
 
     #[test]
@@ -2960,10 +2991,11 @@ mod card_tests {
             .unwrap();
         assert_eq!(rows(&v, &new_ref), vec!["id:B1", "id:B2"]);
         assert_eq!(rows(&v, &base), vec!["id:A1", "id:A2", "id:A3"]);
-        assert!(v
-            .pending_account_selection_connections()
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.pending_account_selection_connections()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -3051,10 +3083,11 @@ mod card_tests {
         v.clone()
             .import_portal_capture_cards(conn, bodies, keys, cards, "[]".into())
             .unwrap();
-        assert!(v
-            .pending_account_selection_connections()
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.pending_account_selection_connections()
+                .unwrap()
+                .is_empty()
+        );
         let choices = v.connection_account_choices(conn).unwrap();
         assert_eq!(
             choices

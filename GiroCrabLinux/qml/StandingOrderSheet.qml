@@ -141,7 +141,7 @@ Sheet {
                             font.features: { "tnum": 1 }
                             text: sheet.draft.amountText
                             onTextEdited: Payments.setStanding({ amountText: text })
-                            Sensitive {}
+                            Sensitive { amounts: true }
                         }
                     }
                     FormRow {
@@ -243,7 +243,7 @@ Sheet {
                         width: parent.width
                         spacing: 10
                         Text { text: Fmt.money(sheet.cents === null ? 0 : sheet.cents); font.pixelSize: Theme.title; font.weight: Font.DemiBold
-                               font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                               font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                         Text { text: Payments.rhythmText(sheet.draft) + " · " + Payments.execDayText(sheet.draft)
                                font.pixelSize: Theme.callout; color: Theme.secondary }
                         Line { label: qsTr("Von Konto"); value: sheet.account ? sheet.account.name + " · " + Fmt.iban(sheet.account.iban) : "" }

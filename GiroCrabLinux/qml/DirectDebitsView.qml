@@ -324,7 +324,7 @@ Rectangle {
                 spacing: 2
                 Text { visible: !!mr.mandate && mr.mandate.default_amount_cents > 0; Layout.alignment: Qt.AlignRight
                        text: mr.mandate ? Fmt.money(mr.mandate.default_amount_cents) : ""
-                       font.pixelSize: Theme.body; font.weight: Font.Medium; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                       font.pixelSize: Theme.body; font.weight: Font.Medium; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                 Text { Layout.alignment: Qt.AlignRight; font.pixelSize: Theme.caption; color: Theme.secondary
                        text: !mr.mandate ? "" : mr.mandate.last_collected ? qsTr("zuletzt %1").arg(Fmt.medium(mr.mandate.last_collected)) : qsTr("noch nie eingezogen") }
             }

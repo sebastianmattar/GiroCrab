@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use girocrab_core::connectors::PayeeCheck;
 use girocrab_core::{Challenge, ChallengeKind, TransferStep};
 
-use crate::sync_flow::{safe_https_url, Ui, CANCELLED};
+use crate::sync_flow::{CANCELLED, Ui, safe_https_url};
 
 const DIALOG_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
@@ -75,12 +75,12 @@ pub fn drive_transfer<S: TransferStepper, U: TransferUi>(
                 return Ok(msg);
             }
             TransferStep::InstantDeclined { reason } => {
-                return Err(format!("Nicht ausgeführt: {reason}"))
+                return Err(format!("Nicht ausgeführt: {reason}"));
             }
             TransferStep::OutcomeUnknown { reason, .. } => {
                 return Err(format!(
                     "Ergebnis unklar: {reason} Bitte das Konto prüfen und NICHT erneut senden."
-                ))
+                ));
             }
             TransferStep::NeedsPayeeConfirmation { check } => {
                 if ui.confirm_payee(&check) {

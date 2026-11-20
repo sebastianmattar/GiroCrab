@@ -2,6 +2,9 @@
 //! Manager (`keyring`, `windows-native`). On other platforms (development, `cargo check`,
 //! tests) a process-local store stands in, so the crate builds everywhere.
 
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[cfg(windows)]
 const SERVICE: &str = "de.girocrab.vault";
 #[cfg(windows)]
@@ -18,9 +21,20 @@ fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| ["1", "true", "yes"].contains(&v.to_lowercase().as_str()))
 }
 
-/// `GIROCRAB_DEMO_SEED=1|true|yes`: start with the demo vault.
+/// Demo mode of this process: starts as `GIROCRAB_DEMO_SEED=1|true|yes`, then follows the
+/// demo buttons. Kept here instead of in the environment, which other threads read
+/// (`std::env::set_var` is unsafe then, Rust 2024).
+static DEMO: LazyLock<AtomicBool> =
+    LazyLock::new(|| AtomicBool::new(env_flag("GIROCRAB_DEMO_SEED")));
+
+/// Start with (or switch to) the demo vault.
 pub fn demo_seed_requested() -> bool {
-    env_flag("GIROCRAB_DEMO_SEED")
+    DEMO.load(Ordering::SeqCst)
+}
+
+/// Demo buttons: demo data on/off for the next `unlock` and `vault_path`.
+pub fn set_demo(on: bool) {
+    DEMO.store(on, Ordering::SeqCst);
 }
 
 /// Demo mode and `GIROCRAB_NO_KEYCHAIN=1` use a fixed throw-away key; the store is never touched.
@@ -97,9 +111,8 @@ mod tests {
 
     #[test]
     fn creates_once_then_reads_back() {
-        std::env::remove_var("GIROCRAB_DEMO_SEED");
-        std::env::remove_var("GIROCRAB_NO_KEYCHAIN");
-        if cfg!(windows) {
+        set_demo(false);
+        if env_flag("GIROCRAB_NO_KEYCHAIN") || cfg!(windows) {
             return; // would touch the real Credential Manager
         }
         assert!(unlock(false).is_err());

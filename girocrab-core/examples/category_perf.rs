@@ -48,6 +48,10 @@
 //! Rules that add tags (#580, 2026-11-17, 41,469 bookings): apply_rules(fetch) 127 ms with one
 //! tag rule (124 without; only bookings whose tags nobody touched), apply_rules(all) 230 ms;
 //! rule_tag_counts (rule list, four tag rules, a third of the bookings tagged) 34 ms (off main).
+//! Known recipients (#978, 44,474 bookings, 2026-11-19): suggest_recipients 259 ms per keystroke
+//!   (a scan over every booking row) → 0.6 ms for the first call after a write (index
+//!   `tx_recipients`, 4,207 bookings with an IBAN; the write itself not timed), 0.0 ms while the
+//!   data is unchanged; 10.7 ms after a write when every outgoing booking (36,060) carries an IBAN.
 use girocrab_core::models::{
     BookingDirection, BookingFilter, BookingScope, MatchKind, Rule, RuleField,
 };
@@ -422,10 +426,10 @@ fn main() {
             r#"{"method":"summary","params":{"date_from":"2025-01-01","date_to":"2025-12-31"}}"#,
         )
     });
-    let to = chrono::Local::now().date_naive();
+    let to = jiff::ZonedDateTime::now().date();
     let three = format!(
         r#"{{"method":"summary","params":{{"date_from":"{}","date_to":"{to}"}}}}"#,
-        to - chrono::Duration::days(3 * 366)
+        to - jiff::Span::new().days(3 * 366)
     );
     time("local_api summary (three years, the maximum)", || {
         vault.local_api_request(&three)
@@ -457,6 +461,32 @@ fn small_results(vault: &Vault, all: &[girocrab_core::models::Booking]) {
             })
             .unwrap()
     });
+    time("suggest_recipients(\"m\", 5), data unchanged", || {
+        vault.suggest_recipients("m".into(), 5).unwrap()
+    });
+    let known = vault.list_known_recipients(String::new()).unwrap();
+    println!(
+        "  → {} IBANs, {} outgoing bookings with an IBAN",
+        known.len(),
+        known.iter().map(|r| r.times_used).sum::<u32>()
+    );
+    // The rebuild after a write, without the write: hide and show again (an even number of
+    // times, so the IBAN ends up shown), timing only the read that follows each.
+    let iban = known[0].iban.clone();
+    let mut rebuild: Vec<f32> = [true, false, true, false, true, false]
+        .into_iter()
+        .map(|hide| {
+            vault.set_recipient_hidden(iban.clone(), hide).unwrap();
+            let t = std::time::Instant::now();
+            vault.suggest_recipients("m".into(), 5).unwrap();
+            t.elapsed().as_secs_f32() * 1000.0
+        })
+        .collect();
+    rebuild.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!(
+        "{:<52} {:>8.1} ms",
+        "suggest_recipients(\"m\", 5), first after a write", rebuild[3]
+    );
     time("cashflow_by_period(month, 12)", || {
         vault
             .cashflow_by_period(PeriodGranularity::Month, 12, None)
@@ -534,8 +564,7 @@ fn env_usize(name: &str, default: usize) -> usize {
 /// The core calls of `AppModel.startSelectionLoad` for the busiest top-level
 /// category, for the periods "all" and current year.
 fn category_selection(vault: &Vault, cats: &[girocrab_core::models::Category]) {
-    use chrono::Datelike;
-    let today = chrono::Local::now().date_naive();
+    let today = jiff::ZonedDateTime::now().date();
     let cat = cats
         .iter()
         .filter(|c| c.parent_id.is_none())
@@ -549,8 +578,8 @@ fn category_selection(vault: &Vault, cats: &[girocrab_core::models::Category]) {
         ("all", None, None, 4u32),
         (
             "year",
-            Some(format!("{}-01-01", today.format("%Y"))),
-            Some(today.format("%Y-%m-%d").to_string()),
+            Some(format!("{}-01-01", today.year())),
+            Some(today.to_string()),
             7,
         ),
     ] {
@@ -577,7 +606,7 @@ fn category_selection(vault: &Vault, cats: &[girocrab_core::models::Category]) {
             vault.selection_flow(vec![], from.clone(), to.clone())
         });
         total += time(&format!("[{label}] recurring_snapshot"), || {
-            vault.recurring_snapshot(vec![], today.year(), today.month())
+            vault.recurring_snapshot(vec![], today.year().into(), today.month() as u32)
         });
         total += time(&format!("[{label}] list_categories(period)"), || {
             vault.list_categories(from.clone(), to.clone())

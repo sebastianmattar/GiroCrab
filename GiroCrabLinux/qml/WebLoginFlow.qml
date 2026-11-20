@@ -5,7 +5,7 @@ import QtQuick.Layouts
 // above the browser). Subtypes: TrWebLoginFlow (ConnectionsUI.swift › WebLoginSheet),
 // PortalWebLoginFlow (PortalUI.swift), AmazonWebLoginFlow (AmazonUI.swift),
 // FnzWebLoginFlow (FnzUI.swift), QuirionWebLoginFlow (QuirionUI.swift),
-// SchwaebischHallWebLoginFlow (SchwaebischHallUI.swift).
+// SchwaebischHallWebLoginFlow (SchwaebischHallUI.swift), EquatePlusWebLoginFlow (EquatePlusUI.swift).
 RowLayout {
     /// The sheet (browser API: load, evaluate, runAsync, currentURL, onPortal, …).
     property var browser

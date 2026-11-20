@@ -3,13 +3,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use rusqlite::{params, params_from_iter, ToSql};
+use rusqlite::{ToSql, params, params_from_iter};
 
 use super::Vault;
+use super::cache::DataStamp;
 use crate::error::CoreError;
 use crate::i18n::trf;
 use crate::iban::normalize_iban;
-use crate::merchants::{classify, clean_purpose, payment_method, FlowKind, MerchantResolver};
+use crate::merchants::{FlowKind, MerchantResolver, classify, clean_purpose, payment_method};
 use crate::models::*;
 use crate::money::parse_cents;
 
@@ -275,10 +276,9 @@ impl BookingFinisher {
                          OR (c.id IS NULL AND (lower(a.name) LIKE '%paypal%'
                                                OR lower(a.bank_name) LIKE '%paypal%')))",
             )?;
-            let ids = st
-                .query_map([], |r| r.get::<_, i64>(0))?
-                .collect::<Result<_, _>>()?;
-            ids
+
+            st.query_map([], |r| r.get::<_, i64>(0))?
+                .collect::<Result<_, _>>()?
         };
         Ok(Self {
             language: crate::i18n::current(),
@@ -872,6 +872,54 @@ impl Vault {
     pub fn list_transactions(&self, filter: BookingFilter) -> Result<BookingPage, CoreError> {
         self.list_page(filter, true)
     }
+
+    /// `flow_other_currencies` for the plain selection of `selection_flow`: accounts and period.
+    pub fn selection_flow_other_currencies(
+        &self,
+        account_ids: Vec<i64>,
+        date_from: Option<String>,
+        date_to: Option<String>,
+    ) -> Result<Vec<CurrencyFlow>, CoreError> {
+        self.flow_other_currencies(BookingFilter {
+            account_ids,
+            date_from,
+            date_to,
+            ..Default::default()
+        })
+    }
+
+    /// The KPI tiles of the currencies other than EUR (#1049) for the same filter: what the page
+    /// sums leave out. Empty for a single account; no scan when no booking has another currency.
+    pub fn flow_other_currencies(
+        &self,
+        filter: BookingFilter,
+    ) -> Result<Vec<CurrencyFlow>, CoreError> {
+        if filter.account_ids.len() == 1 {
+            return Ok(Vec::new());
+        }
+        let db = self.db()?;
+        if !crate::planning::has_other_currencies(&db)? {
+            return Ok(Vec::new());
+        }
+        let mut per: std::collections::BTreeMap<String, SelectionFlow> = Default::default();
+        self.visit_bookings(&db, &filter, |share, t| {
+            if !crate::planning::counts_in_sums(filter.account_ids.len(), &t.currency) {
+                per.entry(t.currency.to_uppercase())
+                    .or_default()
+                    .add(t.flow, share);
+            }
+        })?;
+        Ok(per
+            .into_iter()
+            .map(|(currency, f)| CurrencyFlow {
+                currency,
+                consumption_cents: f.consumption_cents,
+                invested_cents: f.invested_cents,
+                income_cents: f.income_cents,
+            })
+            .filter(|f| f.consumption_cents != 0 || f.invested_cents != 0 || f.income_cents != 0)
+            .collect())
+    }
 }
 
 impl Vault {
@@ -914,40 +962,43 @@ pub(crate) struct BookingClass {
 
 type BookingClasses = Arc<HashMap<i64, BookingClass>>;
 
-/// Per-vault work every booking list repeats, valid while `total_changes` of the vault's
-/// connection still equals the stored count. The vault has one connection that is never
-/// replaced and every write (rules, settings, merges, imports) goes through it, so any
-/// change that can move a flow, a merchant or a category bumps the count; a restored
-/// snapshot is a new `Vault` with an empty cache.
+/// Per-vault work every booking list repeats, valid for one state of the data
+/// ([`DataStamp`](super::cache::DataStamp): any write that can move a flow, a merchant or a
+/// category, and a restore, changes it).
 #[derive(Default)]
 pub(crate) struct ListCache(Mutex<ListCacheState>);
 
 #[derive(Default)]
 struct ListCacheState {
-    changes: u64,
+    stamp: DataStamp,
     finisher: Option<Arc<BookingFinisher>>,
     classes: Option<BookingClasses>,
 }
 
 impl ListCache {
-    /// The entries built at `changes`; emptied first when a write happened since.
-    fn at(&self, changes: u64) -> MutexGuard<'_, ListCacheState> {
+    /// The entries built at `stamp`; emptied first when the data changed since.
+    fn at(&self, stamp: DataStamp) -> MutexGuard<'_, ListCacheState> {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.changes != changes {
+        if state.stamp != stamp {
             *state = ListCacheState {
-                changes,
+                stamp,
                 ..Default::default()
             };
         }
         state
     }
 
-    /// Stores into the entries of `changes`, unless a transaction is open: its
+    /// Stores into the entries of `stamp`, unless a transaction is open: its
     /// rollback would not lower the count, so entries built from its data would
     /// outlive it.
-    fn keep(&self, db: &rusqlite::Connection, changes: u64, put: impl FnOnce(&mut ListCacheState)) {
+    fn keep(
+        &self,
+        db: &rusqlite::Connection,
+        stamp: DataStamp,
+        put: impl FnOnce(&mut ListCacheState),
+    ) {
         if db.is_autocommit() {
-            put(&mut self.at(changes));
+            put(&mut self.at(stamp));
         }
     }
 }
@@ -959,10 +1010,10 @@ impl Vault {
         &self,
         db: &rusqlite::Connection,
     ) -> Result<Arc<BookingFinisher>, CoreError> {
-        let changes = db.total_changes();
+        let stamp = self.data_stamp(db);
         if let Some(finisher) = self
             .list_cache
-            .at(changes)
+            .at(stamp)
             .finisher
             .clone()
             .filter(|f| f.language == crate::i18n::current())
@@ -971,7 +1022,7 @@ impl Vault {
         }
         let finisher = Arc::new(BookingFinisher::load(db)?);
         self.list_cache
-            .keep(db, changes, |s| s.finisher = Some(finisher.clone()));
+            .keep(db, stamp, |s| s.finisher = Some(finisher.clone()));
         Ok(finisher)
     }
 
@@ -986,7 +1037,7 @@ impl Vault {
         if let Some(classes) = self.cached_booking_classes(db) {
             return Ok(classes);
         }
-        let changes = db.total_changes();
+        let stamp = self.data_stamp(db);
         let finisher = self.booking_finisher(db)?;
         let (cte, where_sql, args, share_sql) =
             Self::filter_clauses(db, &BookingFilter::default())?;
@@ -1023,7 +1074,7 @@ impl Vault {
         }
         let classes = Arc::new(classes);
         self.list_cache
-            .keep(db, changes, |s| s.classes = Some(classes.clone()));
+            .keep(db, stamp, |s| s.classes = Some(classes.clone()));
         Ok(classes)
     }
 
@@ -1033,7 +1084,7 @@ impl Vault {
         &self,
         db: &rusqlite::Connection,
     ) -> Option<BookingClasses> {
-        self.list_cache.at(db.total_changes()).classes.clone()
+        self.list_cache.at(self.data_stamp(db)).classes.clone()
     }
 
     /// `list_transactions`; `with_rows: false` returns the sums and counts without rows
@@ -1080,13 +1131,18 @@ impl Vault {
             ""
         };
         let sql = format!(
-            "{cte}SELECT t.id, t.booking_date, {share_sql} {BOOKING_FROM_SQL} WHERE {where_sql}{order}"
+            "{cte}SELECT t.id, t.booking_date, {share_sql}, t.currency {BOOKING_FROM_SQL} WHERE {where_sql}{order}"
         );
         let mut stmt = db.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter().map(|b| b.as_ref())), |r| {
             // the date only cuts the page: counts and sums skip the String
             let date = if with_rows { r.get(1)? } else { String::new() };
-            Ok((r.get::<_, i64>(0)?, date, r.get::<_, i64>(2)?))
+            Ok((
+                r.get::<_, i64>(0)?,
+                date,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })?;
         let (mut income, mut expense, mut consumption, mut investment, mut perk) =
             (0i64, 0i64, 0i64, 0i64, 0i64);
@@ -1094,25 +1150,28 @@ impl Vault {
         let mut kept: Vec<(i64, String)> = Vec::new();
         let mut total = 0u32;
         for row in rows {
-            let (id, date, share) = row?;
+            let (id, date, share, currency) = row?;
             let Some(class) = classes.get(&id) else {
                 return Ok(None);
             };
             if !keeps(filter, class.flow, &class.merchant) {
                 continue;
             }
-            match kpi_side(class.flow, share) {
-                KpiSide::Income => income += share,
-                KpiSide::Expense => expense += share,
-                KpiSide::Neutral => {}
+            // Sums skip other currencies unless one account is selected (#1049); the rows stay.
+            if crate::planning::counts_in_sums(filter.account_ids.len(), &currency) {
+                match kpi_side(class.flow, share) {
+                    KpiSide::Income => income += share,
+                    KpiSide::Expense => expense += share,
+                    KpiSide::Neutral => {}
+                }
+                match class.flow {
+                    FlowKind::Consumption => consumption += share,
+                    FlowKind::Investment => investment += share,
+                    FlowKind::Perk => perk += share,
+                    _ => {}
+                }
+                flow.add(class.flow, share);
             }
-            match class.flow {
-                FlowKind::Consumption => consumption += share,
-                FlowKind::Investment => investment += share,
-                FlowKind::Perk => perk += share,
-                _ => {}
-            }
-            flow.add(class.flow, share);
             total += 1;
             if with_rows {
                 kept.push((id, date));
@@ -1191,18 +1250,21 @@ impl Vault {
         self.visit_bookings(db, filter, |share, t| {
             // One KPI definition (`kpi_side`) for the page sums and `SelectionFlow`;
             // transfers between own accounts are neutral (else counted on both sides).
-            match kpi_side(t.flow, share) {
-                KpiSide::Income => income += share,
-                KpiSide::Expense => expense += share,
-                KpiSide::Neutral => {}
+            // Sums skip other currencies unless one account is selected (#1049); the rows stay.
+            if crate::planning::counts_in_sums(filter.account_ids.len(), &t.currency) {
+                match kpi_side(t.flow, share) {
+                    KpiSide::Income => income += share,
+                    KpiSide::Expense => expense += share,
+                    KpiSide::Neutral => {}
+                }
+                match t.flow {
+                    FlowKind::Consumption => consumption += share,
+                    FlowKind::Investment => investment += share,
+                    FlowKind::Perk => perk += share,
+                    _ => {}
+                }
+                flow.add(t.flow, share);
             }
-            match t.flow {
-                FlowKind::Consumption => consumption += share,
-                FlowKind::Investment => investment += share,
-                FlowKind::Perk => perk += share,
-                _ => {}
-            }
-            flow.add(t.flow, share);
             // Only the page is kept. `whole_days` adds the rest of its last day:
             // sorted by day, it follows directly.
             let in_page = (start..end).contains(&total)
@@ -1529,10 +1591,11 @@ mod paging_tests {
         let both = v.list_transactions(range(Some(min), Some(max))).unwrap();
         assert!(both.total_count > 0, "the demo vault has bookings in range");
         assert_eq!(both.total_count, expected(&|a| (min..=max).contains(&a)));
-        assert!(both
-            .transactions
-            .iter()
-            .all(|b| (min..=max).contains(&b.amount_cents.abs())));
+        assert!(
+            both.transactions
+                .iter()
+                .all(|b| (min..=max).contains(&b.amount_cents.abs()))
+        );
         // the sign is ignored: income and expenses both count
         assert!(both.transactions.iter().any(|b| b.amount_cents > 0));
         assert!(both.transactions.iter().any(|b| b.amount_cents < 0));
@@ -1626,10 +1689,11 @@ mod paging_tests {
             0
         );
         // a second run changes nothing
-        assert!(v
-            .set_checked_for_filter(unchecked.clone(), true)
-            .unwrap()
-            .is_empty());
+        assert!(
+            v.set_checked_for_filter(unchecked.clone(), true)
+                .unwrap()
+                .is_empty()
+        );
         // undo restores exactly the touched bookings
         v.set_checked_for_ids(ids, false).unwrap();
         assert_eq!(v.list_transactions(unchecked).unwrap().total_count, before);
@@ -1745,10 +1809,11 @@ mod paging_tests {
             ..Default::default()
         };
         let page = v.list_transactions(unc.clone()).unwrap();
-        assert!(page
-            .transactions
-            .iter()
-            .all(|b| b.flow != FlowKind::Transfer));
+        assert!(
+            page.transactions
+                .iter()
+                .all(|b| b.flow != FlowKind::Transfer)
+        );
         assert_eq!(page.total_count as usize, open.len());
         assert_eq!(
             v.count_transactions(unc.clone()).unwrap() as usize,
@@ -1813,10 +1878,12 @@ mod paging_tests {
             })
             .unwrap();
         assert!(by_number.total_count > 0);
-        assert!(by_number
-            .transactions
-            .iter()
-            .all(|b| b.account_id == giro.id));
+        assert!(
+            by_number
+                .transactions
+                .iter()
+                .all(|b| b.account_id == giro.id)
+        );
         let _ = std::fs::remove_file(p);
     }
 

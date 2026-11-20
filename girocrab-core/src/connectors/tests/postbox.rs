@@ -1,6 +1,6 @@
 //! comdirect PostBox next to a FinTS login (#838): switch, due date, storage.
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::connectors::*;
 use crate::documents::RemoteDocument;
@@ -41,8 +41,8 @@ fn doc(account_ref: &str, id: &str) -> RemoteDocument {
     }
 }
 
-fn day(s: &str) -> NaiveDate {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+fn day(s: &str) -> Date {
+    Date::strptime("%Y-%m-%d", s).unwrap()
 }
 
 #[test]
@@ -71,10 +71,11 @@ fn postbox_needs_comdirect_fints_and_api_credentials() {
     assert!(!v.comdirect_postbox_enabled(c).unwrap());
     assert_eq!(v.get_setting(postbox_last_key(c)).unwrap(), None);
     // "PostBox jetzt abrufen" only when it is on
-    assert!(v
-        .clone()
-        .fetch_comdirect_postbox(c, String::new(), false)
-        .is_err());
+    assert!(
+        v.clone()
+            .fetch_comdirect_postbox(c, String::new(), false)
+            .is_err()
+    );
 }
 
 #[test]
@@ -133,14 +134,16 @@ fn postbox_and_statements_are_refused_while_document_retrieval_is_off() {
     let ctx_free = v.clone().begin_sync(c, "pin".into(), true);
     assert!(ctx_free.is_ok());
     v.set_documents_fetch(c, true).unwrap();
-    assert!(v
-        .clone()
-        .fetch_comdirect_postbox(c, "pin".into(), true)
-        .is_ok());
-    assert!(v
-        .clone()
-        .fetch_account_statements(account, "pin".into(), true)
-        .is_ok());
+    assert!(
+        v.clone()
+            .fetch_comdirect_postbox(c, "pin".into(), true)
+            .is_ok()
+    );
+    assert!(
+        v.clone()
+            .fetch_account_statements(account, "pin".into(), true)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -288,4 +291,73 @@ fn documents_can_be_moved_to_another_account_or_none() {
     assert_eq!(account_of(), None);
     assert!(v.set_document_account(doc_id, Some(9999)).is_err());
     assert!(v.set_document_account(9999, Some(depot)).is_err());
+}
+
+/// Consorsbank Online-Archiv (#1024): same switch, no API credentials; documents
+/// stored before (fetched or imported under the bank's file name) are known.
+#[test]
+fn consorsbank_archive_switch_and_known_documents() {
+    let (_dir, v) = vault("girocrab-consorsbank-archive");
+    let c = connection(&v, "fints:76030080");
+    let other = connection(&v, "fints:12345678");
+    v.set_comdirect_postbox(c, true).unwrap();
+    assert!(v.comdirect_postbox_enabled(c).unwrap());
+    assert!(v.set_comdirect_postbox(other, true).is_err());
+    // switching off works the same way and forgets the last fetch
+    v.set_setting(postbox_last_key(c), "2026-11-01".into())
+        .unwrap();
+    v.set_comdirect_postbox(c, false).unwrap();
+    assert!(!v.comdirect_postbox_enabled(c).unwrap());
+    assert_eq!(v.get_setting(postbox_last_key(c)).unwrap(), None);
+    assert!(
+        v.clone()
+            .fetch_comdirect_postbox(c, String::new(), false)
+            .is_err()
+    );
+    v.set_comdirect_postbox(c, true).unwrap();
+    let account = |iban: &str| RemoteAccount {
+        external_ref: iban.into(),
+        name: "Verrechnungskonto".into(),
+        owner: String::new(),
+        iban: iban.into(),
+        account_number: iban[12..].into(),
+        currency: "EUR".into(),
+        kind: AccountKind::Checking,
+        balance_cents: 0,
+        balance_date: "2026-11-17".into(),
+    };
+    let mut imported = doc("DE00760300800111111111", "imported");
+    imported.file_name = "KAUF_111111111_dat20261102_id1111111111.pdf".into();
+    imported.source_url = "moneymoney:1:abcdef".into();
+    let mut fetched = doc("", "fetched");
+    fetched.source_url = "consorsbank:archive:2222222222".into();
+    let data = FetchResult {
+        accounts: vec![account("DE00760300800111111111")],
+        documents: vec![imported, fetched],
+        postbox_fetched: true,
+        ..Default::default()
+    };
+    let summary = store_fetch(&v, ConnectorKind::FinTsGeneric, c, data).unwrap();
+    assert_eq!(
+        summary.postbox_documents,
+        Some(1),
+        "only archive documents are counted"
+    );
+    assert_eq!(v.get_setting(postbox_last_key(c)).unwrap(), Some(today()));
+    // a document with a bank file name at another login is not this login's
+    let mut foreign = doc("DE00123456780333333333", "foreign");
+    foreign.file_name = "KONTOAUSZUG_x_id3333333333.pdf".into();
+    let data = FetchResult {
+        accounts: vec![account("DE00123456780333333333")],
+        documents: vec![foreign],
+        ..Default::default()
+    };
+    store_fetch(&v, ConnectorKind::FinTsGeneric, other, data).unwrap();
+    let mut known: Vec<String> = v
+        .consorsbank_known_documents(c)
+        .unwrap()
+        .into_iter()
+        .collect();
+    known.sort();
+    assert_eq!(known, ["1111111111", "2222222222"]);
 }

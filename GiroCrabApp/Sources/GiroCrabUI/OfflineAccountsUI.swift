@@ -109,13 +109,17 @@ extension AppModel {
     }
 
     /// "Neues Offline-Konto …": the account belongs in the own vault, not the demo (#487).
-    func createOfflineAccount(name: String, note: String, openingCents: Int64) {
+    func createOfflineAccount(name: String, note: String, openingCents: Int64,
+                              kind: AccountKind = .cash, currency: String = OfflineAccountOptions.defaultCurrency) {
         runInOwnVault { [self] in
             guard let vault else { return }
             do {
-                let id = try vault.createOfflineAccount(name: name, kind: .cash, openingCents: openingCents)
+                let id = try vault.createOfflineAccount(name: name, kind: kind, currency: currency, openingCents: openingCents)
                 offlineStore.accountIDs.insert(id)
-                if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { setAccountNote(note, for: id) }
+                // one reload for the account and its note
+                if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    runCore { try vault.setAccountNote(accountId: id, note: note) }
+                }
                 reloadAccounts()
                 sidebarSelection = .account(id)
             } catch {
@@ -329,7 +333,40 @@ struct ManualBookingSheet: View {
     }
 }
 
-/// "Neues Offline-Konto …": name, type and starting balance.
+/// What "Neues Offline-Konto …" offers (#1049): the kinds that can be kept by hand and the currencies.
+enum OfflineAccountOptions {
+    static let kinds: [AccountKind] = [.cash, .savings]
+    static let defaultCurrency = "EUR"
+    /// ISO 4217 codes offered when creating an account; the first is the default.
+    static let currencies = ["EUR", "USD", "CHF", "GBP", "SEK", "DKK", "NOK", "PLN", "CZK"]
+    /// Picker tag of "Andere …": the code is typed into its own field.
+    static let otherTag = "__other"
+
+    /// The code the sheet creates the account with: the picked one, or the typed ISO 4217 code
+    /// (three letters, upper-cased). `nil` while the typed code is not valid.
+    static func currency(picked: String, typed: String) -> String? {
+        guard picked == otherTag else { return picked }
+        let code = typed.trimmingCharacters(in: .whitespaces).uppercased()
+        return code.count == 3 && code.allSatisfy({ $0.isASCII && $0.isLetter }) ? code : nil
+    }
+
+    /// "Sparkonto · USD": the line under the account name in the header.
+    static func subtitle(_ account: Account) -> String {
+        "\(title(account.kind)) · \(account.currency.isEmpty ? defaultCurrency : account.currency.uppercased())"
+    }
+
+    static func title(_ kind: AccountKind) -> String {
+        kind == .savings ? String(localized: "Sparkonto") : String(localized: "Bargeld")
+    }
+
+    /// "USD – US Dollar" in the app language.
+    static func title(currency code: String) -> String {
+        guard let name = Locale.current.localizedString(forCurrencyCode: code) else { return code }
+        return "\(code) – \(name)"
+    }
+}
+
+/// "Neues Offline-Konto …": name, type, currency and starting balance.
 struct OfflineAccountSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -337,6 +374,9 @@ struct OfflineAccountSheet: View {
     @State private var name = ""
     @State private var balanceText = ""
     @State private var note = ""
+    @State private var kind: AccountKind = .cash
+    @State private var currency = OfflineAccountOptions.defaultCurrency
+    @State private var customCurrency = ""
 
     /// An empty field is a starting balance of 0; a typo is not.
     private var openingCents: Int64? {
@@ -344,13 +384,31 @@ struct OfflineAccountSheet: View {
         return t.isEmpty ? 0 : Money.parseCents(t)
     }
 
+    private var chosenCurrency: String? {
+        OfflineAccountOptions.currency(picked: currency, typed: customCurrency)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Neues Offline-Konto").appFont(.title3, weight: .bold)
-            Text("Ein Bargeld-Konto ohne Bankanbindung. Die Buchungen tragen Sie selbst ein.")
+            Text("Ein Konto ohne Bankanbindung. Die Buchungen tragen Sie selbst ein.")
                 .appFont(.callout).foregroundStyle(Theme.secondary)
             Form {
-                TextField("Kontoname", text: $name, prompt: Text("Bargeld")).sensitive()
+                TextField("Kontoname", text: $name, prompt: Text(OfflineAccountOptions.title(kind))).sensitive()
+                Picker("Kontoart", selection: $kind) {
+                    ForEach(OfflineAccountOptions.kinds, id: \.self) { kind in
+                        Text(OfflineAccountOptions.title(kind)).tag(kind)
+                    }
+                }
+                Picker("Währung", selection: $currency) {
+                    ForEach(OfflineAccountOptions.currencies, id: \.self) { code in
+                        Text(OfflineAccountOptions.title(currency: code)).tag(code)
+                    }
+                    Text("Andere …").tag(OfflineAccountOptions.otherTag)
+                }
+                if currency == OfflineAccountOptions.otherTag {
+                    TextField("ISO-Code", text: $customCurrency, prompt: Text("JPY"))
+                }
                 TextField("Startsaldo", text: $balanceText, prompt: Text("0,00"))
                     .multilineTextAlignment(.trailing)
                     .sensitive(.amounts)
@@ -367,13 +425,15 @@ struct OfflineAccountSheet: View {
                 Spacer()
                 Button("Abbrechen", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Anlegen") {
-                    if let cents = openingCents {
-                        model.createOfflineAccount(name: name, note: note, openingCents: cents)
+                    if let cents = openingCents, let code = chosenCurrency {
+                        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        model.createOfflineAccount(name: trimmed.isEmpty ? OfflineAccountOptions.title(kind) : name,
+                                                   note: note, openingCents: cents, kind: kind, currency: code)
                         dismiss()
                     }
                 }
                 .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
-                .disabled(openingCents == nil)
+                .disabled(openingCents == nil || chosenCurrency == nil)
             }
         }
         .padding(22)
@@ -406,7 +466,7 @@ struct BalanceCorrectionSheet: View {
                     .multilineTextAlignment(.trailing)
                     .sensitive(.amounts)
             }
-            Text("Der Unterschied wird als Buchung „Saldokorrektur“ mit heutigem Datum angelegt. Den Startsaldo ändern Sie über „Startsaldo …“ im Kontextmenü des Kontos.")
+            Text("Der Unterschied wird als Buchung „Saldokorrektur“ mit heutigem Datum angelegt. Den Startsaldo ändern Sie über „Einstellungen …“ im Kontextmenü des Kontos.")
                 .appFont(.caption).foregroundStyle(Theme.tertiary)
             HStack {
                 Spacer()

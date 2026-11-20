@@ -31,7 +31,7 @@ Item {
                 MerchantFocus.sidebarChanged()
                 AppModel.reloadSelection(false)
             }
-            AppModel.sidebarSelection = row.selectionKey
+            AppModel.selectFromSidebar(row.selectionKey)
             // the sidebar takes the keyboard (↑/↓) like a clicked List
             if (row.ListView.view && row.ListView.view.takeKeyFocus) row.ListView.view.takeKeyFocus()
             else if (row.focusTarget) row.focusTarget.forceActiveFocus(Qt.MouseFocusReason)

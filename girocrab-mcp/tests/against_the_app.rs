@@ -4,15 +4,16 @@
 
 mod common;
 
-use common::{adapter_at, call, text, ShortDir};
-use girocrab_core::local_api::server::LocalApiServer;
-use girocrab_core::local_api::{ShareScope, API_VERSION};
+use common::{ShortDir, adapter_at, call, text};
 use girocrab_core::Vault;
-use serde_json::{json, Value};
+use girocrab_core::local_api::server::LocalApiServer;
+use girocrab_core::local_api::{API_VERSION, ShareScope};
+use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A demo vault sharing its first account, served on a socket in `dir`.
 struct App {
@@ -157,13 +158,39 @@ fn the_apps_connection_limit_is_waited_out() {
     let dir = ShortDir::new();
     let app = serve(&dir);
     // Other programs hold every connection the app allows (MAX_CLIENTS = 4 in
-    // the core's server.rs).
+    // the core's server.rs). A connection counts as held only once the server
+    // answered on it: a connect alone may still be in the backlog, or get
+    // `busy` while the server has not yet let go of an earlier connection
+    // (the server then closes it, and a slot frees up later). No fixed sleeps,
+    // so a slow runner only makes this take longer (#1032).
     let hold = || -> Vec<UnixStream> {
-        let held = (0..4)
-            .map(|_| UnixStream::connect(&app.socket).unwrap())
-            .collect();
-        std::thread::sleep(Duration::from_millis(200));
-        held
+        let request = format!(
+            "{}\n",
+            json!({ "v": API_VERSION, "token": app.token, "method": "info", "params": {} })
+        );
+        let give_up = Instant::now() + Duration::from_secs(20);
+        (0..4)
+            .map(|_| {
+                loop {
+                    let mut stream = UnixStream::connect(&app.socket).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(10)))
+                        .unwrap();
+                    // Fails if the server already answered `busy` and closed (it
+                    // does not read first); that answer is still there to read.
+                    let _ = stream.write_all(request.as_bytes());
+                    let mut line = String::new();
+                    BufReader::new(&stream).read_line(&mut line).unwrap();
+                    let answer: Value = serde_json::from_str(&line).unwrap();
+                    if answer.get("result").is_some() {
+                        break stream; // served: this connection holds a slot
+                    }
+                    assert_eq!(answer["error"]["code"], "busy", "{answer}");
+                    assert!(Instant::now() < give_up, "connections never freed up");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            })
+            .collect()
     };
     let held = hold();
     let release = std::thread::spawn(move || {

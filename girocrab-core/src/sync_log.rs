@@ -10,12 +10,12 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
+use crate::CoreError;
 use crate::dates::now_ms;
 use crate::error::CoreResult;
 use crate::vault::Vault;
-use crate::CoreError;
 
 /// How long a row is kept.
 pub(crate) const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;

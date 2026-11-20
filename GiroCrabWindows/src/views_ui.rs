@@ -24,8 +24,8 @@ use crate::portfolio::{
     self, Cells, DepotData, DepotTab, Period, WealthData, WealthPosition, WealthTab,
 };
 use crate::{
-    german_date, hex_color, money, privacy_on, with_state, KpiTile, MainWindow, RuleItem, ShareBar,
-    SideRow, TableRow,
+    KpiTile, MainWindow, RuleItem, ShareBar, SideRow, TableRow, german_date, hex_color, money,
+    privacy_on, with_state,
 };
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;

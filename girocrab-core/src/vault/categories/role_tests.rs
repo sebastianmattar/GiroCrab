@@ -1,5 +1,5 @@
 use super::*;
-use crate::i18n::{with_language, Lang};
+use crate::i18n::{Lang, with_language};
 
 fn vault(dir: &crate::test_support::TempDir) -> std::sync::Arc<Vault> {
     Vault::open(dir.join("v.db").to_string_lossy().into(), vec![7; 32]).unwrap()

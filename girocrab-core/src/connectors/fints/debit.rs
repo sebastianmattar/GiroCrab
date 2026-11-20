@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::sepa::PainHeader;
 use super::syntax::Segment;
 use super::transfer::is_auth_error;
-use super::{pain008, FinTsConnector, PreparedOrder, Vop};
+use super::{FinTsConnector, PreparedOrder, Vop, pain008};
 use crate::connectors::{ConnectContext, DebitJob, Phase};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -50,8 +50,8 @@ pub(super) fn parse_debit_params(seg: &Segment) -> DebitParams {
 pub(super) fn check_debit_lead_time(
     p: &DebitParams,
     sequence: pain008::SequenceType,
-    today: chrono::NaiveDate,
-    due: chrono::NaiveDate,
+    today: jiff::civil::Date,
+    due: jiff::civil::Date,
 ) -> CoreResult<()> {
     use pain008::SequenceType::*;
     let (min, max) = match sequence {
@@ -65,13 +65,13 @@ pub(super) fn check_debit_lead_time(
     // enforced where it is too early in either unit; the maximum gets the
     // longer reading (TARGET days are at most 7/5 calendar days) plus a margin.
     // The bank has the last word.
-    let earliest = today + chrono::Duration::days(i64::from(min));
-    let latest = today + chrono::Duration::days(i64::from(max) * 7 / 5 + 3);
+    let earliest = today + crate::dates::days(i64::from(min));
+    let latest = today + crate::dates::days(i64::from(max) * 7 / 5 + 3);
     if due < earliest {
         return Err(CoreError::InvalidInput {
             message: trf(
                 "Die Bank braucht für diese Lastschrift mindestens {0} Tage Vorlauf; frühestens möglich: {1}.",
-                &[&min, &earliest.format("%d.%m.%Y").to_string()],
+                &[&min, &earliest.strftime("%d.%m.%Y").to_string()],
             ),
         });
     }
@@ -79,7 +79,14 @@ pub(super) fn check_debit_lead_time(
         return Err(CoreError::InvalidInput {
             message: trf(
                 "Die Bank nimmt diese Lastschrift höchstens {0} Tage im Voraus an; spätestens möglich: {1}.",
-                &[&max, &today.checked_add_signed(chrono::Duration::days(i64::from(max))).unwrap_or(latest).format("%d.%m.%Y").to_string()],
+                &[
+                    &max,
+                    &today
+                        .checked_add(crate::dates::days(i64::from(max)))
+                        .unwrap_or(latest)
+                        .strftime("%d.%m.%Y")
+                        .to_string(),
+                ],
             ),
         });
     }
@@ -102,14 +109,12 @@ impl FinTsConnector {
             B2b => ("HKBME", "HKBSE"),
         };
         let scheme_name = job.scheme.code();
-        let not_allowed = || {
-            CoreError::Bank {
+        let not_allowed = || CoreError::Bank {
             code: batch_id.into(),
             message: trf(
                 "Dieses Konto oder diese Bank erlaubt keine Lastschrift-Einreichung ({0}) per FinTS. Bitte die Datei im Online-Banking hochladen.",
                 &[&scheme_name],
             ),
-        }
         };
         let seg_id = if self.bank_supports(batch_id) {
             batch_id
@@ -119,28 +124,28 @@ impl FinTsConnector {
             return Err(not_allowed());
         };
         let params = self.st.debit_params.get(batch_id).cloned();
-        if seg_id == batch_id {
-            if let Some(p) = &params {
-                if p.max_count > 0 && job.collections.len() > p.max_count as usize {
-                    return Err(CoreError::InvalidInput {
-                        message: trf(
-                            "Die Bank erlaubt höchstens {0} Lastschriften pro Einreichung.",
-                            &[&p.max_count],
-                        ),
-                    });
-                }
-                if !job.batch_booking && !p.single_booking_allowed {
-                    return Err(CoreError::InvalidInput {
-                        message: tr("Die Bank bucht Lastschriften nur als Sammelbuchung.").into(),
-                    });
-                }
+        if seg_id == batch_id
+            && let Some(p) = &params
+        {
+            if p.max_count > 0 && job.collections.len() > p.max_count as usize {
+                return Err(CoreError::InvalidInput {
+                    message: trf(
+                        "Die Bank erlaubt höchstens {0} Lastschriften pro Einreichung.",
+                        &[&p.max_count],
+                    ),
+                });
+            }
+            if !job.batch_booking && !p.single_booking_allowed {
+                return Err(CoreError::InvalidInput {
+                    message: tr("Die Bank bucht Lastschriften nur als Sammelbuchung.").into(),
+                });
             }
         }
         if let (Some(p), Ok(due)) = (
             &params,
-            chrono::NaiveDate::parse_from_str(&job.collection_date, "%Y-%m-%d"),
+            jiff::civil::Date::strptime("%Y-%m-%d", &job.collection_date),
         ) {
-            check_debit_lead_time(p, job.sequence, chrono::Local::now().date_naive(), due)?;
+            check_debit_lead_time(p, job.sequence, crate::dates::today(), due)?;
         }
         self.require_tan_method(tr("Für Lastschriften ist ein TAN-Verfahren nötig; es wurde keines gefunden. Bitte zuerst eine Synchronisation mit TAN-Verfahren durchführen."))?;
         let Some(acc) = self.source_account(ctx, &job.source_iban, seg_id).await? else {
@@ -199,7 +204,9 @@ impl FinTsConnector {
                     code,
                     message: format!(
                         "{message} {}",
-                        tr("Die Bank verlangt für diesen Auftrag eine Empfängerprüfung (Verification of Payee), die GiroCrab für Sammelüberweisungen noch nicht unterstützt. Bitte in der Banking-App überweisen.")
+                        tr(
+                            "Die Bank verlangt für diesen Auftrag eine Empfängerprüfung (Verification of Payee), die GiroCrab für Sammelüberweisungen noch nicht unterstützt. Bitte in der Banking-App überweisen."
+                        )
                     ),
                 })
             }

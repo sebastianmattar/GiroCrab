@@ -17,6 +17,8 @@ RowLayout {
     /// The control on the right takes all the width the label leaves (a borderless text
     /// field in a grouped form, FormTextField).
     property bool fillValue: false
+    /// `value` is money (`.sensitive(.amounts)`): covered in privacy mode and in the bug report.
+    property bool amounts: false
     default property alias trailing: trail.data
     Layout.fillWidth: true
     spacing: splitValue ? 12 : 10
@@ -35,12 +37,14 @@ RowLayout {
         font.pixelSize: Theme.body; color: r.valueColor
         horizontalAlignment: Text.AlignRight
         wrapMode: Text.Wrap
+        Sensitive { amounts: true; when: r.amounts }
     }
     RowLayout {
         id: trail
         spacing: r.splitValue ? 6 : 8
         Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
         Layout.fillWidth: r.fillValue
-        Text { visible: !r.splitValue && r.value !== ""; text: r.value; color: r.valueColor; font.pixelSize: Theme.body; font.features: { "tnum": 1 } }
+        Text { visible: !r.splitValue && r.value !== ""; text: r.value; color: r.valueColor; font.pixelSize: Theme.body; font.features: { "tnum": 1 }
+               Sensitive { amounts: true; when: r.amounts } }
     }
 }

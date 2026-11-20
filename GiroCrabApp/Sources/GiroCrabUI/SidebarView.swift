@@ -7,6 +7,7 @@ struct SidebarView: View {
     /// The one sidebar dialog on screen (group dialogs live in `model.groupDialog`).
     @State private var dialog: SidebarDialog?
     @State private var budgetCategory: IDBox?
+    /// The account whose settings sheet is open.
     @State private var editedAccount: IDBox?
     @AppStorage(ViewLayout.budgetsKey) private var showBudgets = true
     /// Where a drop would land: a thin line above or below one row.
@@ -135,7 +136,7 @@ struct SidebarView: View {
                                 .foregroundStyle(model.missingSettings(for: c).isEmpty ? Theme.secondary : Theme.warning)
                         }
                         Spacer()
-                        Button(model.missingSettings(for: c).isEmpty ? "Abrufen" : "Einrichten") { model.requestSync(c) }
+                        Button(model.missingSettings(for: c).isEmpty ? "Abrufen" : "Einrichten") { model.requestFullSync(c) }
                             .controlSize(.small)
                             .disabled(model.bankingGate(for: c) != nil)
                             .help(model.bankingGate(for: c)?.message ?? "")
@@ -251,7 +252,7 @@ struct SidebarView: View {
                 Text("Alle Konten dieses Bankzugangs werden samt Buchungen, Belegen und gespeicherten Zugangsdaten aus dem Tresor gelöscht. Das lässt sich nicht widerrufen.")
             }
         }
-        .capturableSheet(item: $editedAccount) { box in AccountEditSheet(accountID: box.id).environment(model) }
+        .capturableSheet(item: $editedAccount) { box in AccountSettingsView(accountID: box.id).environment(model) }
         .capturableSheet(item: $budgetCategory) { box in BudgetEditorSheet(categoryID: box.id).environment(model) }
     }
 
@@ -349,7 +350,7 @@ struct SidebarView: View {
                     return model.canDropGroup(dragged, on: group, into: into) ? (into ? .into : .above) : nil
                 }, perform: { items, edge in
                     handleDrop(items, into: group, row: nil, edge: edge)
-                }, freeLeading: 12))  // the expand/collapse arrow
+                }, freeLeading: DisclosureChevron.width))  // the expand/collapse arrow
                 .padding(.top, group.depth == 0 ? 10 : 4)
                 .padding(.leading, indent)
                 .listRowInsets(Self.rowInsets)
@@ -467,36 +468,23 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func accountMenu(_ account: Account) -> some View {
-        // same order as a group's menu: rename, look, place – then what only
-        // accounts have – then archive / delete
-        Button("Konto bearbeiten …", systemImage: "square.and.pencil") { editedAccount = IDBox(id: account.id) }
-        Button("Umbenennen …", systemImage: "pencil") { model.groupDialog = .renameAccount(account) }
-        Button("Symbol & Farbe …", systemImage: "paintpalette") { model.iconColorTarget = .account(account.id) }
+        // name, symbol & colour, Kontoart, Kontoinhaber, Startsaldo and the rest of the
+        // account's data live in the settings window; the menu keeps the actions
+        Button("Einstellungen …", systemImage: "gearshape") { editedAccount = IDBox(id: account.id) }
         CategoryChipToggle(accountID: account.id)
-        // an offline account is always cash (#679)
-        if !model.isOffline(account.id) {
-            Menu("Kontoart ändern …", systemImage: "list.bullet.rectangle") {
-                ForEach(AccountKind.importChoices, id: \.self) { k in
-                    Button { model.setAccountKind(account.id, to: k) } label: {
-                        Text(verbatim: k == account.kind ? "✓ \(k.label)" : k.label)
-                    }
-                }
-            }
-        }
-        Button("Kontoinhaber …", systemImage: "person.crop.circle") { model.groupDialog = .editOwner(account) }
         AccountGroupMenu(account: account)
         Divider()
         Button("Alle Buchungen als gelesen markieren", systemImage: "checkmark.circle") { model.markAllChecked(accountIDs: [account.id]) }
         ManualLoanAccountMenu(model: model, account: account)
-        OpeningBalanceMenuItem(model: model, account: account)
         OfflineAccountMenuItems(model: model, account: account)
         if !account.isArchived, let cid = account.connectionId, let conn = model.connections.first(where: { $0.id == cid }) {
-            Button("\(account.name) abrufen", systemImage: "arrow.triangle.2.circlepath") { model.requestSync(conn) }
-                .disabled(model.bankingGate(for: conn) != nil)
+            Button("\(account.name) abrufen", systemImage: "arrow.triangle.2.circlepath") { model.requestSyncAccount(account) }
+                .disabled(model.bankingGate(for: conn) != nil || model.syncingConnectionID != nil)
         }
         AccountCopyMenu(account: account)
         Button("Belege anzeigen", systemImage: "doc.text.magnifyingglass") {
             model.documentsAccountFilter = account.id
+            model.documentsConnectionFilter = nil
             model.interactiveSidebarSelection = .documents
         }
         Divider()
@@ -534,7 +522,7 @@ struct SidebarView: View {
                 .listRowInsets(Self.rowInsets)
                 #if os(macOS)
                 // a category dragged here goes above this row, or into it (lower half)
-                .modifier(categoryDropSlot(node, indent: indent, takesBookings: false, freeLeading: 12))
+                .modifier(categoryDropSlot(node, indent: indent, takesBookings: false, chevron: true))
                 #endif
                 .tag(SidebarItem.category(node.id))
                 .contextMenu { categoryMenu(node.category) }
@@ -571,8 +559,10 @@ struct SidebarView: View {
     /// Drop zones of a category row (#977): a category goes above the row (upper
     /// half), below it or – on a row with sub-categories or a main category – into
     /// it as its last sub-category (lower half). Bookings (`takesBookings`, leaves
-    /// only) are assigned to the row's category.
-    private func categoryDropSlot(_ node: CategoryNode, indent: CGFloat, takesBookings: Bool, freeLeading: CGFloat = 0) -> DropSlot {
+    /// only) are assigned to the row's category. The slot sits outside the row's
+    /// `indent` padding, so on a row with a `chevron` the zones leave the indent
+    /// and the arrow free, else it takes no clicks below the first level (#1137).
+    private func categoryDropSlot(_ node: CategoryNode, indent: CGFloat, takesBookings: Bool, chevron: Bool = false) -> DropSlot {
         DropSlot(key: "c:\(node.id)", inset: indent, line: $dropLine, edge: { half in
             guard let dragged = GroupDrag.draggedCategory else { return .into }
             guard model.canDropCategory(dragged, on: node.id) else { return nil }
@@ -582,7 +572,7 @@ struct SidebarView: View {
                 return model.dropCategory(items, onto: node.id, place: edge == .into ? .into : edge == .below ? .after : .before)
             }
             return takesBookings && model.dropBookings(items, onCategory: node.id)
-        }, freeLeading: freeLeading, takesBookings: takesBookings, takesCategories: true)
+        }, freeLeading: chevron ? indent + DisclosureChevron.width : 0, takesBookings: takesBookings, takesCategories: true)
     }
     #endif
 
@@ -646,8 +636,12 @@ private struct SidebarSelectionList<Content: View>: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        List(selection: Binding(get: { model.sidebarSelection }, set: { model.selectFromSidebar($0) })) { content }
+        #else
         @Bindable var model = model
         List(selection: $model.interactiveSidebarSelection) { content }
+        #endif
     }
 }
 
@@ -853,21 +847,36 @@ struct AccountRow: View {
 }
 
 struct CategoryRow: View {
+    @Environment(AppModel.self) private var model
     let category: GiroCrabCore.Category
 
     var body: some View {
+        // "Zusätzlich" (#1049): what the category holds in currencies other than EUR, under its total.
+        let other = (model.categoryOtherTotals[category.id] ?? []).map { Money.format($0.cents, currency: $0.currency) }.joined(separator: " · ")
         HStack(spacing: 8) {
             Image(systemName: category.sfSymbol)
                 .foregroundStyle(Color.readable(hex: category.colorHex).opacity(0.85))
                 .frame(width: 20)
             Text(category.name).lineLimit(1).appDefaultFont().sensitive(.labels)
             Spacer(minLength: 4)
-            if category.totalCents != 0 {
-                Text(Money.format(category.totalCents))
-                    .sensitive(.amounts)
-                    .appFont(.caption, monospacedDigit: true)
-                    .fixedSize()
-                    .foregroundStyle(.secondary) // follows selection, Dark Mode, Increase Contrast
+            if category.totalCents != 0 || !other.isEmpty {
+                VStack(alignment: .trailing, spacing: 1) {
+                    if category.totalCents != 0 {
+                        Text(Money.format(category.totalCents, currency: model.categorySumCurrency))
+                            .sensitive(.amounts)
+                            .appFont(.caption, monospacedDigit: true)
+                            .fixedSize()
+                            .foregroundStyle(.secondary) // follows selection, Dark Mode, Increase Contrast
+                    }
+                    if !other.isEmpty {
+                        Text("Zusätzlich: \(other)")
+                            .sensitive(.amounts)
+                            .appFont(.caption2, monospacedDigit: true)
+                            .fixedSize()
+                            .foregroundStyle(.secondary)
+                            .help("Weitere Währungen werden nicht umgerechnet und nicht in die Summe einbezogen.")
+                    }
+                }
             }
         }
     }

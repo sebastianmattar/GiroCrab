@@ -27,8 +27,7 @@ struct DepotValueChart: View {
                             AreaMark(x: .value("Datum", day), yStart: .value("Basis", domain.lowerBound),
                                      yEnd: .value("Wert", euros), series: .value("Fläche", index))
                                 .interpolationMethod(.stepEnd)
-                                .foregroundStyle(LinearGradient(colors: [Theme.accent.opacity(0.14), Theme.accent.opacity(0.01)],
-                                                                startPoint: .top, endPoint: .bottom))
+                                .foregroundStyle(Theme.chartAreaFill)
                         }
                         LineMark(x: .value("Datum", day), y: .value("Wert", euros), series: .value("Abschnitt", index))
                             .interpolationMethod(.stepEnd)

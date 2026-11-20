@@ -110,7 +110,7 @@ airbnb	Airbnb	airbnb	Travel	bed.double	#FF5A5F	airbnb.de
 
 # --- Banks ---
 kasseler-bank	Kasseler Bank	kasseler bank	Bank	building.columns	#0066B3	kasseler-bank.de
-volksbank	Volksbank Kassel Göttingen	volksbank|vr bank|raiffeisen	Bank	building.columns	#0066B3	vr.de
+volksbank	Volksbank / Raiffeisenbank	volksbank|vr bank|raiffeisen	Bank	building.columns	#0066B3	vr.de
 1822direkt	1822direkt	1822direkt|1822 direkt|frankfurter sparkasse	Bank	building.columns	#E30613	1822direkt.de
 comdirect	comdirect	comdirect	Bank	building.columns	#3C3C3C	comdirect.de
 sparkasse	Sparkasse	sparkasse|stadtsparkasse|kreissparkasse	Bank	building.columns	#FF0000	sparkasse.de

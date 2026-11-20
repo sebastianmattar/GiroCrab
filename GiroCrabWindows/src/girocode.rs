@@ -3,7 +3,7 @@
 //! or logged (the texts are personal data).
 
 use girocrab_core::payment_input::{
-    girocode_matrix, girocode_payload, parse_payment_text, GiroCodeMatrix, PaymentDetails,
+    GiroCodeMatrix, PaymentDetails, girocode_matrix, girocode_payload, parse_payment_text,
 };
 
 /// Pixels per QR module; the core's quiet zone is kept as it is.
@@ -29,11 +29,11 @@ pub fn merge_empty(current: &Fields, found: &PaymentDetails) -> (Fields, usize) 
     let mut out = current.clone();
     let mut filled = 0;
     let mut fill = |field: &mut String, value: Option<String>| {
-        if field.trim().is_empty() {
-            if let Some(v) = value.filter(|v| !v.trim().is_empty()) {
-                *field = v;
-                filled += 1;
-            }
+        if field.trim().is_empty()
+            && let Some(v) = value.filter(|v| !v.trim().is_empty())
+        {
+            *field = v;
+            filled += 1;
         }
     };
     fill(&mut out.name, found.name.clone());
@@ -171,9 +171,11 @@ mod tests {
 
     #[test]
     fn paste_reports_nothing_recognised() {
-        assert!(paste_into(&Fields::default(), "  \n ")
-            .unwrap_err()
-            .contains("keine Zahlungsdaten"));
+        assert!(
+            paste_into(&Fields::default(), "  \n ")
+                .unwrap_err()
+                .contains("keine Zahlungsdaten")
+        );
     }
 
     #[test]

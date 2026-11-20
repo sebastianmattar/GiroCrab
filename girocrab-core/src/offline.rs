@@ -14,11 +14,10 @@
 //! offline accounts in this sense; accounts of a bank connection are synced and
 //! stay read-only.
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::connectors::group_for;
-use crate::dates::now_ms;
+use crate::dates::{now_ms, today_iso as today};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
 use crate::models::AccountKind;
@@ -49,25 +48,14 @@ pub struct ManualBookingSetup {
     pub note: String,
 }
 
-fn invalid(message: String) -> CoreError {
-    CoreError::InvalidInput { message }
-}
-
 fn not_found(what: String) -> CoreError {
     CoreError::NotFound { what }
-}
-
-fn today() -> String {
-    chrono::Local::now()
-        .date_naive()
-        .format("%Y-%m-%d")
-        .to_string()
 }
 
 fn clean(text: &str, max: usize) -> CoreResult<String> {
     let t = text.trim();
     if t.chars().count() > max {
-        return Err(invalid(trf(
+        return Err(CoreError::invalid(trf(
             "Der Text ist zu lang (höchstens {0} Zeichen).",
             &[&max],
         )));
@@ -76,9 +64,9 @@ fn clean(text: &str, max: usize) -> CoreResult<String> {
 }
 
 fn parse_date(date: &str) -> CoreResult<String> {
-    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .map_err(|_| invalid(trf("Ungültiges Datum: {0}", &[&date.trim()])))
+    jiff::civil::Date::strptime("%Y-%m-%d", date.trim())
+        .map(crate::dates::iso)
+        .map_err(|_| CoreError::invalid(trf("Ungültiges Datum: {0}", &[&date.trim()])))
 }
 
 fn require_offline(conn: &Connection, account_id: i64) -> CoreResult<()> {
@@ -91,9 +79,9 @@ fn require_offline(conn: &Connection, account_id: i64) -> CoreResult<()> {
         .optional()?;
     match ok {
         Some(true) => Ok(()),
-        Some(false) => Err(invalid(
-            tr("Manuelle Buchungen sind nur in Offline-Konten möglich.").to_string(),
-        )),
+        Some(false) => Err(CoreError::invalid(tr(
+            "Manuelle Buchungen sind nur in Offline-Konten möglich.",
+        ))),
         None => Err(not_found(trf("Konto {0}", &[&account_id]))),
     }
 }
@@ -192,13 +180,38 @@ pub(crate) fn insert_booking(
     Ok(conn.last_insert_rowid())
 }
 
+/// Normalises an account currency: three ASCII letters (ISO 4217), upper-cased; empty means EUR.
+fn clean_currency(code: &str) -> CoreResult<String> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Ok("EUR".to_string());
+    }
+    if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return Err(CoreError::invalid(tr(
+            "Die Währung muss ein dreistelliger ISO-Code sein (z. B. EUR).",
+        )));
+    }
+    Ok(code.to_ascii_uppercase())
+}
+
+/// Sidebar symbol of a new offline account: one per kind, so a savings account is told from cash at a glance (#1049).
+fn offline_symbol(kind: AccountKind) -> &'static str {
+    match kind {
+        AccountKind::Cash => "banknote",
+        AccountKind::Savings => "percent",
+        _ => "pencil.and.list.clipboard",
+    }
+}
+
 /// Creates the account row, places it in its sidebar group and stores the opening balance.
 pub(crate) fn create_in(
     conn: &Connection,
     name: &str,
     kind: AccountKind,
+    currency: &str,
     opening_cents: i64,
 ) -> CoreResult<i64> {
+    let currency = clean_currency(currency)?;
     let name = clean(name, MAX_NAME_CHARS)?;
     let name = if name.is_empty() {
         tr("Bargeld").to_string()
@@ -209,20 +222,17 @@ pub(crate) fn create_in(
     let gid = Vault::ensure_group(conn, group, symbol, order)?;
     conn.execute(
         "INSERT INTO accounts(connection_id, group_id, external_ref, name, kind, sf_symbol, balance_cents,
-                              balance_date, sort_order)
-         VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM accounts))",
+                              balance_date, currency, sort_order)
+         VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM accounts))",
         params![
             gid,
             format!("{EXTERNAL_REF_PREFIX}{}", uuid::Uuid::new_v4()),
             name,
             kind.as_str(),
-            if kind == AccountKind::Cash {
-                "banknote"
-            } else {
-                "pencil.and.list.clipboard"
-            },
+            offline_symbol(kind),
             opening_cents,
-            today()
+            today(),
+            currency
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -239,7 +249,7 @@ fn finish(conn: &Connection, account_id: i64) -> CoreResult<()> {
 
 fn validate(s: &ManualBookingSetup) -> CoreResult<(String, String, String, String)> {
     if s.amount_cents == 0 {
-        return Err(invalid(tr("Der Betrag darf nicht 0 sein.").to_string()));
+        return Err(CoreError::invalid(tr("Der Betrag darf nicht 0 sein.")));
     }
     Ok((
         parse_date(&s.booking_date)?,
@@ -253,21 +263,23 @@ fn validate(s: &ManualBookingSetup) -> CoreResult<(String, String, String, Strin
 impl Vault {
     /// Creates an offline account (no bank connection) with a starting balance
     /// and returns its id. An empty name becomes "Bargeld". `kind` must not be a
-    /// depot or loan: they have their own flows.
+    /// depot or loan: they have their own flows. `currency` is an ISO 4217 code
+    /// (empty = EUR); bookings and balance use it, nothing is converted.
     pub fn create_offline_account(
         &self,
         name: String,
         kind: AccountKind,
+        currency: String,
         opening_cents: i64,
     ) -> Result<i64, CoreError> {
         if matches!(kind, AccountKind::Brokerage | AccountKind::Loan) {
-            return Err(invalid(
-                tr("Depots und Darlehen werden nicht als Offline-Konto angelegt.").to_string(),
-            ));
+            return Err(CoreError::invalid(tr(
+                "Depots und Darlehen werden nicht als Offline-Konto angelegt.",
+            )));
         }
         let db = self.db()?;
         let tx = db.unchecked_transaction()?;
-        let id = create_in(&tx, &name, kind, opening_cents)?;
+        let id = create_in(&tx, &name, kind, &currency, opening_cents)?;
         tx.commit()?;
         Ok(id)
     }
@@ -394,12 +406,12 @@ impl Vault {
             .optional()?
             .ok_or_else(|| not_found(trf("Buchung {0}", &[&booking_id])))?;
         if source_account == account_id {
-            return Err(invalid(
-                tr("Eine Buchung lässt sich nicht in ihr eigenes Konto spiegeln.").to_string(),
-            ));
+            return Err(CoreError::invalid(tr(
+                "Eine Buchung lässt sich nicht in ihr eigenes Konto spiegeln.",
+            )));
         }
         if cents == 0 {
-            return Err(invalid(tr("Der Betrag darf nicht 0 sein.").to_string()));
+            return Err(CoreError::invalid(tr("Der Betrag darf nicht 0 sein.")));
         }
         ensure_opening(&tx, account_id)?;
         let setup = ManualBookingSetup {

@@ -10,6 +10,7 @@ allowlist = {
     "mod", "tests", "persist", "bank_directory", "fints_directory", "fints_presets",
     "types", "error", "http", "amazon_documents", "broker_documents",
     "comdirect_postbox", "dpop", "paypal_nvp",  # Submodule von paypal.rs (payPalSignatureKeys)
+    "consorsbank_archive",  # Dokumentquelle neben FinTS (#1024), kein eigener Konnektor
 }
 
 modules = sorted(

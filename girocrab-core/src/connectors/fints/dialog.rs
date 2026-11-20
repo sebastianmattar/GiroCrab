@@ -6,11 +6,12 @@ use std::collections::HashMap;
 
 use base64::Engine;
 
-use super::syntax::{escape, parse_response, SegmentBuilder};
-use super::{rah10, BankReply, FinTsConnector, CONSORSBANK_BLZ, COUNTRY};
+use super::syntax::{SegmentBuilder, escape, parse_response};
+use super::{BankReply, CONSORSBANK_BLZ, COUNTRY, FinTsConnector, rah10};
+use crate::connectors::fints_directory::COMDIRECT_BLZ;
 use crate::connectors::{
-    ensure_secure_fints_url, http_client_no_redirect, read_text_limited, Challenge, ChallengeKind,
-    ConnectContext, Phase,
+    Challenge, ChallengeKind, ConnectContext, Phase, ensure_secure_fints_url,
+    http_client_no_redirect, read_text_limited,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -19,8 +20,17 @@ use crate::i18n::{tr, trf};
 /// is still outstanding. Standard is 3956; Deutsche Bank answers with warnings
 /// only (3060, no success code) until the user has confirmed.
 pub(super) fn approval_pending(reply: &BankReply) -> bool {
+    // 3045 ("SEPA-Instant Payment Statusabfrage HKIPS veranlassen"): bank accepted the
+    // instant payment for processing after approval; polling HKTAN again fails with 9210 (#1121).
     reply.errors().is_empty()
+        && !reply.has("3045")
         && (reply.has("3956") || !reply.codes.iter().any(|c| c.0.starts_with('0')))
+}
+
+/// `request` failed because the bank wanted a TAN (0030) or an app approval
+/// that was not given in time (3956): asking again sends the next one (#1083).
+pub(super) fn tan_demanded(e: &CoreError) -> bool {
+    matches!(e, CoreError::Bank { code, .. } if matches!(code.as_str(), "0030" | "3956"))
 }
 
 /// Whether a TAN medium name already carries the "SO:" (security object) prefix.
@@ -34,6 +44,20 @@ pub(super) fn has_so_prefix(medium: &str) -> bool {
 /// system ID / TAN method (9931/9942).
 fn init_rejected_as_malformed(reply: &BankReply) -> bool {
     reply.has("9010") && !reply.has("9931") && !reply.has("9942")
+}
+
+/// The bank code does not belong to the login: 9210 "Bankleitzahl passt nicht
+/// zum Benutzer" (comdirect). 9210 alone is any rejected order, so the text decides.
+pub(super) fn blz_mismatch(reply: &BankReply) -> bool {
+    reply.codes.iter().any(|c| {
+        let text = c.2.to_lowercase();
+        c.0 == "9210" && text.contains("bankleitzahl") && text.contains("benutzer")
+    })
+}
+
+/// One of comdirect's bank codes.
+pub(super) fn is_comdirect(blz: &str) -> bool {
+    COMDIRECT_BLZ.contains(&blz)
 }
 
 fn clean_challenge(s: &str) -> String {
@@ -58,10 +82,10 @@ fn strip_mime_header(b: Vec<u8>) -> Vec<u8> {
 
 impl FinTsConnector {
     pub(super) fn now() -> (String, String) {
-        let n = chrono::Local::now();
+        let n = jiff::ZonedDateTime::now();
         (
-            n.format("%Y%m%d").to_string(),
-            n.format("%H%M%S").to_string(),
+            n.strftime("%Y%m%d").to_string(),
+            n.strftime("%H%M%S").to_string(),
         )
     }
 
@@ -78,11 +102,7 @@ impl FinTsConnector {
     /// two-step TAN method. Strict banks (Consorsbank) reject a mismatch with
     /// "9010 Ungültiger Signaturaufbau".
     fn security_profile(sec_func: &str) -> &'static str {
-        if sec_func == "999" {
-            "PIN:1"
-        } else {
-            "PIN:2"
-        }
+        if sec_func == "999" { "PIN:1" } else { "PIN:2" }
     }
 
     /// Wraps payload segments (numbered from 3) into a signed, "encrypted"
@@ -220,9 +240,7 @@ impl FinTsConnector {
             let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
             let raw = base64::engine::general_purpose::STANDARD
                 .decode(cleaned.as_bytes())
-                .map_err(|e| CoreError::Protocol {
-                    message: format!("base64: {e}"),
-                })?;
+                .map_err(|e| CoreError::protocol(format!("base64: {e}")))?;
             parse_response(&raw)?
         };
         let segments = raw;
@@ -411,6 +429,44 @@ impl FinTsConnector {
         Ok(None)
     }
 
+    /// Synchronisation (if needed) and the authenticated dialog. comdirect
+    /// has several bank codes, and the one in an account's IBAN is not always
+    /// the one the login is known under: when the bank answers 9210 "Bankleitzahl
+    /// passt nicht zum Benutzer", its other codes are tried in turn (same
+    /// address, same PIN) and the one that works is kept in the state. Any
+    /// other answer ends the search; all codes failing reports the first error.
+    pub(super) async fn login(&mut self, ctx: &ConnectContext) -> CoreResult<Phase> {
+        let first = self.login_attempt(ctx).await;
+        if first.is_ok() || !self.blz_rejected || self.rah.is_some() || !is_comdirect(&self.blz) {
+            return first;
+        }
+        let tried = self.blz.clone();
+        for blz in COMDIRECT_BLZ.iter().filter(|b| **b != tried) {
+            self.blz = (*blz).to_string();
+            crate::depot_debug::log(&format!(
+                "fints: comdirect bank code {tried} rejected, trying {blz}"
+            ));
+            let attempt = self.login_attempt(ctx).await;
+            if attempt.is_ok() {
+                self.st.login_blz = self.blz.clone();
+                return attempt;
+            }
+            if !self.blz_rejected {
+                return attempt;
+            }
+        }
+        self.blz = tried;
+        first
+    }
+
+    async fn login_attempt(&mut self, ctx: &ConnectContext) -> CoreResult<Phase> {
+        self.blz_rejected = false;
+        if self.st.system_id.is_empty() || self.st.sec_func.is_empty() {
+            self.sync_dialog(ctx).await?;
+        }
+        self.open_dialog(ctx).await
+    }
+
     pub(super) async fn sync_dialog(&mut self, ctx: &ConnectContext) -> CoreResult<()> {
         self.reset_dialog();
         let payload = vec![
@@ -419,31 +475,33 @@ impl FinTsConnector {
             SegmentBuilder::new("HKSYN", 5, 3).raw("0").build(),
         ];
         let reply = self.send(ctx, payload, "999", None).await?;
+        self.blz_rejected = blz_mismatch(&reply);
         reply.check()?;
         self.learn_bpd(&reply);
         // Optional: TAN media list (needed by some banks for HKTAN).
         let tab_v = self.version("HKTAB");
-        if self.bank_supports("HKTAB") {
-            if let Ok(r) = self
+        if self.bank_supports("HKTAB")
+            && let Ok(r) = self
                 .send(
                     ctx,
-                    vec![SegmentBuilder::new("HKTAB", 3, tab_v)
-                        .raw("0")
-                        .raw("A")
-                        .build()],
+                    vec![
+                        SegmentBuilder::new("HKTAB", 3, tab_v)
+                            .raw("0")
+                            .raw("A")
+                            .build(),
+                    ],
                     "999",
                     None,
                 )
                 .await
-            {
-                self.learn_bpd(&r);
-            }
+        {
+            self.learn_bpd(&r);
         }
         self.end_dialog(ctx, "999").await;
         if self.st.system_id.is_empty() {
-            return Err(CoreError::Protocol {
-                message: "bank did not assign a customer system ID (HISYN)".into(),
-            });
+            return Err(CoreError::protocol(
+                "bank did not assign a customer system ID (HISYN)",
+            ));
         }
         Ok(())
     }
@@ -483,12 +541,9 @@ impl FinTsConnector {
         let mut reply = self.send(ctx, payload, &sec, None).await?;
         if reply.has("3955") || reply.has("3956") {
             let _ = self.challenge_from(&reply)?;
-            let task = self
-                .task_reference
-                .clone()
-                .ok_or_else(|| CoreError::Protocol {
-                    message: trf("{0}: Freigabe ohne Auftragsreferenz", &[&seg_id]),
-                })?;
+            let task = self.task_reference.clone().ok_or_else(|| {
+                CoreError::protocol(trf("{0}: Freigabe ohne Auftragsreferenz", &[&seg_id]))
+            })?;
             let mut approved = false;
             for _ in 0..60 {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -519,7 +574,10 @@ impl FinTsConnector {
         } else if reply.has("0030") {
             return Err(CoreError::Bank {
                 code: "0030".into(),
-                message: trf("Die Bank verlangt für {0} eine TAN-Eingabe. Bitte ein Push-/App-Verfahren (z. B. SecureGo plus) verwenden oder „Tage beim ersten Abruf“ auf höchstens 90 setzen.", &[&seg_id]),
+                message: trf(
+                    "Die Bank verlangt für {0} eine TAN-Eingabe. Bitte ein Push-/App-Verfahren (z. B. SecureGo plus) verwenden oder „Tage beim ersten Abruf“ auf höchstens 90 setzen.",
+                    &[&seg_id],
+                ),
             });
         }
         reply.check()?;
@@ -532,6 +590,12 @@ impl FinTsConnector {
         self.reset_dialog();
         let sec = self.sec();
         let mut reply = self.send_dialog_init(ctx, &sec).await?;
+        // wrong bank code for this login: nothing below can help (`login` may
+        // try another one)
+        if blz_mismatch(&reply) {
+            self.blz_rejected = true;
+            reply.check()?;
+        }
         // Some banks reject HKTAN in the dialog init as malformed (9010 without a
         // PIN/TAN/system-id code): retry once one-step and remember it.
         if sec != "999" && init_rejected_as_malformed(&reply) {

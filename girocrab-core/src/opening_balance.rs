@@ -19,8 +19,7 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -41,7 +40,9 @@ fn not_found(account_id: i64) -> CoreError {
 }
 
 fn bank_balance() -> CoreError {
-    CoreError::invalid(tr("Der Saldo dieses Kontos kommt von der Bank. Ein Startsaldo gilt nur für Konten, deren Saldo GiroCrab aus den Umsätzen berechnet."))
+    CoreError::invalid(tr(
+        "Der Saldo dieses Kontos kommt von der Bank. Ein Startsaldo gilt nur für Konten, deren Saldo GiroCrab aus den Umsätzen berechnet.",
+    ))
 }
 
 fn normalize_date(date: &str) -> CoreResult<String> {
@@ -49,8 +50,8 @@ fn normalize_date(date: &str) -> CoreResult<String> {
     if d.is_empty() {
         return Ok(String::new());
     }
-    NaiveDate::parse_from_str(d, "%Y-%m-%d")
-        .map(|d| d.format("%Y-%m-%d").to_string())
+    jiff::civil::Date::strptime("%Y-%m-%d", d)
+        .map(crate::dates::iso)
         .map_err(|_| CoreError::invalid(trf("Ungültiges Datum: {0}", &[&d])))
 }
 
@@ -152,6 +153,17 @@ fn reset_to_sum(conn: &Connection, account_id: i64) -> CoreResult<()> {
         params![sum, last, account_id],
     )?;
     Ok(())
+}
+
+/// After an account stopped being a Sachwerte account or a manual loan, whose
+/// balance came from its items or loan terms: opening balance + Σ bookings,
+/// or Σ bookings without an opening balance.
+pub(crate) fn recompute(conn: &Connection, account_id: i64) -> CoreResult<()> {
+    if load(conn, account_id)?.is_some() {
+        refresh(conn, account_id)
+    } else {
+        reset_to_sum(conn, account_id)
+    }
 }
 
 /// Refreshes every account with an opening balance. Called after every import

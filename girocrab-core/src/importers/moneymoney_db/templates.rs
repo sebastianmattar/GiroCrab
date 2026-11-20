@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::{get, real_to_cents, select, vint, vreal, vtext};
 use crate::connectors::fints::sepa;
@@ -331,30 +331,40 @@ mod tests {
             ..Default::default()
         };
         assert!(!ok.unusable());
-        assert!(!SrcTemplate {
-            currency: String::new(),
-            ..ok.clone()
-        }
-        .unusable());
-        assert!(SrcTemplate {
-            currency: "USD".into(),
-            ..ok.clone()
-        }
-        .unusable());
-        assert!(SrcTemplate {
-            recipient_name: " ".into(),
-            ..ok.clone()
-        }
-        .unusable());
-        assert!(SrcTemplate {
-            iban: "DE89370400440532013001".into(),
-            ..ok.clone()
-        }
-        .unusable());
-        assert!(SrcTemplate {
-            iban: String::new(),
-            ..ok
-        }
-        .unusable());
+        assert!(
+            !SrcTemplate {
+                currency: String::new(),
+                ..ok.clone()
+            }
+            .unusable()
+        );
+        assert!(
+            SrcTemplate {
+                currency: "USD".into(),
+                ..ok.clone()
+            }
+            .unusable()
+        );
+        assert!(
+            SrcTemplate {
+                recipient_name: " ".into(),
+                ..ok.clone()
+            }
+            .unusable()
+        );
+        assert!(
+            SrcTemplate {
+                iban: "DE89370400440532013001".into(),
+                ..ok.clone()
+            }
+            .unusable()
+        );
+        assert!(
+            SrcTemplate {
+                iban: String::new(),
+                ..ok
+            }
+            .unusable()
+        );
     }
 }

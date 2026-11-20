@@ -18,8 +18,13 @@ struct TransferSheetView: View {
     @FocusState private var amountFocused: Bool
     /// Row of the recipient list chosen with the arrow keys.
     @State private var highlighted: Int?
+    /// Row to highlight once the list has changed because one was hidden (#978): the next one
+    /// moves into its place. Any other change of the list (typing) clears the highlight.
+    @State private var keepHighlight: Int?
     /// Name just taken from the list: typing it must not reopen the list.
     @State private var pickedName: String?
+    /// "Empfänger verwalten" (#978).
+    @State private var managingRecipients = false
     @State private var dropTargeted = false
     @State private var importNote: String?
     @State private var ownTargetID: Int64?
@@ -188,6 +193,8 @@ struct TransferSheetView: View {
             switch model.options.demoSheetName {
             case "transfer-confirm": step = .review
             case "transfer-girocode": step = .giroCode
+            case "transfer-recipients": managingRecipients = true
+            case "transfer-suggestions": keepHighlight = 0; suggestions = recipients("n")
             default: break
             }
         }
@@ -207,6 +214,8 @@ struct TransferSheetView: View {
                     .background(Theme.accent.opacity(0.06)).allowsHitTesting(false)
             }
         }
+        // what was hidden or shown again there applies to an open list at once
+        .capturableSheet(isPresented: $managingRecipients, onDismiss: refreshSuggestions) { KnownRecipientsSheet() }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard step == .form, let p = providers.first else { return false }
             _ = p.loadObject(ofClass: URL.self) { url, _ in
@@ -242,12 +251,15 @@ struct TransferSheetView: View {
             if new.count > maxPurpose { model.transferDraft.purpose = String(new.prefix(maxPurpose)) }
         }
         .onChange(of: model.transferDraft.name) { _, new in
-            if new == pickedName { suggestions = []; return }
-            pickedName = nil
-            suggestions = nameFocused ? recipients(new) : []
+            if new != pickedName { pickedName = nil }
+            refreshSuggestions()
         }
-        .onChange(of: nameFocused) { _, f in
-            suggestions = f && model.transferDraft.name != pickedName ? recipients(model.transferDraft.name) : []
+        .onChange(of: nameFocused) { refreshSuggestions() }
+        // here, not on the list: that one only exists while it has rows, so it would miss the
+        // list appearing and emptying
+        .onChange(of: suggestions.map(\.iban)) { _, new in
+            highlighted = keepHighlight.flatMap { new.isEmpty ? nil : min($0, new.count - 1) }
+            keepHighlight = nil
         }
     }
 
@@ -259,13 +271,18 @@ struct TransferSheetView: View {
         }
     }
 
-    /// Title left, the two helpers (templates, paste) as small actions right.
+    /// Title left, the helpers (templates, recipients, paste) as small actions right.
     private var header: some View {
         HStack(spacing: 12) {
             Text(title).appFont(.title2, weight: .semibold)
             Spacer()
             if step == .form {
                 TransferTemplatesMenu()
+                Button { managingRecipients = true } label: { Label("Empfänger", systemImage: "person.2") }
+                    .help("Empfänger verwalten: veraltete IBANs nicht mehr vorschlagen")
+                    #if os(iOS)
+                    .labelStyle(.iconOnly)
+                    #endif
                 #if os(macOS)
                 Button { pasteFromClipboard() } label: { Label("Einfügen", systemImage: "doc.on.clipboard") }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -471,41 +488,78 @@ struct TransferSheetView: View {
         }
     }
 
-    /// Known recipients as a drop-down under the name (#881): one row each,
-    /// pick with the mouse or ↑/↓ and Return; Esc closes it.
+    /// Known recipients as a drop-down under the name (#881): one row per IBAN with
+    /// its last use, pick with the mouse or ↑/↓ and Return; Esc closes it. The row under
+    /// the pointer offers "Nicht mehr vorschlagen" (#978), as does its context menu.
     private var suggestionList: some View {
         VStack(spacing: 0) {
             ForEach(Array(suggestions.enumerated()), id: \.element.iban) { i, r in
-                Button { pick(r) } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(r.name).appFont(.body).lineLimit(1)
-                        Text(formatIBAN(r.iban)).appFont(.caption, design: .monospaced)
-                            .foregroundStyle(Theme.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    Button { pick(r) } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(r.name).appFont(.body).lineLimit(1).sensitive()
+                                Spacer(minLength: 8)
+                                Text("zuletzt \(DateText.medium(r.lastUsed))").appFont(.caption)
+                                    .foregroundStyle(Theme.tertiary).fixedSize()
+                            }
+                            Text(formatIBAN(r.iban)).appFont(.caption, design: .monospaced)
+                                .foregroundStyle(Theme.secondary).lineLimit(1).sensitive()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 8).padding(.vertical, 4)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .contentShape(Rectangle())
-                    .background(RoundedRectangle(cornerRadius: 6).fill(i == highlighted ? Theme.selection : .clear))
+                    .buttonStyle(.plain)
+                    Button { hide(r) } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.tertiary)
+                            .padding(.trailing, 8).padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Nicht mehr vorschlagen")
+                    .opacity(i == highlighted ? 1 : 0)
+                    .disabled(i != highlighted)
+                    .accessibilityHidden(true)
                 }
-                .buttonStyle(.plain)
+                .background(RoundedRectangle(cornerRadius: 6).fill(i == highlighted ? Theme.selection : .clear))
                 .onHover { if $0 { highlighted = i } }
+                .contextMenu {
+                    Button("Nicht mehr vorschlagen", systemImage: "eye.slash") { hide(r) }
+                }
+                .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(i == highlighted ? .isSelected : [])
-                .sensitive()
+                .accessibilityAction { pick(r) }
+                .accessibilityAction(named: "Nicht mehr vorschlagen") { hide(r) }
             }
         }
         .padding(4)
         .background(RoundedRectangle(cornerRadius: 8).fill(Theme.card))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
         .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
-        .onChange(of: suggestions.map(\.iban)) { _, _ in highlighted = nil }
     }
 
     /// Known recipients for what was typed: only once something is typed, one
-    /// row per IBAN (the most used spelling), at most five.
+    /// row per IBAN (the most used spelling), the most recently used first, at most five.
     private func recipients(_ query: String) -> [KnownRecipient] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        var seen = Set<String>()
-        return model.suggestRecipients(query).filter { seen.insert($0.iban).inserted }.prefix(5).map { $0 }
+        return model.suggestRecipients(query)
+    }
+
+    /// The list for the name as typed: only while the field has the focus and the name was not
+    /// just taken from the list.
+    private func refreshSuggestions() {
+        let name = model.transferDraft.name
+        suggestions = nameFocused && name != pickedName ? recipients(name) : []
+    }
+
+    /// "Nicht mehr vorschlagen": the IBAN leaves the list at once, the highlight keeps its
+    /// place; "Empfänger" shows it again.
+    private func hide(_ r: KnownRecipient) {
+        let before = suggestions.map(\.iban), place = highlighted
+        model.setRecipientHidden(r.iban, true)
+        refreshSuggestions()
+        if suggestions.map(\.iban) != before { keepHighlight = place }
     }
 
     private func moveHighlight(_ step: Int) -> KeyPress.Result {

@@ -1,8 +1,8 @@
 [package]
 name = "girocrab-linux"
 # Kept equal to [workspace.package] in ../Cargo.toml; the app itself reads that one (build.rs).
-version = "0.8.5"
-edition = "2021"
+version = "0.8.6"
+edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/GiroCrab/GiroCrab"
 description = "GiroCrab for Linux: Qt6/QML front end on the GiroCrab Rust core"
@@ -30,7 +30,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # ZUGFeRD XML embedded in dropped PDF invoices (already used by girocrab-core).
 miniz_oxide = "0.9"
 # Local time of the Abrufprotokoll lines in a bug report (already used by girocrab-core).
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+jiff = "1.0.1"
 rqrr = { version = "0.11", default-features = false }
 
 [build-dependencies]

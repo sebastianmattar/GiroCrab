@@ -18,6 +18,6 @@ Rectangle {
         font.weight: parent.inflow ? Font.DemiBold : Font.Medium
         font.features: { "tnum": 1 }
         color: parent.inflow ? BookingPrefs.positiveColor : parent.cents < 0 ? BookingPrefs.negativeColor : Theme.outflow
-        Sensitive {}
+        Sensitive { amounts: true }
     }
 }

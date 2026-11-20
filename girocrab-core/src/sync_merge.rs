@@ -21,7 +21,7 @@
 //! `rules`, `bookings`. Each step translates the other vault's ids with the
 //! maps the earlier steps returned.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -596,7 +596,7 @@ fn booking_key(conn: &Connection, id: i64) -> CoreResult<String> {
 // ------------------------------------------------------------------ merge
 
 /// Newest stamp wins; equal stamps with different values: the larger value.
-fn take_newer<T: PartialOrd>(val: &mut T, ms: &mut i64, other: T, other_ms: i64) {
+pub(crate) fn take_newer<T: PartialOrd>(val: &mut T, ms: &mut i64, other: T, other_ms: i64) {
     if other_ms > *ms || (other_ms == *ms && other > *val) {
         *val = other;
         *ms = other_ms;

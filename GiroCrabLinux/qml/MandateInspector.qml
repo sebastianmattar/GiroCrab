@@ -44,7 +44,7 @@ ColumnLayout {
             Field { label: qsTr("Unterschrieben am"); value: insp.m ? Fmt.medium(insp.m.signed_date) : ""; personal: false }
             Field { label: qsTr("IBAN"); value: insp.m ? insp.m.debtor_iban : ""; mono: true }
             Field { visible: !!insp.m && insp.m.debtor_bic !== ""; label: qsTr("BIC"); value: insp.m ? insp.m.debtor_bic : ""; mono: true }
-            Field { visible: !!insp.m && insp.m.default_amount_cents > 0; label: qsTr("Betrag"); value: insp.m ? Fmt.money(insp.m.default_amount_cents) : ""; mono: true }
+            Field { visible: !!insp.m && insp.m.default_amount_cents > 0; label: qsTr("Betrag"); value: insp.m ? Fmt.money(insp.m.default_amount_cents) : ""; mono: true; amount: true }
             Field { visible: !!insp.m && insp.m.default_purpose !== ""; label: qsTr("Verwendungszweck"); value: insp.m ? insp.m.default_purpose : "" }
             Field { visible: !!insp.m && !!insp.m.last_collected; label: qsTr("Zuletzt eingezogen"); value: insp.m && insp.m.last_collected ? Fmt.medium(insp.m.last_collected) : ""; personal: false }
             Field { visible: !!insp.m && insp.m.note !== ""; label: qsTr("Notiz"); value: insp.m ? insp.m.note : "" }
@@ -68,7 +68,7 @@ ColumnLayout {
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.callout; color: Theme.text
                    readonly property var r: returnsCard.last
                    text: !r ? "" : Fmt.medium(r.date) + " · " + Fmt.money(Math.abs(r.amount_cents)) + (r.reason === "" ? "" : " · " + r.reason)
-                   Sensitive {} }
+                   Sensitive { amounts: true } }
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.callout; color: Theme.secondary
                    text: qsTr("Die Bank hat einen Einzug zurückgegeben. Prüfe die Angaben des Mandats, bevor du erneut einziehst.") }
             // side by side when they fit, else stacked (ViewThatFits)
@@ -100,7 +100,7 @@ ColumnLayout {
                            text: modelData.reason === "" ? qsTr("Rücklastschrift") : modelData.reason
                            font.pixelSize: Theme.caption; color: Theme.negative }
                     Item { visible: !modelData.is_return; Layout.fillWidth: true }
-                    Text { text: Fmt.money(modelData.amount_cents); font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                    Text { text: Fmt.money(modelData.amount_cents); font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                 }
             }
         }
@@ -122,6 +122,8 @@ ColumnLayout {
         property string value
         property bool mono: false
         property bool personal: true
+        /// money: `.sensitive(.amounts)`
+        property bool amount: false
         Layout.fillWidth: true
         spacing: 2
         Text { text: parent.label; font.pixelSize: Theme.caption; color: Theme.secondary }
@@ -129,7 +131,7 @@ ColumnLayout {
             Layout.fillWidth: true; readOnly: true; selectByMouse: true; wrapMode: Text.Wrap
             text: parent.value; font.pixelSize: Theme.callout; color: Theme.text
             font.features: parent.mono ? { "tnum": 1 } : {}
-            Sensitive { when: parent.parent.personal }
+            Sensitive { amounts: parent.parent.amount; when: parent.parent.personal || parent.parent.amount }
         }
     }
 }

@@ -33,13 +33,16 @@ use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{json, Value};
 use zeroize::Zeroize;
 
-use super::uberspace::{attr, attrs, parse_date, text, INPUT};
+use super::html::{
+    Form, LINK, attr, attrs, de_date, form_by_id, parse_amount, parse_date, partial_updates,
+    select_options, text,
+};
 use super::{
-    http_client, BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext,
-    ContentIds, FetchResult, Phase, RemoteAccount, RemoteTransaction,
+    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, ContentIds,
+    Documents, FetchResult, KnownDocuments, Phase, RemoteAccount, RemoteTransaction,
+    http_client_same_host,
 };
 use crate::documents::RemoteDocument;
 use crate::error::{CoreError, CoreResult};
@@ -62,16 +65,8 @@ pub(crate) const REF_PREFIX: &str = "opeldirektbank:";
 const MAX_ROWS: usize = 5000;
 /// Start of the date range for the Postbox lists.
 const POSTBOX_START: &str = "01.01.2010";
-/// Documents remembered in the connector state (newest kept).
-const KNOWN_DOCUMENTS_MAX: usize = 1000;
 
-static FORM_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<form\b([^>]*)>").unwrap());
-static SELECT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<select\b([^>]*)>(.*?)</select\s*>").unwrap());
-static OPTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<option\b([^>]*)>").unwrap());
 static BUTTON: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<button\b([^>]*)>").unwrap());
-static A_TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<a\b([^>]*)>(.*?)</a\s*>").unwrap());
 static POLLER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?s)cw\("Poll",\s*"[^"]*",\s*\{id:"([^"]+)".*?u:"([^"]+)""#).unwrap()
 });
@@ -90,23 +85,19 @@ static ACCOUNT_ROW: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(\d{6,})\b").unwrap());
-static CDATA_UPDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)<update id="([^"]+)"><!\[CDATA\[(.*?)\]\]></update>"#).unwrap()
-});
 static REDIRECT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<redirect url="([^"]+)""#).unwrap());
 
 fn page_changed() -> CoreError {
-    CoreError::Protocol {
-        message: tr("Opel Direktbank: Seite nicht erkannt (Online-Banking geändert?).").into(),
-    }
+    CoreError::protocol(tr(
+        "Opel Direktbank: Seite nicht erkannt (Online-Banking geändert?).",
+    ))
 }
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput {
-        message: tr("Opel Direktbank: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.")
-            .into(),
-    }
+    CoreError::invalid(tr(
+        "Opel Direktbank: Unvollständige oder ungültige Antwort. Es wurden keine Daten übernommen.",
+    ))
 }
 
 fn wrong_credentials() -> CoreError {
@@ -137,12 +128,9 @@ fn ensure_host(url: &url::Url) -> CoreResult<()> {
     if url.scheme() == "https" && url.host_str() == Some(HOST) {
         return Ok(());
     }
-    Err(CoreError::Protocol {
-        message: tr(
-            "Opel Direktbank: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
-        )
-        .into(),
-    })
+    Err(CoreError::protocol(tr(
+        "Opel Direktbank: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
+    )))
 }
 
 fn push_challenge() -> Challenge {
@@ -158,118 +146,7 @@ fn push_challenge() -> Challenge {
     }
 }
 
-// ------------------------------------------------------------------ JSF forms
-
-/// A page form as the browser would submit it.
-#[derive(Debug, Clone, PartialEq)]
-struct Form {
-    /// Absolute path (with query) the form posts to.
-    action: String,
-    /// Hidden and text fields and selects with their current values.
-    fields: Vec<(String, String)>,
-}
-
-impl Form {
-    fn set(&mut self, name: &str, value: &str) {
-        match self.fields.iter_mut().find(|(n, _)| n == name) {
-            Some((_, v)) => *v = value.to_string(),
-            None => self.fields.push((name.to_string(), value.to_string())),
-        }
-    }
-
-    fn get(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    }
-
-    fn field_ending(&self, suffix: &str) -> Option<String> {
-        self.fields
-            .iter()
-            .map(|(n, _)| n.clone())
-            .find(|n| n.ends_with(suffix))
-    }
-
-    /// The fields plus `name=name` (a clicked button or command link).
-    fn clicked(&self, name: &str) -> Vec<(String, String)> {
-        let mut out = self.fields.clone();
-        out.push((name.to_string(), name.to_string()));
-        out
-    }
-}
-
-/// The form with `id` (up to its first `</form>`: these forms nest none).
-/// Only same-site actions are accepted.
-fn form_by_id(html: &str, id: &str) -> Option<Form> {
-    let open = FORM_TAG
-        .captures_iter(html)
-        .find(|c| attr(&attrs(&c[1]), "id") == Some(id))?;
-    let a = attrs(&open[1]);
-    let action = attr(a.as_slice(), "action")?.trim().to_string();
-    if !action.starts_with('/') || action.starts_with("//") {
-        return None;
-    }
-    let start = open.get(0)?.end();
-    let rest = &html[start..];
-    let end = rest
-        .to_ascii_lowercase()
-        .find("</form")
-        .unwrap_or(rest.len());
-    let body = &rest[..end];
-    let mut fields = Vec::new();
-    for input in INPUT.captures_iter(body) {
-        let a = attrs(&input[1]);
-        let Some(name) = attr(&a, "name").filter(|n| !n.is_empty()) else {
-            continue;
-        };
-        if attr(&a, "disabled").is_some() {
-            continue;
-        }
-        let kind = attr(&a, "type").unwrap_or("text").to_ascii_lowercase();
-        if matches!(kind.as_str(), "hidden" | "text") {
-            fields.push((
-                name.to_string(),
-                attr(&a, "value").unwrap_or("").to_string(),
-            ));
-        }
-    }
-    for select in SELECT.captures_iter(body) {
-        let a = attrs(&select[1]);
-        let Some(name) = attr(&a, "name") else {
-            continue;
-        };
-        let options: Vec<Vec<(String, String)>> = OPTION
-            .captures_iter(&select[2])
-            .map(|o| attrs(&o[1]))
-            .filter(|o| attr(o, "disabled").is_none())
-            .collect();
-        let chosen = options
-            .iter()
-            .find(|o| attr(o, "selected").is_some())
-            .or(options.first())
-            .and_then(|o| attr(o, "value"))
-            .unwrap_or("");
-        fields.push((name.to_string(), chosen.to_string()));
-    }
-    Some(Form { action, fields })
-}
-
-/// Options (`value`) of the select whose name ends in `suffix`.
-fn select_options(html: &str, suffix: &str) -> Vec<String> {
-    SELECT
-        .captures_iter(html)
-        .find(|s| attr(&attrs(&s[1]), "name").is_some_and(|n| n.ends_with(suffix)))
-        .map(|s| {
-            OPTION
-                .captures_iter(&s[2])
-                .map(|o| attrs(&o[1]))
-                .filter(|o| attr(o, "disabled").is_none())
-                .filter_map(|o| attr(&o, "value").map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
-}
+// ------------------------------------------------------------------ page helpers
 
 /// Id of the first `<button>` whose `onclick` mentions `needle`.
 fn button_for(html: &str, needle: &str) -> Option<String> {
@@ -284,20 +161,12 @@ fn button_for(html: &str, needle: &str) -> Option<String> {
 
 /// Id of the command link with the visible text `label` ("Gelesen").
 fn link_with_text(html: &str, label: &str) -> Option<String> {
-    A_TAG.captures_iter(html).find_map(|c| {
+    LINK.captures_iter(html).find_map(|c| {
         if text(&c[2]) != label {
             return None;
         }
         attr(&attrs(&c[1]), "id").map(str::to_string)
     })
-}
-
-/// `(update id, content)` of a JSF partial response.
-fn partial_updates(xml: &str) -> Vec<(String, String)> {
-    CDATA_UPDATE
-        .captures_iter(xml)
-        .map(|c| (c[1].to_string(), c[2].to_string()))
-        .collect()
 }
 
 fn view_state(xml: &str) -> Option<String> {
@@ -400,19 +269,6 @@ fn german_iban(blz: &str, number: &str) -> Option<String> {
     Some(format!("DE{:02}{blz}{number}", 98 - rem))
 }
 
-/// "- 0,73 €", "+ 1,36 €", "97.000,00&nbsp;€" → cents.
-fn parse_amount(s: &str) -> Option<i64> {
-    let cleaned: String = text(s)
-        .replace(['\u{2212}', '\u{2013}'], "-")
-        .chars()
-        .filter(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | ',' | '.'))
-        .collect();
-    if !cleaned.chars().any(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    crate::money::parse_cents(&cleaned).ok()
-}
-
 fn parse_accounts(html: &str) -> CoreResult<Vec<Account>> {
     let mut out = Vec::new();
     for part in html.split("account-row-link").skip(1) {
@@ -509,7 +365,7 @@ struct PostboxRow {
     link: String,
     date: String,
     subject: String,
-    /// "Tagesgeld 1000054713", "Info".
+    /// "Tagesgeld 1000000001", "Info".
     account: String,
     category: String,
     account_number: Option<String>,
@@ -571,16 +427,6 @@ fn document_file_name(row: &PostboxRow) -> String {
         })
         .collect();
     format!("{}_{}.pdf", row.date, subject.trim().replace(' ', "_"))
-}
-
-fn known_documents(state: &Value) -> Vec<String> {
-    serde_json::from_value(state["documents"].clone()).unwrap_or_default()
-}
-
-/// `YYYY-MM-DD` → `DD.MM.YYYY`.
-fn site_date(iso: &str) -> Option<String> {
-    let d = chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").ok()?;
-    Some(d.format("%d.%m.%Y").to_string())
 }
 
 // ------------------------------------------------------------------ connector
@@ -716,10 +562,10 @@ impl OpelDirektbankConnector {
             .send()
             .await?;
         let xml = self.read(resp).await?.html();
-        if let Some(url) = REDIRECT.captures(&xml).map(|c| c[1].to_string()) {
-            if url.contains("login") || url.contains("logout") {
-                return Err(session_ended());
-            }
+        if let Some(url) = REDIRECT.captures(&xml).map(|c| c[1].to_string())
+            && (url.contains("login") || url.contains("logout"))
+        {
+            return Err(session_ended());
         }
         Ok(xml)
     }
@@ -808,8 +654,8 @@ impl OpelDirektbankConnector {
             .filtered_table(
                 path,
                 Some(&account.number),
-                &site_date(since).ok_or_else(invalid)?,
-                &site_date(today).ok_or_else(invalid)?,
+                &de_date(since).ok_or_else(invalid)?,
+                &de_date(today).ok_or_else(invalid)?,
             )
             .await?;
         parse_bookings(&table, &account.external_ref(), since)
@@ -833,7 +679,7 @@ impl OpelDirektbankConnector {
             button_for(&page, "postboxTableWrapper"),
         ) {
             head.set(&start, POSTBOX_START);
-            head.set(&end, &site_date(&super::today()).unwrap_or_default());
+            head.set(&end, &de_date(&super::today()).unwrap_or_default());
             let xml = self
                 .ajax(&head, &button, "contentHead", "contentForm", &[])
                 .await?;
@@ -872,7 +718,7 @@ impl OpelDirektbankConnector {
     async fn documents(
         &mut self,
         wanted: &HashMap<String, String>,
-        known: &mut Vec<String>,
+        known: &mut KnownDocuments,
     ) -> CoreResult<Vec<RemoteDocument>> {
         let mut out = Vec::new();
         for tab in ["Ungelesen", "Gelesen"] {
@@ -899,7 +745,7 @@ impl OpelDirektbankConnector {
                     .and_then(|n| wanted.get(n))
                     .cloned()
                     .unwrap_or_default();
-                known.push(row.key());
+                known.insert(row.key());
                 out.push(RemoteDocument {
                     account_ref,
                     booking_external_id: None,
@@ -941,7 +787,7 @@ impl BankConnector for OpelDirektbankConnector {
                 message: tr("Opel Direktbank: Benutzerkennung und Passwort erforderlich.").into(),
             });
         }
-        self.client = Some(http_client()?);
+        self.client = Some(http_client_same_host()?);
         let resp = self.http()?.get(Self::target(LOGIN)?).send().await?;
         let page = self.read(resp).await?;
         let form = form_by_id(&page.html(), "loginForm").ok_or_else(page_changed)?;
@@ -1006,21 +852,15 @@ impl BankConnector for OpelDirektbankConnector {
             .iter()
             .map(|a| (a.number.clone(), a.external_ref()))
             .collect();
-        let mut known = known_documents(&ctx.state);
-        let state = |known: &Vec<String>| {
-            let keep = known.len().saturating_sub(KNOWN_DOCUMENTS_MAX);
-            Some(json!({ "documents": known[keep..] }))
-        };
+        let mut known = KnownDocuments::from_state(&ctx.state);
 
-        // "Kontoauszüge abrufen" for one account: documents only.
-        if let Some(only) = ctx.settings.get(super::STATEMENTS_ONLY) {
-            let only = only.expose().to_string();
+        if let Documents::StatementsOnly(only) = &ctx.documents {
             let wanted: HashMap<String, String> =
-                refs.into_iter().filter(|(_, r)| *r == only).collect();
+                refs.into_iter().filter(|(_, r)| r == only).collect();
             let documents = self.documents(&wanted, &mut known).await?;
             return Ok(FetchResult {
                 documents,
-                state: state(&known),
+                state: known.to_state(),
                 ..Default::default()
             });
         }
@@ -1044,31 +884,30 @@ impl BankConnector for OpelDirektbankConnector {
             });
         }
 
-        let auto: Vec<String> = ctx
-            .settings
-            .get(super::STATEMENTS_AUTO)
-            .map(|v| v.expose().split(',').map(str::to_string).collect())
-            .unwrap_or_default();
-        if !auto.is_empty() {
+        let due = ctx.documents.due_statements();
+        if !due.is_empty() {
             let wanted: HashMap<String, String> =
-                refs.into_iter().filter(|(_, r)| auto.contains(r)).collect();
-            // Optional: a failed document download never fails the sync.
-            if let Ok(documents) = self.documents(&wanted, &mut known).await {
+                refs.into_iter().filter(|(_, r)| due.contains(r)).collect();
+            // Optional: a failed download never fails the sync. On failure the
+            // ids of what was downloaded so far are dropped with the documents.
+            let mut fetched = known.clone();
+            if let Ok(documents) = self.documents(&wanted, &mut fetched).await {
                 out.documents = documents;
-                out.statements_fetched = auto;
+                out.statements_fetched = due.to_vec();
+                known = fetched;
             }
         }
-        out.state = state(&known);
+        out.state = known.to_state();
         Ok(out)
     }
 
     async fn finish(&mut self, _ctx: &ConnectContext) {
-        if let (Some(client), Some((form, button))) = (self.client.take(), self.logout.take()) {
-            if let Ok(url) = Self::target(&form.action) {
-                let mut fields = form.fields.clone();
-                fields.push((button, String::new()));
-                let _ = client.post(url).form(&fields).send().await;
-            }
+        if let (Some(client), Some((form, button))) = (self.client.take(), self.logout.take())
+            && let Ok(url) = Self::target(&form.action)
+        {
+            let mut fields = form.fields.clone();
+            fields.push((button, String::new()));
+            let _ = client.post(url).form(&fields).send().await;
         }
         self.approval = None;
     }
@@ -1166,20 +1005,20 @@ mod tests {
     fn reads_accounts_and_derives_missing_ibans() {
         let html = format!(
             "{}{}{}",
-            account_row(0, "Tagesgeld", "DE88 5002 5000 1000 0000 01", "4.254,14"),
-            account_row(1, "Festgeld", "1000000002", "97.000,00"),
-            account_row(0, "Tagesgeld", "DE88 5002 5000 1000 0000 01", "4.254,14"),
+            account_row(0, "Tagesgeld", "DE88 5002 5000 1000 0000 01", "2.222,22"),
+            account_row(1, "Festgeld", "1000000002", "50.000,00"),
+            account_row(0, "Tagesgeld", "DE88 5002 5000 1000 0000 01", "2.222,22"),
         );
         let accounts = parse_accounts(&html).unwrap();
         assert_eq!(accounts.len(), 2, "duplicate rows are listed once");
         assert_eq!(accounts[0].product, "Tagesgeld");
         assert_eq!(accounts[0].iban, "DE88500250001000000001");
         assert_eq!(accounts[0].number, "1000000001");
-        assert_eq!(accounts[0].balance_cents, 425_414);
+        assert_eq!(accounts[0].balance_cents, 222_222);
         assert_eq!(accounts[0].bookings_page(), Some(DAILY));
         assert_eq!(accounts[1].number, "1000000002");
         assert_eq!(accounts[1].iban, german_iban(BLZ, "1000000002").unwrap());
-        assert_eq!(accounts[1].balance_cents, 9_700_000);
+        assert_eq!(accounts[1].balance_cents, 5_000_000);
         assert_eq!(accounts[1].bookings_page(), Some(FIXED));
         assert!(parse_accounts(&account_row(0, "Tagesgeld", "kaputt", "1,00")).is_err());
     }
@@ -1199,31 +1038,31 @@ mod tests {
         let table = [
             booking(
                 0,
-                "28.11.2025 <br />30.11.2025",
+                "12.02.2025 <br />14.02.2025",
                 "Abschluss",
                 "",
-                "+ 1,36 €",
+                "+ 5,55 €",
             ),
             booking(
                 1,
-                "28.11.2025 <br />30.11.2025",
+                "12.02.2025 <br />14.02.2025",
                 "Abschluss",
                 "",
-                "+ 1,36 €",
+                "+ 5,55 €",
             ),
             booking(
                 2,
-                "28.11.2025 <br />30.11.2025",
+                "12.02.2025 <br />14.02.2025",
                 "Kap.ertr.st1",
                 "",
-                "<span class=\"transaction-negative\">- 0,73 €</span>",
+                "<span class=\"transaction-negative\">- 1,17 €</span>",
             ),
             booking(
                 3,
-                "23.04.2026 <br />23.04.2026",
+                "19.05.2026 <br />19.05.2026",
                 "Zinsen",
                 "Festgeld Ablauf",
-                "+ 2.212,81 €",
+                "+ 3.333,33 €",
             ),
         ]
         .join("");
@@ -1231,7 +1070,7 @@ mod tests {
         assert_eq!(tx.len(), 4);
         assert_eq!(
             (tx[0].booking_date.as_str(), tx[0].value_date.as_str()),
-            ("2025-11-28", "2025-11-30")
+            ("2025-02-12", "2025-02-14")
         );
         assert_eq!(
             (
@@ -1239,23 +1078,23 @@ mod tests {
                 tx[0].booking_text.as_str(),
                 tx[0].purpose.as_str()
             ),
-            (136, "Abschluss", "Abschluss")
+            (555, "Abschluss", "Abschluss")
         );
         assert_ne!(
             tx[0].external_id, tx[1].external_id,
             "identical bookings stay two"
         );
-        assert_eq!(tx[2].amount_cents, -73);
+        assert_eq!(tx[2].amount_cents, -117);
         assert_eq!(
             (tx[3].amount_cents, tx[3].purpose.as_str()),
-            (221_281, "Festgeld Ablauf")
+            (333_333, "Festgeld Ablauf")
         );
         let again = parse_bookings(&table, "opeldirektbank:DE00", "2000-01-01").unwrap();
         assert_eq!(again[1].external_id, tx[1].external_id);
         let recent = parse_bookings(&table, "opeldirektbank:DE00", "2026-01-01").unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].external_id, tx[3].external_id);
-        assert!(parse_bookings(&table.replace("- 0,73 €", "n/a"), "a", "2000-01-01").is_err());
+        assert!(parse_bookings(&table.replace("- 1,17 €", "n/a"), "a", "2000-01-01").is_err());
     }
 
     #[test]
@@ -1263,7 +1102,7 @@ mod tests {
         let table = [
             postbox_row(
                 0,
-                "30.10.2026",
+                "15.03.2026",
                 "Kontoauszug Nr. 10",
                 "<span class=\"\">Tagesgeld </span> <span>1000000001 </span>",
                 "Kontoauszug",
@@ -1292,7 +1131,7 @@ mod tests {
         );
         assert_eq!(
             (rows[0].date.as_str(), rows[0].subject.as_str()),
-            ("2026-10-30", "Kontoauszug Nr. 10")
+            ("2026-03-15", "Kontoauszug Nr. 10")
         );
         assert_eq!(rows[0].account, "Tagesgeld 1000000001");
         assert_eq!(rows[0].account_number.as_deref(), Some("1000000001"));
@@ -1302,11 +1141,11 @@ mod tests {
         assert_eq!(document_type(&rows[2]), "steuer");
         assert_eq!(
             document_file_name(&rows[0]),
-            "2026-10-30_Kontoauszug_Nr._10.pdf"
+            "2026-03-15_Kontoauszug_Nr._10.pdf"
         );
         assert_eq!(
             rows[0].key(),
-            "2026-10-30|Kontoauszug Nr. 10|Tagesgeld 1000000001"
+            "2026-03-15|Kontoauszug Nr. 10|Tagesgeld 1000000001"
         );
     }
 
@@ -1372,13 +1211,10 @@ mod tests {
     }
 
     #[test]
-    fn amounts_dates_and_known_documents() {
-        assert_eq!(parse_amount("<span>- 0,73 €</span>"), Some(-73));
-        assert_eq!(parse_amount("+ 2.212,81 €"), Some(221_281));
-        assert_eq!(parse_amount("97.000,00&nbsp;€"), Some(9_700_000));
+    fn amounts_and_dates() {
+        assert_eq!(parse_amount("<span>- 1,17 €</span>"), Some(-117));
+        assert_eq!(parse_amount("+ 3.333,33 €"), Some(333_333));
+        assert_eq!(parse_amount("50.000,00&nbsp;€"), Some(5_000_000));
         assert_eq!(parse_amount("—"), None);
-        assert_eq!(site_date("2026-01-05").as_deref(), Some("05.01.2026"));
-        assert_eq!(known_documents(&json!({"documents": ["a"]})), vec!["a"]);
-        assert!(known_documents(&Value::Null).is_empty());
     }
 }

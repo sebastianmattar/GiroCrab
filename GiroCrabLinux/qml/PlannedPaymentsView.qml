@@ -162,7 +162,7 @@ Rectangle {
         spacing: 2
         Text { text: parent.label; font.pixelSize: Theme.caption; color: Theme.secondary }
         Text { text: Fmt.money(parent.cents); font.pixelSize: Theme.title3; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
-               color: Theme.text; Sensitive {} }
+               color: Theme.text; Sensitive { amounts: true } }
     }
 
     /// monthHeader: top of a month card, like the day header of the booking stream.
@@ -178,7 +178,7 @@ Rectangle {
                            return d ? d.toLocaleDateString(Fmt.locale, "MMMM yyyy") : parent.parent.month.id } }
             Text { readonly property real sum: parent.parent.month ? parent.parent.month.sumCents : 0
                    text: Fmt.signed(sum); font.pixelSize: Theme.subheadline + 1; font.features: { "tnum": 1 }
-                   color: sum > 0 ? Theme.inflow : Theme.secondary; Sensitive {} }
+                   color: sum > 0 ? Theme.inflow : Theme.secondary; Sensitive { amounts: true } }
         }
     }
 
@@ -244,6 +244,6 @@ Rectangle {
             }
         }
         Accessible.role: Accessible.Button
-        Accessible.name: payment ? payment.counterparty + ", " + Fmt.money(payment.amount_cents) + ", " + Fmt.medium(payment.date) : ""
+        Accessible.name: payment ? AppModel.masking(payment.counterparty) + ", " + AppModel.masking(Fmt.money(payment.amount_cents), AppModel.redactAmounts) + ", " + Fmt.medium(payment.date) : ""
     }
 }

@@ -1,4 +1,4 @@
-// "Import, Export & Einstellungen": statement and MoneyMoney imports, Amazon orders, CSV / CAMT.053
+// "Import, Export & Einstellungen": statement and database imports, Amazon orders, CSV / CAMT.053
 // export, encrypted backup, settings and the Abrufprotokoll. The panel is the content of a
 // `Dialog` in main.slint (which owns the theme), so colours come in as properties. All state and
 // callbacks live in the `SettingsImportState` global; settings_import_ui.rs fills it and runs
@@ -184,7 +184,7 @@ export component SettingsImportPanel inherits VerticalLayout {
             Button { text: "Importieren"; primary: true; enabled: !SettingsImportState.busy && SettingsImportState.file-ready; clicked => { SettingsImportState.run-import(); } }
         }
         Info { text: SettingsImportState.file-info; ink: root.muted; }
-        Text { text: "MoneyMoney-Datenbank"; color: root.ink; font-size: 13px; font-weight: 600; }
+        Text { text: "Datenbank"; color: root.ink; font-size: 13px; font-weight: 600; }
         HorizontalLayout {
             spacing: 8px;
             Caption { text: "Passwort"; ink: root.muted; }

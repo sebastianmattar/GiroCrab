@@ -6,7 +6,7 @@
 use std::fmt::Write;
 
 use super::{
-    day_number, merchant_key, normalize_iban, similar, Limits, SuggestionBasis, Target, Vote,
+    Limits, SuggestionBasis, Target, Vote, day_number, merchant_key, normalize_iban, similar,
 };
 use crate::error::CoreError;
 use crate::merchants::MerchantResolver;

@@ -13,9 +13,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-use chrono::{Duration, Local, Months, NaiveDate};
+use jiff::civil::Date;
 use regex::Regex;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;
@@ -96,7 +96,7 @@ pub struct SalaryCycle {
 }
 
 /// Picks the main salary series and derives the cycle. `today` is injected for tests.
-pub(crate) fn derive_cycle(salaries: &[Booking], today: NaiveDate) -> Option<SalaryCycle> {
+pub(crate) fn derive_cycle(salaries: &[Booking], today: Date) -> Option<SalaryCycle> {
     // Group by payer (IBAN, else name); the main series has the largest total.
     let mut groups: HashMap<String, Vec<&Booking>> = HashMap::new();
     for b in salaries {
@@ -113,30 +113,28 @@ pub(crate) fn derive_cycle(salaries: &[Booking], today: NaiveDate) -> Option<Sal
     })?;
     main.sort_by(|a, b| a.booking_date.cmp(&b.booking_date));
     let last = *main.last()?;
-    let last_date = NaiveDate::parse_from_str(&last.booking_date, "%Y-%m-%d").ok()?;
-    if (today - last_date).num_days() > STALE_DAYS {
+    let last_date = Date::strptime("%Y-%m-%d", &last.booking_date).ok()?;
+    if crate::dates::days_between(last_date, today) > STALE_DAYS {
         return None;
     }
     // Typical interval: median gap between consecutive salaries, else one month.
     let mut gaps: Vec<i64> = main
         .windows(2)
         .filter_map(|w| {
-            let a = NaiveDate::parse_from_str(&w[0].booking_date, "%Y-%m-%d").ok()?;
-            let b = NaiveDate::parse_from_str(&w[1].booking_date, "%Y-%m-%d").ok()?;
-            Some((b - a).num_days())
+            let a = Date::strptime("%Y-%m-%d", &w[0].booking_date).ok()?;
+            let b = Date::strptime("%Y-%m-%d", &w[1].booking_date).ok()?;
+            Some(crate::dates::days_between(a, b))
         })
         .filter(|d| *d >= 7) // same-month extras (bonus) don't define the cycle
         .collect();
     gaps.sort_unstable();
     let next = match gaps.get(gaps.len() / 2) {
-        Some(&g) if !(25..=35).contains(&g) => last_date + Duration::days(g),
-        _ => last_date
-            .checked_add_months(Months::new(1))
-            .unwrap_or(last_date + Duration::days(30)),
+        Some(&g) if !(25..=35).contains(&g) => crate::dates::add_days(last_date, g)?,
+        _ => last_date.checked_add(jiff::Span::new().months(1)).ok()?,
     };
     Some(SalaryCycle {
         last_date: last.booking_date.clone(),
-        next_expected: next.format("%Y-%m-%d").to_string(),
+        next_expected: crate::dates::iso(next),
         amount_cents: last.amount_cents,
         counterparty: if last.merchant_name.is_empty() {
             last.counterparty.clone()
@@ -172,10 +170,8 @@ impl Vault {
     /// Current pay cycle of the given accounts (empty = all), or `None` when no
     /// salary was detected within the last ~6 weeks.
     pub fn salary_cycle(&self, account_ids: Vec<i64>) -> Result<Option<SalaryCycle>, CoreError> {
-        let today = Local::now().date_naive();
-        let from = (today - Duration::days(LOOKBACK_DAYS))
-            .format("%Y-%m-%d")
-            .to_string();
+        let today = crate::dates::today();
+        let from = crate::dates::iso(today - crate::dates::days(LOOKBACK_DAYS));
         let filter = BookingFilter {
             account_ids,
             date_from: Some(from),
@@ -199,7 +195,7 @@ mod tests {
 
     #[test]
     fn salary_payer_sums_saturate_instead_of_overflowing() {
-        let today = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let today = jiff::civil::date(2026, 5, 20);
         let list = [
             b(
                 1,
@@ -308,7 +304,7 @@ mod tests {
 
     #[test]
     fn cycle_follows_month_end_salary() {
-        let today = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let today = jiff::civil::date(2026, 11, 11);
         let s = vec![
             b(1, "2026-08-28", 300_000, "DE1", "Gehalt"),
             b(2, "2026-09-29", 300_000, "DE1", "Gehalt"),
@@ -323,7 +319,7 @@ mod tests {
 
     #[test]
     fn stale_salary_gives_no_cycle() {
-        let today = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let today = jiff::civil::date(2026, 11, 11);
         let s = vec![b(1, "2026-08-28", 300_000, "DE1", "Gehalt")];
         assert_eq!(derive_cycle(&s, today), None);
         assert_eq!(derive_cycle(&[], today), None);
@@ -331,7 +327,7 @@ mod tests {
 
     #[test]
     fn quarterly_payer_uses_its_interval() {
-        let today = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let today = jiff::civil::date(2026, 11, 11);
         let s = vec![
             b(1, "2026-04-01", 100_000, "DE1", "Pension"),
             b(2, "2026-07-01", 100_000, "DE1", "Pension"),
@@ -351,8 +347,8 @@ mod vault_tests {
         let dir = std::env::temp_dir().join(format!("gc-salary-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![5u8; 32]).unwrap();
-        let today = Local::now().date_naive();
-        let d = |n: i64| (today - Duration::days(n)).format("%Y-%m-%d").to_string();
+        let today = crate::dates::today();
+        let d = |n: i64| crate::dates::iso(today - crate::dates::days(n));
         let ids: Vec<i64> = {
             let c = v.db().unwrap();
             c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
@@ -403,9 +399,7 @@ mod demo_tests {
             .salary_cycle(vec![])
             .unwrap()
             .expect("demo salary detected");
-        let expect = (Local::now().date_naive() - Duration::days(22))
-            .format("%Y-%m-%d")
-            .to_string();
+        let expect = crate::dates::iso(crate::dates::today() - crate::dates::days(22));
         assert_eq!(c.last_date, expect);
         assert_eq!(c.amount_cents, 365_000);
         drop(v);

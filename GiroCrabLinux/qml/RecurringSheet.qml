@@ -74,7 +74,8 @@ Sheet {
                     visible: sheet.month !== null
                     title: qsTr("Diesen Monat")
                     footer: sheet.month ? qsTr("Noch offen: %1 Ausgaben, %2 Einnahmen · bereits gebucht: %3")
-                        .arg(Fmt.money(-sheet.month.open_expense_cents)).arg(Fmt.money(sheet.month.open_income_cents)).arg(Fmt.money(-sheet.month.booked_expense_cents)) : ""
+                        .arg(AppModel.masking(Fmt.money(-sheet.month.open_expense_cents), AppModel.redactAmounts)).arg(AppModel.masking(Fmt.money(sheet.month.open_income_cents), AppModel.redactAmounts))
+                        .arg(AppModel.masking(Fmt.money(-sheet.month.booked_expense_cents), AppModel.redactAmounts)) : ""
                     Text { visible: sheet.month !== null && sheet.month.items.length === 0; text: qsTr("Diesen Monat ist nichts fällig."); font.pixelSize: Theme.body; color: Theme.secondary }
                     Repeater {
                         model: sheet.month ? sheet.month.items : []
@@ -125,9 +126,9 @@ Sheet {
                             spacing: 10
                             SFIcon { symbol: "eye.slash"; size: 15; color: Theme.tertiary }
                             ColumnLayout { spacing: 1; Layout.fillWidth: true
-                                Text { text: hr.modelData.name; font.pixelSize: Theme.body; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: hr.modelData.name; font.pixelSize: Theme.body; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
                                 Text { text: qsTr("Zuletzt am %1").arg(Fmt.medium(hr.modelData.last_date)); font.pixelSize: Theme.caption; color: Theme.tertiary } }
-                            Text { text: Fmt.money(hr.modelData.amount_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.secondary }
+                            Text { text: Fmt.money(hr.modelData.amount_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } }
                             Button { flat: true; text: qsTr("Einblenden"); onClicked: AppModel.resetRecurring(hr.modelData.series_key) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: hiddenMenu.popup() }
                             AppMenu { id: hiddenMenu; AppMenuItem { text: qsTr("Wieder einblenden"); onTriggered: AppModel.resetRecurring(hr.modelData.series_key) } }
@@ -156,9 +157,9 @@ Sheet {
         SFIcon { symbol: row.symbol; size: 15; color: row.symbolColor
                  ToolTip.visible: symHover.hovered; ToolTip.text: row.symbolHelp; HoverHandler { id: symHover } }
         ColumnLayout { spacing: 1; Layout.fillWidth: true
-            Text { text: row.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
+            Text { text: row.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
             Text { text: row.detail; font.pixelSize: Theme.caption; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true } }
-        Text { text: Fmt.money(row.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: row.cents < 0 ? Theme.outflow : Theme.inflow }
+        Text { text: Fmt.money(row.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: row.cents < 0 ? Theme.outflow : Theme.inflow; Sensitive { amounts: true } }
         IconButton { visible: row.showsMenuButton; symbol: "ellipsis.circle"; ToolTip.text: qsTr("Aktionen"); onClicked: row.menuButtonClicked() }
         TapHandler { onDoubleTapped: row.activated() }
         TapHandler { acceptedButtons: Qt.RightButton; onTapped: row.menuRequested() }

@@ -15,7 +15,9 @@ use std::{
 };
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput { message: tr("EquatePlus: Unvollständige oder nicht unterstützte Bestandsdaten. Es wurden keine Daten übernommen.").into() }
+    CoreError::invalid(tr(
+        "EquatePlus: Unvollständige oder nicht unterstützte Bestandsdaten. Es wurden keine Daten übernommen.",
+    ))
 }
 fn label(v: &Value) -> Option<&str> {
     v.as_str()
@@ -43,10 +45,9 @@ fn money(v: &Value, currency: &str) -> CoreResult<f64> {
         .as_str()
         .or(v["currency"]["code"].as_str())
         .or(v["currency"].as_str())
+        && unit != currency
     {
-        if unit != currency {
-            return Err(invalid());
-        }
+        return Err(invalid());
     }
     amount(v)
 }
@@ -356,7 +357,7 @@ fn snapshot(json: &str) -> CoreResult<FetchResult> {
         return Err(invalid());
     }
     let date = label(&v["date"]).ok_or_else(invalid)?;
-    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| invalid())?;
+    jiff::civil::Date::strptime("%Y-%m-%d", date).map_err(|_| invalid())?;
     let plans = v["plans"].as_array().ok_or_else(invalid)?;
     // An empty overview may also be an expired session; don't clear a depot.
     if plans.is_empty() {
@@ -636,7 +637,7 @@ fn document(v: &Value) -> Option<LibraryDocument> {
         return None;
     }
     let date = text("date")?.chars().take(10).collect::<String>();
-    chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok()?;
+    jiff::civil::Date::strptime("%Y-%m-%d", &date).ok()?;
     let document_type = text("documentType").unwrap_or_default();
     let title = text("description")
         .filter(|d| !d.is_empty())
@@ -835,11 +836,13 @@ mod tests {
             .import_equateplus_snapshot(connection, two_plans(4.0).to_string())
             .unwrap();
         assert_eq!(vault.list_accounts().unwrap().len(), 2);
-        assert!(vault
-            .connection_account_choices(connection)
-            .unwrap()
-            .iter()
-            .all(|c| c.enabled));
+        assert!(
+            vault
+                .connection_account_choices(connection)
+                .unwrap()
+                .iter()
+                .all(|c| c.enabled)
+        );
     }
 
     fn library_doc(id: &str, plan: Option<&str>, service: &str) -> Value {
@@ -876,10 +879,12 @@ mod tests {
         assert_eq!(keys[0], keys[1], "identical entries share a group");
         assert_ne!(keys[0], keys[2]);
         assert!(keys.iter().all(|k| valid_document_group(k)));
-        assert!(vault
-            .clone()
-            .pending_equateplus_documents(connection, "kein json".into())
-            .is_err());
+        assert!(
+            vault
+                .clone()
+                .pending_equateplus_documents(connection, "kein json".into())
+                .is_err()
+        );
     }
 
     fn pending_docs(vault: &std::sync::Arc<Vault>, connection: i64, list: &Value) -> Vec<String> {
@@ -1032,15 +1037,19 @@ mod tests {
             .unwrap();
         assert_eq!(pending.len(), 3);
         // anything that is not a PDF is rejected
-        assert!(vault
-            .clone()
-            .import_equateplus_document(connection, pending[0].clone(), b"<html>".to_vec())
-            .is_err());
-        for doc in &pending {
-            assert!(vault
+        assert!(
+            vault
                 .clone()
-                .import_equateplus_document(connection, doc.clone(), b"%PDF-1.4 test".to_vec())
-                .unwrap());
+                .import_equateplus_document(connection, pending[0].clone(), b"<html>".to_vec())
+                .is_err()
+        );
+        for doc in &pending {
+            assert!(
+                vault
+                    .clone()
+                    .import_equateplus_document(connection, doc.clone(), b"%PDF-1.4 test".to_vec())
+                    .unwrap()
+            );
         }
         // a few bytes in front of the header are allowed, an HTML page is not
         assert!(has_pdf_header(b"\xEF\xBB\xBF\n%PDF-1.4 test"));
@@ -1053,15 +1062,23 @@ mod tests {
                 .collect::<Vec<u8>>()
         ));
         // a later run: the group is complete, nothing is listed, and storing one again changes nothing
-        assert!(vault
-            .clone()
-            .pending_equateplus_documents(connection, docs.to_string())
-            .unwrap()
-            .is_empty());
-        assert!(!vault
-            .clone()
-            .import_equateplus_document(connection, pending[0].clone(), b"%PDF-1.4 test".to_vec())
-            .unwrap());
+        assert!(
+            vault
+                .clone()
+                .pending_equateplus_documents(connection, docs.to_string())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !vault
+                .clone()
+                .import_equateplus_document(
+                    connection,
+                    pending[0].clone(),
+                    b"%PDF-1.4 test".to_vec()
+                )
+                .unwrap()
+        );
         // the program named in the document is its account; otherwise none, never a guess
         let plan_a = vault
             .list_accounts()
@@ -1096,14 +1113,18 @@ mod tests {
         let other = vault
             .add_bank_connection(ConnectorKind::Quirion, "Andere".into(), "x".into())
             .unwrap();
-        assert!(vault
-            .clone()
-            .pending_equateplus_documents(other, "[]".into())
-            .is_err());
-        assert!(vault
-            .clone()
-            .import_equateplus_document(other, "{}".into(), b"%PDF-".to_vec())
-            .is_err());
+        assert!(
+            vault
+                .clone()
+                .pending_equateplus_documents(other, "[]".into())
+                .is_err()
+        );
+        assert!(
+            vault
+                .clone()
+                .import_equateplus_document(other, "{}".into(), b"%PDF-".to_vec())
+                .is_err()
+        );
     }
 
     #[test]
@@ -1226,11 +1247,13 @@ mod tests {
         bad["plans"][0]["details"]["entries"][0]["entries"][0]["marketPrice"]["unit"]["code"] =
             json!("USD");
         assert!(snapshot(&bad.to_string()).is_err());
-        assert!(quantities(
-            &json!({"QUANTITY":{"amount":2},"TOTAL_UNITS":{"amount":3}}),
-            Some(true)
-        )
-        .is_err());
+        assert!(
+            quantities(
+                &json!({"QUANTITY":{"amount":2},"TOTAL_UNITS":{"amount":3}}),
+                Some(true)
+            )
+            .is_err()
+        );
         assert_eq!(
             quantities(&json!({"UNITS":{"amount":2}}), None).unwrap()[0].1,
             "Verfügbarkeit unbekannt"
@@ -1274,10 +1297,12 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(json!({"id":"broken-plan","details":{}}));
-        assert!(vault
-            .clone()
-            .import_equateplus_snapshot(id, broken.to_string())
-            .is_err());
+        assert!(
+            vault
+                .clone()
+                .import_equateplus_snapshot(id, broken.to_string())
+                .is_err()
+        );
         assert_eq!(
             vault
                 .db()

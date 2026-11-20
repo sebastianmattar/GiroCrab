@@ -1,12 +1,11 @@
-GiroCrab v0.8.5 (iOS Build under Version 0.7.5, Schema v27)
+GiroCrab v0.8.6 (iOS Build 23 under Version 0.7.5, Schema v31)
 
 Note on the TestFlight version number:
-Because our development moves faster than Apple's version review for new release trains, the complete v0.8.5 release ships immediately as a new build under 0.7.5.
+Because our development moves faster than Apple's version review for new release trains, the complete v0.8.6 release ships immediately as Build 23 under 0.7.5.
 
 What to test:
-- Built-in FinTS product registration & automatic encrypted vault backup before upgrade.
-- Tag filtering & analytics (#228, #777): Filter bookings by tags and analyze them in charts.
-- EquatePlus & per-holding currencies (#750, #625): New EquatePlus connector and native currency per holding.
-- Revolut OAuth popup (#289), ING Business (#721), Sparda Hannover (#619) & C24 categories (#763).
-- iOS Fix (#768): Paste Key sheet in Settings -> Security stays open reliably.
-- Performance & UI polish: ListCache (#760), split booking categories (#654), inline Analytics toggle (#757) and sidebar counts (#592).
+- Natural-language booking search, document filters, and postbox filtering by connection (#1056).
+- Redesigned account settings on iOS & macOS; built-in FinTS product registration active out of the box (#1092).
+- Instant transfer `3045` handover handling (#1121), FFB mailbox PDFs (#1105), and FFB depot twin folding (#1103).
+- Trade Republic clearing account adoption (#1114), PayPal foreign-currency bookings (#1110), pending reservation retention (#1111), and ING Business (#974).
+- Advanzia re-add fix (#1115), Ford Money / Opel tax-line matching (#1102), and N26 90-day consent (#1082).

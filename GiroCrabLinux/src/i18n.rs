@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// German → English, Qt placeholders (`%1`, `%2` …).
 const EN_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/en.json"));
@@ -19,7 +19,7 @@ static RELAUNCH: AtomicBool = AtomicBool::new(false);
 
 static QUESTION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-extern "C" {
+unsafe extern "C" {
     fn girocrab_language_choice() -> *const c_char;
     fn girocrab_set_language_choice(choice: *const c_char);
     fn girocrab_system_language() -> *const c_char;
@@ -46,17 +46,17 @@ pub fn english(german: &str) -> Option<&'static str> {
 
 /// A Rust text shown in the UI, in the running language (`%1` … filled by the caller).
 pub fn tr(german: &str) -> String {
-    if ENGLISH.load(Ordering::Relaxed) {
-        if let Some(en) = english(german) {
-            return en.to_string();
-        }
+    if ENGLISH.load(Ordering::Relaxed)
+        && let Some(en) = english(german)
+    {
+        return en.to_string();
     }
     german.to_string()
 }
 
 /// cpp/translator.cpp: English for `german` (UTF-8), null if there is none. The pointer
 /// stays valid for the whole process.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn girocrab_tr(german: *const c_char) -> *const c_char {
     if german.is_null() {
         return std::ptr::null();

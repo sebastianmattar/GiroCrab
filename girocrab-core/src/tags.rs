@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 use crate::dates::now_ms;
 use crate::error::{CoreError, CoreResult};

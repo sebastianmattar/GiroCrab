@@ -13,9 +13,11 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::{SignedDuration, Timestamp};
 
-use super::{http_client, RemoteAccount, RemoteTransaction};
+use super::{RemoteAccount, RemoteTransaction, http_client_same_host};
 use crate::error::{CoreError, CoreResult};
 use crate::models::AccountKind;
 use crate::money::parse_cents;
@@ -68,9 +70,14 @@ const MIN_WINDOW_SECS: i64 = 60;
 
 /// End of the halved window `start..end`, or `None` when it would be shorter
 /// than [`MIN_WINDOW_SECS`].
-fn smaller_window(start: DateTime<Utc>, end: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    let half = (end - start) / 2;
-    (half >= Duration::seconds(MIN_WINDOW_SECS)).then(|| start + half)
+fn smaller_window(start: Timestamp, end: Timestamp) -> Option<Timestamp> {
+    let half = end.duration_since(start) / 2;
+    (half >= SignedDuration::from_secs(MIN_WINDOW_SECS)).then(|| start + half)
+}
+
+/// Start of `day` in UTC.
+fn utc_midnight(day: Date) -> Result<Timestamp, jiff::Error> {
+    day.to_zoned_datetime(TimeZone::UTC).map(|z| z.timestamp())
 }
 
 fn is_truncated(r: &Nvp) -> bool {
@@ -103,7 +110,7 @@ fn error_of(r: &Nvp) -> CoreError {
 impl NvpClient {
     pub fn new(sandbox: bool, creds: NvpCredentials) -> CoreResult<Self> {
         Ok(NvpClient {
-            client: http_client()?,
+            client: http_client_same_host()?,
             endpoint: if sandbox {
                 "https://api-3t.sandbox.paypal.com/nvp".into()
             } else {
@@ -149,17 +156,14 @@ impl NvpClient {
     /// Bookings since `since`, and the `(account ref, id)` of internal entries left out.
     pub async fn transactions(
         &self,
-        since: NaiveDate,
+        since: Date,
     ) -> CoreResult<(Vec<RemoteTransaction>, Vec<(String, String)>)> {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let mut out = Vec::new();
         let mut withdrawn = Vec::new();
-        let mut start = since
-            .and_hms_opt(0, 0, 0)
-            .map(|d| d.and_utc())
-            .unwrap_or(now - Duration::days(90));
+        let mut start = utc_midnight(since).unwrap_or(now - SignedDuration::from_hours(90 * 24));
         while start < now {
-            let mut end = (start + Duration::days(WINDOW_DAYS)).min(now);
+            let mut end = (start + SignedDuration::from_hours(WINDOW_DAYS * 24)).min(now);
             loop {
                 let r = self.search(start, end).await?;
                 // Halve until the window fits. Never keep a truncated answer: the
@@ -180,7 +184,7 @@ impl NvpClient {
                 withdrawn.extend(gone);
                 break;
             }
-            start = end + Duration::seconds(1);
+            start = end + SignedDuration::from_secs(1);
         }
         // Windows touch at the boundary second: drop duplicates.
         let mut seen = std::collections::HashSet::new();
@@ -216,12 +220,9 @@ impl NvpClient {
     /// `TransactionSearch` from `start` until now, each as its fields without the
     /// index suffix (`L_TYPE`, `L_STATUS` …), unfiltered.
     /// `class`: optional `TRANSACTIONCLASS` filter (e.g. `BalanceAffecting`).
-    pub async fn raw_rows(&self, start: NaiveDate, class: Option<&str>) -> CoreResult<Vec<Nvp>> {
-        let from = start
-            .and_hms_opt(0, 0, 0)
-            .map(|d| d.and_utc())
-            .unwrap_or_else(Utc::now);
-        let r = self.search_with(from, Utc::now(), class).await?;
+    pub async fn raw_rows(&self, start: Date, class: Option<&str>) -> CoreResult<Vec<Nvp>> {
+        let from = utc_midnight(start).unwrap_or_else(|_| Timestamp::now());
+        let r = self.search_with(from, Timestamp::now(), class).await?;
         let mut rows = Vec::new();
         for i in 0.. {
             let suffix = i.to_string();
@@ -244,17 +245,17 @@ impl NvpClient {
         Ok(rows)
     }
 
-    async fn search(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> CoreResult<Nvp> {
+    async fn search(&self, start: Timestamp, end: Timestamp) -> CoreResult<Nvp> {
         self.search_with(start, end, None).await
     }
 
     async fn search_with(
         &self,
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
+        start: Timestamp,
+        end: Timestamp,
         class: Option<&str>,
     ) -> CoreResult<Nvp> {
-        let fmt = |d: DateTime<Utc>| d.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let fmt = |d: Timestamp| d.strftime("%Y-%m-%dT%H:%M:%SZ").to_string();
         let mut params = vec![("STARTDATE", fmt(start)), ("ENDDATE", fmt(end))];
         if let Some(c) = class.filter(|c| !c.is_empty()) {
             params.push(("TRANSACTIONCLASS", c.to_string()));
@@ -390,11 +391,7 @@ pub(crate) fn transactions_from_search(r: &Nvp) -> (Vec<RemoteTransaction>, Vec<
         let date: String = get("L_TIMESTAMP").chars().take(10).collect();
         let currency = {
             let c = get("L_CURRENCYCODE");
-            if c.is_empty() {
-                "EUR".into()
-            } else {
-                c
-            }
+            if c.is_empty() { "EUR".into() } else { c }
         };
         let name = get("L_NAME");
         let email = get("L_EMAIL");
@@ -616,10 +613,8 @@ mod tests {
 
     #[test]
     fn a_truncated_window_shrinks_down_to_a_minute_then_fails() {
-        let start = DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut end = start + Duration::days(31);
+        let start: Timestamp = "2026-11-01T00:00:00Z".parse().unwrap();
+        let mut end = start + SignedDuration::from_hours(31 * 24);
         let mut steps = 0;
         while let Some(e) = smaller_window(start, end) {
             assert!(e > start && e < end);
@@ -628,9 +623,12 @@ mod tests {
         }
         // 31 days halve to just over a minute; one more halving would be below it
         assert!(steps > 10, "{steps}");
-        assert!(end - start >= Duration::seconds(MIN_WINDOW_SECS));
-        assert!(end - start < Duration::seconds(2 * MIN_WINDOW_SECS));
-        assert_eq!(smaller_window(start, start + Duration::seconds(119)), None);
+        assert!(end.duration_since(start) >= SignedDuration::from_secs(MIN_WINDOW_SECS));
+        assert!(end.duration_since(start) < SignedDuration::from_secs(2 * MIN_WINDOW_SECS));
+        assert_eq!(
+            smaller_window(start, start + SignedDuration::from_secs(119)),
+            None
+        );
     }
 
     #[test]

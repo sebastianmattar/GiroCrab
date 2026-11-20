@@ -64,8 +64,9 @@ public enum WindowScreenshot {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { capture(to: path, attempt: attempt) }
             return
         }
-        // With a sheet open (e.g. --demo-sync), capture the sheet instead.
-        let target = window.attachedSheet ?? window
+        // With a sheet open (e.g. --demo-sync), capture the sheet instead; the topmost one
+        // when a sheet opened another (`--demo-sheet transfer-recipients`).
+        let target = window.attachedSheet?.attachedSheet ?? window.attachedSheet ?? window
         // GIROCRAB_SCREENSHOT_NATIVE=1: activate the app and let `screencapture`
         // grab the real window, so default buttons and focus look as on screen.
         if ProcessInfo.processInfo.environment["GIROCRAB_SCREENSHOT_NATIVE"] == "1" {

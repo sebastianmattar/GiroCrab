@@ -90,9 +90,7 @@ fn add_in(v: &Vault, account: i64, tag: &str, day: &str, cents: i64, currency: &
 
 /// `days` from today (`-5` = five days ago).
 fn day(offset: i64) -> String {
-    (chrono::Local::now().date_naive() + chrono::Duration::days(offset))
-        .format("%Y-%m-%d")
-        .to_string()
+    crate::dates::iso(crate::dates::today() + crate::dates::days(offset))
 }
 
 fn export(

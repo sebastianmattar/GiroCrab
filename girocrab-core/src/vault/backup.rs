@@ -7,12 +7,13 @@
 use std::time::Duration;
 
 use rusqlite::backup::Backup;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use zeroize::Zeroizing;
 
 use super::Vault;
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;
+use crate::schema::has_table;
 
 /// Shortest password `write_backup` accepts (the macOS dialog requires the same).
 pub(crate) const MIN_BACKUP_PASSWORD_CHARS: usize = 8;
@@ -25,9 +26,34 @@ const DEVICE_SETTINGS_WHERE: &str = "key LIKE 'fints.url.%' OR key LIKE 'fints.t
      OR key LIKE 'pin.%' OR key = 'sync.psd2_auto_hours'";
 
 fn not_a_backup() -> CoreError {
-    CoreError::InvalidInput {
-        message: tr("Falsches Passwort oder keine GiroCrab-Sicherung.").into(),
+    CoreError::invalid(tr("Falsches Passwort oder keine GiroCrab-Sicherung."))
+}
+
+/// The password opened the file, but it is another app's database (which may
+/// also have `accounts` and `transactions` tables).
+fn other_apps_database() -> CoreError {
+    CoreError::invalid(tr(
+        "Diese Datei ist keine GiroCrab-Sicherung, sondern die Datenbank einer anderen App. Zum Übernehmen bitte als Art des Imports diese App wählen.",
+    ))
+}
+
+/// Drops every trigger and view in `schema`. The app defines neither, so any
+/// found came from outside its own code paths (for example a crafted backup) and
+/// could rewrite rows on later writes, such as repointing a FinTS endpoint
+/// after the device-settings carve-out ran.
+pub(crate) fn drop_triggers_and_views(conn: &Connection, schema: &str) -> CoreResult<()> {
+    let objects: Vec<(String, String)> = conn
+        .prepare(&format!(
+            "SELECT type, name FROM {schema}.sqlite_master WHERE type IN ('trigger', 'view')"
+        ))?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (kind, name) in objects {
+        let name = name.replace('"', "\"\"");
+        let kind = if kind == "view" { "VIEW" } else { "TRIGGER" };
+        conn.execute_batch(&format!("DROP {kind} IF EXISTS {schema}.\"{name}\""))?;
     }
+    Ok(())
 }
 
 fn remove_with_sidecars(path: &str) {
@@ -43,17 +69,16 @@ impl Vault {
     pub fn write_backup(&self, dest_path: String, password: String) -> CoreResult<()> {
         let password = Zeroizing::new(password);
         if password.is_empty() {
-            return Err(CoreError::InvalidInput {
-                message: tr("Bitte ein Passwort für die Sicherung angeben.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Bitte ein Passwort für die Sicherung angeben.",
+            )));
         }
         // The backup is only as strong as this password (PBKDF2 over a guessable
         // string is cheap to brute-force), so every front end gets the same floor.
         if password.chars().count() < MIN_BACKUP_PASSWORD_CHARS {
-            return Err(CoreError::InvalidInput {
-                message: tr("Das Passwort für die Sicherung muss mindestens 8 Zeichen lang sein.")
-                    .into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Das Passwort für die Sicherung muss mindestens 8 Zeichen lang sein.",
+            )));
         }
         self.export_to(&dest_path, &password)
     }
@@ -157,22 +182,18 @@ impl Vault {
     /// open vault (SQLite backup API, same key on both sides).
     fn restore_via(&self, staging: &str, backup_path: &str, password: &str) -> CoreResult<()> {
         let tmp = Connection::open(staging)?;
-        Self::apply_key(&tmp, &self.kept_key()?)?;
+        Self::apply_key(&tmp, &self.kept_key())?;
         // wrong password or no database: the attach or the first read fails
         tmp.execute(
             "ATTACH DATABASE ?1 AS bak KEY ?2",
             params![backup_path, password],
         )
         .map_err(|_| not_a_backup())?;
-        let tables: Vec<String> = tmp
-            .prepare("SELECT name FROM bak.sqlite_master WHERE type = 'table'")
-            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
-            .map_err(|_| not_a_backup())?;
-        if !["accounts", "transactions"]
-            .iter()
-            .all(|t| tables.iter().any(|n| n == t))
-        {
-            return Err(not_a_backup());
+        // every GiroCrab vault since the first release has these tables
+        for table in ["accounts", "transactions", "settings", "bank_connections"] {
+            if !has_table(&tmp, "bak", table).map_err(|_| not_a_backup())? {
+                return Err(other_apps_database());
+            }
         }
         let version: i64 = tmp.query_row("PRAGMA bak.user_version", [], |r| r.get(0))?;
         if version > super::SCHEMA_VERSION {
@@ -182,6 +203,8 @@ impl Vault {
             });
         }
         tmp.query_row("SELECT sqlcipher_export('main', 'bak')", [], |_| Ok(()))?;
+        // The export copies the backup's whole schema; only data may come along.
+        drop_triggers_and_views(&tmp, "main")?;
         // Device-owned settings stay as they are on this device.
         let device: Vec<(String, String, i64)> = {
             let live = self.db()?;
@@ -207,7 +230,10 @@ impl Vault {
         tmp.execute_batch("DETACH DATABASE bak")?;
 
         let mut main = self.db()?;
-        Backup::new(&tmp, &mut main)?.run_to_completion(256, Duration::ZERO, None)?;
+        let copied = Backup::new(&tmp, &mut main)?.run_to_completion(256, Duration::ZERO, None);
+        // the pages changed without moving the change count, also when the copy broke off
+        self.data_replaced();
+        copied?;
         Self::migrate(&mut main)?;
         Self::repair(&main);
         Ok(())

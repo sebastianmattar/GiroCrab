@@ -20,6 +20,7 @@ Consorsbank account yet unless the Status table says so.
 | 2 | Consorsbank-specific FinTS fixes (see Gap analysis) | 🟡 security profile + forced HKTAN done 2026-11-14 (both confirmed live); full KTI for BLZ 76030080 only (confirmed live 2026-11-14); typed TAN on fetch open |
 | 3 | Bank entry (name, tint, monogram, preset note, user-ID hint, search words) | ✅ done 2026-11-14 – without a dedicated `ConnectorKind`, see Change log |
 | 4 | README/CONTRIBUTING: move from "Help wanted" to supported | ✅ done 2026-11-14: `BANK_MATRIX` status `Verified`, README matrix regenerated (website `../girocrab.de` still to be synced) |
+| 5 | Online-Archiv (PDF documents) next to FinTS, unofficial interface (#1024) | ✅ 2026-11-18: live login without a browser, app approval and SecurePlus generator TAN, 537 of 537 documents downloaded and assigned |
 
 ---
 
@@ -34,7 +35,8 @@ three machine interfaces. Only one is usable for a local personal-finance app:
 | PSD2 XS2A (`xs2a.consorsbank.de`, NextGenPSD2, redirect SCA) | No | Requires a licensed TPP. Enable Banking coverage of Consorsbank could not be confirmed (bank list is JS-rendered). No depot data in any case. |
 | Trading API (REST/HAL, OAuth 2.0 FAPI, `api.consorsbank.de/trading/v1`) | No | Client registration with Consorsbank (certificate, signing key, redirect URI), mutual TLS on every token call, partner onboarding via `api-support@consorsbank.de`. Exposes depot positions, per-WKN position history, orders/executions, but **no cash-account bookings**. |
 | ActiveTrader gRPC API (protobuf, `Dokumentation Java.zip`) | No | Separate product for the ActiveTrader desktop application; login by shared secret; trading-oriented. |
-| Web scraping | No | Not acceptable for GiroCrab; the bank's login now uses multi-factor authentication. |
+| Web scraping (HTML) | No | Not acceptable for GiroCrab; the bank's login now uses multi-factor authentication. |
+| Portal JSON API (Online-Archiv) | Documents only, **unofficial** (#1024) | Login with the FinTS login's account number and PIN, approval in the Consorsbank app. See "Online-Archiv" below. |
 
 **Decision:** Consorsbank = FinTS. No new connector module. The work is a live
 test of the existing FinTS connector plus bank-specific fixes and a proper
@@ -146,6 +148,56 @@ the typed-TAN-on-fetch case.
 
 ---
 
+## Online-Archiv (unofficial, #1024)
+
+FinTS has no statements at this bank (no HKEKA/HKEKP/HKKAU in the BPD). The PDFs
+(statements, trade confirmations, depot statements, tax documents) are only in the
+portal's Online-Archiv. `connectors/consorsbank_archive.rs` fetches them next to a
+FinTS login, through the same wrapper as the comdirect PostBox
+(`comdirect_postbox::FintsWithPostbox`, #838): switch "Online-Archiv abrufen" in the
+connection, at most once a week during a manual sync, plus "Online-Archiv jetzt
+abrufen". It never creates accounts or bookings; a failure only skips the documents.
+
+The interface is the portal's internal JSON API, observed in the browser (not
+documented by the bank, may change at any time):
+
+| Step | Request |
+| --- | --- |
+| CSRF token | `GET /web/System/Sicherheit/Login`, JSON in `#modernWebXsrfToken`, sent as header `wemocsrf` |
+| Login | `POST /web-sec-service/api/auth` `{"username", "nip"}`: account number (FinTS user ID without `001`, no leading zeros) and PIN |
+| Approval method | `GET /web-sec-service/api/authorizationmethod/interim`: `authorizationMethod` `sp` = Consorsbank app (also for logins that use the SecurePlus generator) |
+| App approval | `POST /web-sec-service/api/auth/2ndphase/createasync` → `txId`; `POST …/2ndphase/asyncstatus` `{"txId"}` until `TX_EXEC_SUCCESS` |
+| Typed TAN | `GET …/authorizationmethod/interim?qrValidation=true` (QR code if the bank sends one; none seen so far), then `POST /web-sec-service/api/auth/2ndphase` `{"authenticationToken": "<TAN>"}` |
+| Session check | `GET /web-sec-service/api/user/sessiontime` (`sessionTrustLevel: STRONG`) |
+| Owners and accounts | `GET /web-sec-service/api/user/info` (`crmCustomerNo`), `GET /web-sec-service/api/user/accounts` (`backendOwnerNumber`, accounts `KTO`/`DEP`) |
+| Document list | `GET /web-document-service/api/users/{crm}/documents/account-documents/v1` per clearing account (`pageSize` 10–50) |
+| Download | `GET …/documents/downloads/v1?backendOwnerNumber=…&documents={docId}` (without `redirectOnError`, so errors are JSON) |
+| Logout | `POST /web-sec-service/api/logout` |
+
+Findings that shape the code:
+
+- `docId` is an encrypted token that changes with every listing; every download of a
+  document has different bytes (new PDF `/ID`). The stable key is the number in the
+  bank's file name (`…_id<n>.pdf`), stored as `source_url = consorsbank:archive:<n>`.
+- Every download marks the document read at the bank, and there is no way around it.
+  Documents already stored for the login (by `source_url`, or by the `_id` in the file
+  name, e.g. after a database import that kept the bank's file names) are therefore
+  skipped before downloading.
+- Only the clearing account (`KTO`) has a document list; with the depot number the bank
+  answers 400. Depot documents carry the clearing account's number and go to the
+  owner's depot by document type (or ISIN/WKN). Owner-level documents (`accountno` 0:
+  tax certificates, terms) go to the owner's clearing account; they are listed for every
+  owner and stored once.
+- The approval starts like the bank's page: in the app for method `sp`. As on the page,
+  the dialog offers "Manuell mit TAN bestätigen" (TAN from the SecurePlus generator or
+  the app) and back "Mit Consorsbank App bestätigen". The links send the words `TAN` /
+  `APP` instead of a code (like Trade Republic's "SMS"); a TAN was accepted without a
+  running app approval.
+- Requests from a plain HTTP client (GiroCrab's own user agent) got the same answers
+  as the browser for the GET calls. The portal sets Akamai cookies; GiroCrab does not
+  try to get around any bot protection: if the bank refuses the login, the archive is
+  not fetched.
+
 ## Open questions
 
 | # | Question | How to answer |
@@ -197,3 +249,10 @@ the typed-TAN-on-fetch case.
   with `scripts/sync_docs.py`).
 - Still open: login with a typed app TAN (`0030`) and transfers have not been exercised
   live; today every login was SCA-exempt (`3076`).
+- 2026-11-18: Online-Archiv next to FinTS (#1024), see the section above. Portal API
+  explored in the browser on 2026-11-15 and 2026-11-18 (two owners, 557 listed / 537
+  distinct documents since 2007).
+- 2026-11-18: Live test of the Online-Archiv: login without a browser accepted (`auth`
+  200), app approval and typed TAN (SecurePlus generator) both work, 537 of 537 documents
+  downloaded and assigned to an account, a second fetch lists only the last week and
+  downloads nothing known.

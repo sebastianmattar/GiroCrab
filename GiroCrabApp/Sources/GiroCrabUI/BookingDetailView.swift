@@ -7,6 +7,7 @@ struct InspectorView: View {
     /// Order and hidden cards (#448), see `InspectorLayout`.
     @AppStorage(InspectorLayout.defaultsKey) private var layoutValue = ""
     @State private var editingLayout = LaunchOptions.current.inspectorEdit
+    @State private var revealedNoteBookingID: Booking.ID?
 
     private var layout: InspectorLayout { InspectorLayout(storageValue: layoutValue) }
 
@@ -25,40 +26,63 @@ struct InspectorView: View {
                     updateLayout { $0 = .standard }
                 }
             }
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if model.mainColumn == .planned {
-                    PlannedInspector()
-                } else if model.mainColumn == .directDebits {
-                    MandateInspector()
-                } else {
-                SelectedLoanCard()
-                if model.isMultiSelection {
-                    MultiSelectionCard()
-                } else if let b = model.selectedBooking {
-                    if editingLayout {
-                        InspectorLayoutEditor(booking: b, layout: layout, update: updateLayout)
-                    } else {
-                        ForEach(layout.visible) { section in
-                            InspectorSectionCard(section: section, booking: b)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if model.mainColumn == .planned {
+                            PlannedInspector()
+                        } else if model.mainColumn == .directDebits {
+                            MandateInspector()
+                        } else {
+                            SelectedLoanCard()
+                            if model.isMultiSelection {
+                                MultiSelectionCard()
+                            } else if let booking = model.selectedBooking {
+                                if editingLayout {
+                                    InspectorLayoutEditor(booking: booking, layout: layout, update: updateLayout)
+                                } else {
+                                    ForEach(visibleSections(for: booking)) { section in
+                                        InspectorSectionCard(section: section, booking: booking) {
+                                            proxy.scrollTo(InspectorSection.note.id)
+                                        }
+                                        .id(section.id)
+                                    }
+                                }
+                            } else {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label("Keine Buchung ausgewählt", systemImage: "doc.text.magnifyingglass")
+                                        .appFont(.headline)
+                                    Text("Wählen Sie eine Buchung, um Beleg, Händler-Historie und Kategorie zu sehen.")
+                                        .appFont(.callout).foregroundStyle(Theme.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .card()
+                            }
                         }
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Keine Buchung ausgewählt", systemImage: "doc.text.magnifyingglass")
-                            .appFont(.headline)
-                        Text("Wählen Sie eine Buchung, um Beleg, Händler-Historie und Kategorie zu sehen.")
-                            .appFont(.callout).foregroundStyle(Theme.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .card()
+                    .padding(16)
                 }
+                .onChange(of: model.pendingNoteFocus, initial: true) { _, requestedID in
+                    guard let requestedID, requestedID == model.selectedBookingID else { return }
+                    editingLayout = false
+                    if layout.hidden.contains(.note) { revealedNoteBookingID = requestedID }
+                }
+                .onChange(of: model.selectedBookingID) { _, selectedID in
+                    if revealedNoteBookingID != selectedID { revealedNoteBookingID = nil }
+                }
+                .onChange(of: editingLayout) { _, editing in
+                    if editing { revealedNoteBookingID = nil }
                 }
             }
-            .padding(16)
-        }
         }
         .background(Theme.canvas)
+    }
+
+    private func visibleSections(for booking: Booking) -> [InspectorSection] {
+        if revealedNoteBookingID == booking.id, layout.hidden.contains(.note) {
+            return layout.visible + [.note]
+        }
+        return layout.visible
     }
 
     /// The single-booking cards are shown, so their layout can be edited.
@@ -74,7 +98,7 @@ private struct SelectedLoanCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if case .account(let id) = model.sidebarSelection, let a = model.account(for: id), a.kind == .loan {
+        if case .account(let id) = model.shownSelection, let a = model.account(for: id), a.kind == .loan {
             LoanProgressCard(account: a)
         }
     }
@@ -145,7 +169,7 @@ struct ReceiptCard: View {
                 }
                 Spacer()
             }
-            Text(Money.signed(booking.amountCents))
+            Text(Money.signed(booking.amountCents, currency: booking.currency))
                 .sensitive(.amounts)
                 .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit())
                 .foregroundStyle(Money.ink(booking.amountCents))
@@ -233,6 +257,7 @@ struct ReceiptCard: View {
 struct NoteCard: View {
     @Environment(AppModel.self) private var model
     let booking: Booking
+    var scrollToNote: (() -> Void)?
     @State private var draft = ""
     /// The booking `draft` was started from. The inspector reuses the card for the next selected
     /// booking (no `.id`: rebuilding the text editor on every selection was a large part of the
@@ -298,10 +323,19 @@ struct NoteCard: View {
 
     /// Takes the focus requested by a double-click / Return in the list for this booking.
     private func claimFocus() {
-        guard model.pendingNoteFocus == booking.id else { return }
-        model.pendingNoteFocus = nil
-        // deferred: focus on a just-appeared TextEditor is otherwise dropped
-        DispatchQueue.main.async { focused = true }
+        // The layout editor shows a preview of the card and must leave the request for
+        // the editable card. Give a newly revealed inspector one layout pass before scrolling.
+        guard let scrollToNote, model.pendingNoteFocus == booking.id else { return }
+        DispatchQueue.main.async {
+            guard model.pendingNoteFocus == booking.id else { return }
+            guard model.selectedBookingID == booking.id else {
+                model.pendingNoteFocus = nil
+                return
+            }
+            scrollToNote()
+            model.pendingNoteFocus = nil
+            focused = true
+        }
     }
 
     private func save() {
@@ -802,17 +836,31 @@ struct RawDataCard: View {
 struct MultiSelectionCard: View {
     @Environment(AppModel.self) private var model
 
+    private static func code(_ b: Booking) -> String { b.currency.isEmpty ? "EUR" : b.currency.uppercased() }
+
     var body: some View {
         let many = model.selectedBookings
         let income = many.filter { $0.amountCents > 0 }.reduce(Int64(0)) { $0 + $1.amountCents }
         let expense = many.filter { $0.amountCents < 0 }.reduce(Int64(0)) { $0 + $1.amountCents }
+        let currencies = Array(Set(many.map(Self.code))).sorted()
+        let currency = currencies.first ?? "EUR"
         VStack(alignment: .leading, spacing: 12) {
             Label("\(many.count) Buchungen ausgewählt", systemImage: "checkmark.circle")
                 .appFont(.headline)
             VStack(alignment: .leading, spacing: 4) {
-                LabeledContent("Summe") { Text(Money.format(income + expense)).sensitive(.amounts) }
-                if income != 0 { LabeledContent("Einnahmen") { Text(Money.format(income)).sensitive(.amounts) } }
-                if expense != 0 { LabeledContent("Ausgaben") { Text(Money.format(expense)).sensitive(.amounts) } }
+                if currencies.count > 1 {
+                    // Never one number over several currencies (#569): one sum per currency.
+                    ForEach(currencies, id: \.self) { code in
+                        LabeledContent("Summe \(code)") {
+                            Text(Money.format(many.filter { Self.code($0) == code }.reduce(Int64(0)) { $0 + $1.amountCents }, currency: code))
+                                .sensitive(.amounts)
+                        }
+                    }
+                } else {
+                    LabeledContent("Summe") { Text(Money.format(income + expense, currency: currency)).sensitive(.amounts) }
+                    if income != 0 { LabeledContent("Einnahmen") { Text(Money.format(income, currency: currency)).sensitive(.amounts) } }
+                    if expense != 0 { LabeledContent("Ausgaben") { Text(Money.format(expense, currency: currency)).sensitive(.amounts) } }
+                }
             }
             .appFont(.callout, monospacedDigit: true)
             MultiSelectionTags(bookings: many)

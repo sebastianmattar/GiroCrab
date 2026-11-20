@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{Connection, params, params_from_iter};
 
-use super::{Vault, LIVE_BOOKINGS_SQL};
+use super::{LIVE_BOOKINGS_SQL, Vault};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;
 use crate::models::*;
@@ -137,16 +137,28 @@ impl Vault {
         } else {
             ""
         };
+        // A split booking's categories are its splits' (#654, #877): rules give it
+        // none, and drop the one they gave it before it was split.
+        let mut changed: HashSet<i64> = conn
+            .prepare(&format!(
+                "UPDATE transactions AS t SET category_id = NULL, rule_id = NULL, category_source = 'none'
+                  WHERE t.id IN (SELECT transaction_id FROM transaction_splits)
+                    AND t.category_source = 'rule' AND t.deleted_ms IS NULL
+                    AND t.account_id IN (SELECT id FROM accounts WHERE archived_unix IS NULL AND deleted_ms IS NULL){ids_sql}
+                  RETURNING id"
+            ))?
+            .query_map(params_from_iter(ids_json.iter()), |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         let mut stmt = conn.prepare(&format!(
             "SELECT {}
              FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id
-             WHERE a.archived_unix IS NULL AND a.deleted_ms IS NULL AND t.deleted_ms IS NULL AND {source_sql}{ids_sql}",
+             WHERE a.archived_unix IS NULL AND a.deleted_ms IS NULL AND t.deleted_ms IS NULL AND {source_sql}{ids_sql}
+               AND NOT EXISTS (SELECT 1 FROM transaction_splits sp WHERE sp.transaction_id = t.id)",
             RuleRow::COLUMNS
         ))?;
         let rows: Vec<RuleRow> = stmt
             .query_map(params_from_iter(ids_json), RuleRow::read)?
             .collect::<Result<_, _>>()?;
-        let mut changed = HashSet::new();
         let mut upd_rule = conn.prepare("UPDATE transactions SET category_id = ?1, rule_id = ?2, category_source = 'rule' WHERE id = ?3")?;
         let mut upd_none = conn.prepare("UPDATE transactions SET category_id = NULL, rule_id = NULL, category_source = 'none' WHERE id = ?1")?;
         for row in rows {
@@ -178,17 +190,14 @@ impl Vault {
 
     /// Creates (id == 0) or updates a rule. Validates the pattern first.
     pub fn save_rule(&self, rule: Rule) -> Result<i64, CoreError> {
-        if rule.pattern.len() > crate::rules::MAX_PATTERN_LEN {
-            return Err(CoreError::invalid(tr("Das Suchmuster ist zu lang.")));
-        }
-        crate::rules::CompiledRule::compile(rule.clone())?;
+        let rule = crate::rules::CompiledRule::compile_supported(rule)?.rule;
         if rule.pattern.trim().is_empty() {
             return Err(CoreError::invalid(tr("Das Suchmuster ist leer.")));
         }
         if rule.category_id == 0 && rule.tag_ids.is_empty() {
-            return Err(CoreError::InvalidInput {
-                message: tr("Die Regel braucht eine Kategorie oder mindestens einen Tag.").into(),
-            });
+            return Err(CoreError::invalid(tr(
+                "Die Regel braucht eine Kategorie oder mindestens einen Tag.",
+            )));
         }
         let db = self.db()?;
         let tag_uuids = crate::tags::rule_tag_uuids(&db, &rule.tag_ids)?;
@@ -197,11 +206,7 @@ impl Vault {
         let kind = match rule.match_kind {
             MatchKind::Keyword => "keyword",
             MatchKind::Regex => "regex",
-            MatchKind::Expression => {
-                // `compile` keeps unsupported fields for imported rules; a saved rule may not use them.
-                crate::search_expr::SearchExpr::parse_supported(&rule.pattern)?;
-                "expression"
-            }
+            MatchKind::Expression => "expression",
         };
         if rule.id == 0 {
             db.execute(
@@ -422,6 +427,114 @@ mod expression_rule_tests {
         });
         assert!(err.is_err(), "unsupported field can't be saved");
         let _ = std::fs::remove_file(p);
+    }
+}
+
+#[cfg(test)]
+mod split_rule_tests {
+    use super::*;
+
+    /// A split booking's categories are its splits' (#877): rules leave it
+    /// without one of its own, also when they categorised it before the split.
+    #[test]
+    fn rules_leave_split_bookings_without_category() {
+        let dir = crate::test_support::TempDir::new("girocrab-split-rules");
+        let v = Vault::open(
+            dir.join("v.db").to_string_lossy().to_string(),
+            vec![5u8; 32],
+        )
+        .unwrap();
+        let (cat, ids) = {
+            let c = v.db().unwrap();
+            c.execute("INSERT INTO account_groups(name) VALUES ('G')", [])
+                .unwrap();
+            c.execute(
+                "INSERT INTO accounts(group_id, external_ref, name) VALUES ((SELECT id FROM account_groups), 'A1', 'Konto')",
+                [],
+            )
+            .unwrap();
+            c.execute("INSERT INTO categories(name) VALUES ('Lebensmittel')", [])
+                .unwrap();
+            let mut ids = Vec::new();
+            for ext in ["T1", "T2"] {
+                c.execute(
+                    "INSERT INTO transactions(account_id, external_id, booking_date, amount_cents, counterparty) \
+                     VALUES ((SELECT id FROM accounts), ?1, '2026-01-02', -2350, 'REWE Markt')",
+                    [ext],
+                )
+                .unwrap();
+                ids.push(c.last_insert_rowid());
+            }
+            let cat = c
+                .query_row(
+                    "SELECT id FROM categories WHERE name = 'Lebensmittel'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap();
+            (cat, ids)
+        };
+        let split = |id: i64| {
+            v.set_transaction_splits(
+                id,
+                vec![
+                    TransactionSplitInput {
+                        category_id: Some(cat),
+                        amount_cents: -2000,
+                        note: String::new(),
+                    },
+                    TransactionSplitInput {
+                        category_id: None,
+                        amount_cents: -350,
+                        note: String::new(),
+                    },
+                ],
+            )
+            .unwrap()
+        };
+        let source = |id: i64| -> (Option<i64>, String) {
+            v.db()
+                .unwrap()
+                .query_row(
+                    "SELECT category_id, category_source FROM transactions WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap()
+        };
+        split(ids[0]);
+        v.save_rule(Rule {
+            id: 0,
+            name: "REWE".into(),
+            category_id: cat,
+            field: RuleField::Any,
+            match_kind: MatchKind::Keyword,
+            pattern: "REWE".into(),
+            case_sensitive: false,
+            min_amount_cents: None,
+            max_amount_cents: None,
+            account_ids: Vec::new(),
+            priority: 0,
+            enabled: true,
+            match_count: 0,
+            tag_ids: Vec::new(),
+        })
+        .unwrap();
+        v.apply_rules(false).unwrap();
+        assert_eq!(
+            source(ids[0]),
+            (None, "none".into()),
+            "split before the rule"
+        );
+        assert_eq!(source(ids[1]), (Some(cat), "rule".into()));
+        // split after the rule categorised it: the next run takes the category off
+        split(ids[1]);
+        v.apply_rules(true).unwrap();
+        assert_eq!(
+            source(ids[1]),
+            (None, "none".into()),
+            "split after the rule"
+        );
     }
 }
 

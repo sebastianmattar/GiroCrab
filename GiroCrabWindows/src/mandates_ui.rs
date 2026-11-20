@@ -8,15 +8,15 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use girocrab_core::Vault;
 use girocrab_core::batch_csv::parse_batch_csv;
 use girocrab_core::mandates::{
-    parse_mandate_csv, DebitFile, Mandate, MandateBooking, MandateCsvRow,
+    DebitFile, Mandate, MandateBooking, MandateCsvRow, parse_mandate_csv,
 };
-use girocrab_core::Vault;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::mandates_view::{self as view, Form, Line, Pick};
-use crate::{german_date, money, privacy_on, MainWindow, MandatesState, MdRow};
+use crate::{MainWindow, MandatesState, MdRow, german_date, money, privacy_on};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 
@@ -931,10 +931,10 @@ fn wire_returns(win: &MainWindow) {
 
     let weak = win.as_weak();
     gs.on_returns_refresh(move || {
-        if let (Some(win), Some(v)) = (weak.upgrade(), vault_now()) {
-            if !blocked(&win) {
-                load(&win, &v, String::new());
-            }
+        if let (Some(win), Some(v)) = (weak.upgrade(), vault_now())
+            && !blocked(&win)
+        {
+            load(&win, &v, String::new());
         }
     });
 }

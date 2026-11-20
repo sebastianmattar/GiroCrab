@@ -70,8 +70,11 @@ impl IbkrConnector {
         if let Some(c) = &self.client {
             return Ok(c.clone());
         }
+        // The Flex token is in the query: no redirect to another origin, no Referer.
         let c = super::client_builder(Duration::from_secs(60))
             .connect_timeout(CONNECT_TIMEOUT)
+            .redirect(super::same_host_redirects())
+            .referer(false)
             .build()
             .map_err(net_err)?;
         Ok(self.client.insert(c).clone())
@@ -1015,6 +1018,12 @@ fn build_fetch(xml: &str, since: &str) -> CoreResult<FetchResult> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn token_client_does_not_follow_redirects_to_another_origin() {
+        let client = IbkrConnector::new().client().unwrap();
+        crate::connectors::tests::redirects::assert_no_cross_origin_replay(&client).await;
+    }
+
     const OK_SEND: &str = r#"<FlexStatementResponse timestamp='13 November, 2026 10:00 AM EST'>
 <Status>Success</Status>
 <ReferenceCode>1234567890</ReferenceCode>
@@ -1241,14 +1250,16 @@ mod tests {
         assert_eq!(dividend.value_cents, 63);
         assert_eq!(by_id("9101").transaction.direction, SecurityDirection::Tax);
         // FX trade, ORDER-level trade, deposits and interest are no securities transactions
-        assert!(r
-            .security_transactions
-            .iter()
-            .all(|t| t.external_id != "ibkr:U1234567:9002"));
-        assert!(r
-            .security_transactions
-            .iter()
-            .all(|t| t.external_id != "ibkr:U1234567:9102"));
+        assert!(
+            r.security_transactions
+                .iter()
+                .all(|t| t.external_id != "ibkr:U1234567:9002")
+        );
+        assert!(
+            r.security_transactions
+                .iter()
+                .all(|t| t.external_id != "ibkr:U1234567:9102")
+        );
         assert_eq!(r.security_transactions.len(), 4); // buy, 2 dividends, withholding tax
     }
 
@@ -1272,10 +1283,11 @@ mod tests {
     #[test]
     fn since_filters_old_bookings() {
         let r = build_fetch(FLEX, "2026-11-01").unwrap();
-        assert!(r
-            .transactions
-            .iter()
-            .all(|t| t.booking_date.as_str() >= "2026-11-01"));
+        assert!(
+            r.transactions
+                .iter()
+                .all(|t| t.booking_date.as_str() >= "2026-11-01")
+        );
         assert_eq!(r.transactions.len(), 4);
     }
 
@@ -1339,10 +1351,8 @@ mod tests {
             connection_id: 1,
             login_name: token.into(),
             secret: crate::secret::SecretString::new(query.into()),
-            settings: HashMap::new(),
-            state: serde_json::Value::Null,
             since: "2026-01-01".into(),
-            since_by_account: HashMap::new(),
+            ..Default::default()
         }
     }
 

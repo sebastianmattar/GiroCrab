@@ -28,7 +28,7 @@ final class ArchivedSectionsHiddenTests: XCTestCase {
     }
 
     private static func clearDefaults() {
-        for k in defaultsKeys { UserDefaults.standard.removeObject(forKey: k) }
+        for k in defaultsKeys { AppDefaults.store.removeObject(forKey: k) }
     }
 
     // MARK: helpers

@@ -63,17 +63,13 @@ pub fn normalize_mode(mode: &str) -> &'static str {
 }
 
 fn pick(mode: &str, own: &str, builtin: Option<String>) -> Option<(Source, String)> {
-    let own = own.trim();
-    let own = (!own.is_empty()).then(|| (Source::Own, own.to_string()));
-    let builtin = builtin.map(|b| (Source::Builtin, b));
-    match normalize_mode(mode) {
-        // Mode `own` without a value (e.g. the user picked it but never saved an ID) must not
-        // dead-end: GiroCrab's registration is the fallback, the own one stays preferred.
-        "own" => own.or(builtin),
-        "builtin" => builtin.or(own),
-        // Not decided yet: existing users keep working with what they have.
-        _ => own.or(builtin),
+    let _ = mode;
+    if let Some(b) = builtin {
+        // Official builds with an embedded registration always use it (#1092).
+        return Some((Source::Builtin, b));
     }
+    let own = own.trim();
+    (!own.is_empty()).then(|| (Source::Own, own.to_string()))
 }
 
 /// Developer override: `GIROCRAB_FINTS_PRODUCT_ID_OVERRIDE` at run time acts as
@@ -106,55 +102,23 @@ mod tests {
     }
 
     #[test]
-    fn builtin_mode_prefers_builtin_but_falls_back_to_own() {
-        assert_eq!(pick("builtin", "OWN", b()).unwrap().0, Source::Builtin);
-        assert_eq!(pick("builtin", "OWN", None).unwrap().0, Source::Own);
-    }
-
-    #[test]
-    fn own_mode_prefers_own_and_falls_back_to_builtin_when_empty() {
-        assert_eq!(pick("own", "OWN", b()).unwrap().1, "OWN");
-        // "own" without a value must not dead-end: GiroCrab's registration takes over.
-        assert_eq!(pick("own", "  ", b()).unwrap().0, Source::Builtin);
-        assert!(pick("own", "  ", None).is_none());
-    }
-
-    #[test]
-    fn full_matrix_mode_own_builtin() {
-        let modes = ["", "builtin", "own", "garbage"];
-        for mode in modes {
+    fn builtin_always_wins_when_embedded() {
+        for mode in ["", "builtin", "own", "garbage"] {
             for own in ["", "  ", "OWN"] {
-                for builtin in [None, b()] {
-                    let has_own = !own.trim().is_empty();
-                    let got = pick(mode, own, builtin.clone());
-                    // Something exists -> there is always a result; nothing exists -> None.
-                    assert_eq!(
-                        got.is_some(),
-                        has_own || builtin.is_some(),
-                        "mode={mode:?} own={own:?} builtin={builtin:?}"
-                    );
-                    let Some((src, id)) = got else { continue };
-                    match (normalize_mode(mode), has_own, builtin.is_some()) {
-                        ("builtin", _, true) => assert_eq!(src, Source::Builtin),
-                        ("", true, _) | ("own", true, _) => assert_eq!(src, Source::Own),
-                        ("", false, true) | ("own", false, true) => {
-                            assert_eq!(src, Source::Builtin)
-                        }
-                        ("builtin", true, false) => assert_eq!(src, Source::Own),
-                        other => panic!("unexpected case {other:?}"),
-                    }
-                    assert_eq!(id, if src == Source::Own { "OWN" } else { "BUILTIN" });
-                }
+                assert_eq!(
+                    pick(mode, own, b()),
+                    Some((Source::Builtin, "BUILTIN".into()))
+                );
             }
         }
     }
 
     #[test]
-    fn undecided_keeps_existing_own_id_working() {
-        assert_eq!(pick("", "OWN", b()).unwrap().0, Source::Own);
-        assert_eq!(pick("", "", b()).unwrap().0, Source::Builtin);
-        assert_eq!(pick("garbage", "", b()).unwrap().0, Source::Builtin);
-        assert!(pick("", "", None).is_none());
+    fn custom_builds_without_builtin_use_own_id() {
+        for mode in ["", "builtin", "own", "garbage"] {
+            assert_eq!(pick(mode, "OWN", None), Some((Source::Own, "OWN".into())));
+            assert_eq!(pick(mode, "  ", None), None);
+        }
     }
 
     #[test]
@@ -170,37 +134,19 @@ mod tests {
         let none = if builtin_available() { "builtin" } else { "" };
         assert_eq!(v.fints_product_id_source().unwrap(), none);
         v.set_setting(OWN_KEY.into(), "OWNID".into()).unwrap();
-        assert_eq!(v.fints_product_id_source().unwrap(), "own");
-        v.set_fints_product_id_mode("builtin".into()).unwrap();
-        assert_eq!(v.fints_product_id_mode().unwrap(), "builtin");
-        // Own ID survives the switch; without an embedded ID it stays the fallback.
-        assert_eq!(
-            v.get_setting(OWN_KEY.into()).unwrap().as_deref(),
-            Some("OWNID")
-        );
         let expect = if builtin_available() {
             "builtin"
         } else {
             "own"
         };
         assert_eq!(v.fints_product_id_source().unwrap(), expect);
+        v.set_fints_product_id_mode("builtin".into()).unwrap();
+        assert_eq!(v.fints_product_id_mode().unwrap(), "builtin");
+        assert_eq!(
+            v.get_setting(OWN_KEY.into()).unwrap().as_deref(),
+            Some("OWNID")
+        );
         v.set_fints_product_id_mode("nonsense".into()).unwrap();
         assert_eq!(v.fints_product_id_mode().unwrap(), "");
-    }
-
-    #[test]
-    fn unmasking_round_trips() {
-        let plain = b"ABC123-xyz";
-        let masked: Vec<u8> = plain
-            .iter()
-            .enumerate()
-            .map(|(i, b)| b ^ MASK[i % MASK.len()] ^ (i as u8))
-            .collect();
-        let back: Vec<u8> = masked
-            .iter()
-            .enumerate()
-            .map(|(i, b)| b ^ MASK[i % MASK.len()] ^ (i as u8))
-            .collect();
-        assert_eq!(back, plain);
     }
 }

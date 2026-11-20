@@ -164,7 +164,7 @@ Sheet {
                 spacing: 2
                 Text { text: qsTr("Summe"); font.pixelSize: Theme.caption; color: Theme.secondary }
                 Text { text: Fmt.money(Payments.batchTotalCents); font.pixelSize: Theme.title; font.weight: Font.DemiBold
-                       font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                       font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
             }
             Rectangle { width: 1; Layout.preferredHeight: 40; color: Theme.border }
             ColumnLayout {
@@ -271,7 +271,7 @@ Sheet {
                         Mark { visible: rowItem.model.cents <= 0; symbol: "exclamationmark.triangle.fill"; tip: qsTr("Betrag > 0 eingeben") }
                         Cell {
                             Layout.fillWidth: true
-                            text: rowItem.model.amountText; placeholderText: "0,00"
+                            text: rowItem.model.amountText; placeholderText: "0,00"; amounts: true
                             horizontalAlignment: TextInput.AlignRight
                             font.features: { "tnum": 1 }
                             onTextEdited: Payments.updateBatchRow(rowItem.index, { amountText: text })
@@ -289,7 +289,7 @@ Sheet {
                     // review cells
                     Value { visible: sheet.reviewing; Layout.preferredWidth: sheet.nameWidth; text: rowItem.model.name }
                     Value { visible: sheet.reviewing; Layout.preferredWidth: sheet.ibanWidth; text: rowItem.model.iban; font.family: "monospace" }
-                    Value { visible: sheet.reviewing; Layout.preferredWidth: sheet.amountWidth; text: Fmt.money(rowItem.model.cents)
+                    Value { visible: sheet.reviewing; Layout.preferredWidth: sheet.amountWidth; text: Fmt.money(rowItem.model.cents); amounts: true
                             horizontalAlignment: Text.AlignRight; font.features: { "tnum": 1 } }
                     Value { visible: sheet.reviewing; Layout.fillWidth: true; text: rowItem.model.purpose }
                 }
@@ -326,7 +326,7 @@ Sheet {
             }
             Text { text: qsTr("%1 Zahlungen · %2").arg(Payments.batchRows.count).arg(qsTr("Summe")); font.pixelSize: Theme.callout; color: Theme.secondary }
             Text { text: Fmt.money(Payments.batchTotalCents); font.pixelSize: Theme.title3; font.weight: Font.DemiBold
-                   font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                   font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
         }
 
         // review footer: PIN, then the warning
@@ -438,17 +438,20 @@ Sheet {
         elide: Text.ElideRight
     }
     component Cell: TextField {
+        /// the amount column: `.sensitive(.amounts)`
+        property bool amounts: false
         font.pixelSize: Theme.body
         selectByMouse: true
         // a long purpose shows its start, not its end, while not being edited
         Component.onCompleted: cursorPosition = 0
         onEditingFinished: cursorPosition = 0
-        Sensitive {}
+        Sensitive { amounts: parent.amounts }
     }
     component Value: Text {
+        property bool amounts: false
         font.pixelSize: Theme.body; color: Theme.text
         elide: Text.ElideRight
-        Sensitive {}
+        Sensitive { amounts: parent.amounts }
     }
     component Mark: SFIcon {
         property string tip

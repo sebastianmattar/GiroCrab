@@ -13,12 +13,11 @@
 
 use std::sync::{Arc, LazyLock};
 
-use chrono::NaiveDate;
 use regex::Regex;
 use serde::Deserialize;
 
 use super::portal_import::parse_amount;
-use crate::connectors::{store_fetch, FetchResult, RemoteAccount, RemoteTransaction, SyncSummary};
+use crate::connectors::{FetchResult, RemoteAccount, RemoteTransaction, SyncSummary, store_fetch};
 use crate::dates::{find_de_date, iso, month_from_name};
 use crate::error::CoreError;
 use crate::i18n::tr;
@@ -100,7 +99,7 @@ pub fn parse_date(s: &str) -> Option<String> {
         .collect();
     let year = *nums.iter().find(|n| **n >= 1990)?;
     let day = *nums.iter().find(|n| (1..=31).contains(*n))?;
-    NaiveDate::from_ymd_opt(i32::try_from(year).ok()?, month, day).map(iso)
+    crate::dates::ymd(i32::try_from(year).ok()?, month, day).map(iso)
 }
 
 /// First price found in free text ("EUR 12,99", "12,99 €", "Gesamt: 1.234,56 €").
@@ -165,11 +164,7 @@ fn item_refs(o: &Order) -> String {
         .filter(|i| !i.title.trim().is_empty())
         .map(|i| {
             let a = i.asin.trim();
-            if is_asin(a) {
-                a
-            } else {
-                ""
-            }
+            if is_asin(a) { a } else { "" }
         })
         .collect();
     if refs.iter().all(|a| a.is_empty()) {

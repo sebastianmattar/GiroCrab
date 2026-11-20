@@ -16,8 +16,8 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use jiff::civil::Date;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::CoreResult;
 
@@ -215,13 +215,13 @@ pub(crate) struct Series {
 pub(crate) fn series(
     conn: &Connection,
     ids: &[i64],
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
 ) -> CoreResult<Option<Series>> {
     if ids.is_empty() || end < start {
         return Ok(None);
     }
-    let days = (end - start).num_days() as usize + 1;
+    let days = crate::dates::days_between(start, end) as usize + 1;
     let mut total = vec![0_i64; days];
     let mut covered_days = vec![0_u32; days];
     let mut firsts = Vec::new();
@@ -233,7 +233,13 @@ pub(crate) fn series(
                   CASE quality WHEN 'observed' THEN 0 WHEN 'reconstructed' THEN 1 ELSE 2 END,
                   CASE source WHEN 'fetch' THEN 0 WHEN 'import' THEN 1 ELSE 2 END",
     )?;
-    let last = end.format("%Y-%m-%d").to_string();
+    let last = crate::dates::iso(end);
+    // The same day keys for every depot: format them once.
+    let keys: Vec<String> = start
+        .series(crate::dates::days(1))
+        .take(days)
+        .map(crate::dates::iso)
+        .collect();
     for &id in ids {
         // another account (a former depot keeps stale values until it is derived again) has none
         let Some(depot) = depot_row(conn, id)? else {
@@ -257,11 +263,8 @@ pub(crate) fn series(
         firsts.push((id, points[0].0.clone(), points[0].1));
         let mut next = 0;
         let mut current: Option<i64> = None;
-        for i in 0..days {
-            let day = (start + chrono::Duration::days(i as i64))
-                .format("%Y-%m-%d")
-                .to_string();
-            while next < points.len() && points[next].0 <= day {
+        for (i, day) in keys.iter().enumerate() {
+            while next < points.len() && points[next].0 <= *day {
                 current = Some(points[next].1);
                 next += 1;
             }
@@ -285,7 +288,7 @@ fn reported_point(
     conn: &Connection,
     id: i64,
     depot: &DepotRow,
-    end: NaiveDate,
+    end: Date,
 ) -> CoreResult<Option<(String, i64)>> {
     if depot.balance_cents == 0 {
         return Ok(None);
@@ -373,8 +376,8 @@ mod tests {
         .unwrap();
     }
 
-    fn day(s: &str) -> NaiveDate {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    fn day(s: &str) -> Date {
+        Date::strptime("%Y-%m-%d", s).unwrap()
     }
 
     #[test]
@@ -454,7 +457,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             s.values,
-            vec![0, 0, 100_000, 100_000, 100_000, 100_000, 110_000, 110_000, 110_000, 130_000]
+            vec![
+                0, 0, 100_000, 100_000, 100_000, 100_000, 110_000, 110_000, 110_000, 130_000
+            ]
         );
         assert_eq!(s.covered, vec![0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
         assert_eq!(s.total_depots, 1);
@@ -490,13 +495,13 @@ mod tests {
     #[test]
     fn the_history_uses_the_depot_values_even_when_the_balance_differs() {
         let (_d, v) = open("depot-values-history");
-        let today = chrono::Local::now().date_naive();
-        let f = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+        let today = crate::dates::today();
+        let f = crate::dates::iso;
         // the balance (100) differs from the last point (120), as after a device merge
         let id = depot(&v, 100_00, &f(today));
         {
             let db = v.db().unwrap();
-            observe(&db, id, &f(today - chrono::Duration::days(1)), 80_00, 1);
+            observe(&db, id, &f(today - crate::dates::days(1)), 80_00, 1);
             observe(&db, id, &f(today), 120_00, 2);
         }
         let h = v.balance_history(vec![id], 5).unwrap();
@@ -524,12 +529,8 @@ mod tests {
     #[test]
     fn a_depot_without_history_does_not_jump_into_the_total() {
         let (_d, v) = open("depot-values-total");
-        let today = chrono::Local::now().date_naive();
-        let f = |n: i64| {
-            (today - chrono::Duration::days(n))
-                .format("%Y-%m-%d")
-                .to_string()
-        };
+        let today = crate::dates::today();
+        let f = |n: i64| crate::dates::iso(today - crate::dates::days(n));
         let a = depot(&v, 100, &f(0)); // no recorded value
         let b = depot(&v, 40, &f(0));
         {
@@ -546,12 +547,8 @@ mod tests {
     #[test]
     fn a_depot_walks_back_over_its_bookings_before_its_first_value() {
         let (_d, v) = open("depot-values-bookings");
-        let today = chrono::Local::now().date_naive();
-        let f = |n: i64| {
-            (today - chrono::Duration::days(n))
-                .format("%Y-%m-%d")
-                .to_string()
-        };
+        let today = crate::dates::today();
+        let f = |n: i64| crate::dates::iso(today - crate::dates::days(n));
         let id = depot(&v, 1_000, &f(0));
         {
             let db = v.db().unwrap();
@@ -574,10 +571,8 @@ mod tests {
     #[test]
     fn a_future_balance_date_counts_as_today() {
         let (_d, v) = open("depot-values-future");
-        let today = chrono::Local::now().date_naive();
-        let ahead = (today + chrono::Duration::days(2))
-            .format("%Y-%m-%d")
-            .to_string();
+        let today = crate::dates::today();
+        let ahead = crate::dates::iso(today + crate::dates::days(2));
         let id = depot(&v, 10_000, &ahead);
         let h = v.depot_value_history(vec![id], 5).unwrap();
         assert_eq!(h.len(), 1);
@@ -587,12 +582,8 @@ mod tests {
     #[test]
     fn a_former_depot_leaves_the_history_with_its_kind() {
         let (_d, v) = open("depot-values-kind");
-        let today = chrono::Local::now().date_naive();
-        let f = |n: i64| {
-            (today - chrono::Duration::days(n))
-                .format("%Y-%m-%d")
-                .to_string()
-        };
+        let today = crate::dates::today();
+        let f = |n: i64| crate::dates::iso(today - crate::dates::days(n));
         let id = depot(&v, 500, &f(0));
         observe(&v.db().unwrap(), id, &f(2), 400, 1);
         assert_eq!(v.depot_value_history(vec![id], 5).unwrap().len(), 3);
@@ -634,12 +625,8 @@ mod tests {
     #[test]
     fn the_depot_history_says_how_many_depots_each_day_covers() {
         let (_d, v) = open("depot-values-api");
-        let today = chrono::Local::now().date_naive();
-        let f = |n: i64| {
-            (today - chrono::Duration::days(n))
-                .format("%Y-%m-%d")
-                .to_string()
-        };
+        let today = crate::dates::today();
+        let f = |n: i64| crate::dates::iso(today - crate::dates::days(n));
         let a = depot(&v, 100, &f(0));
         let b = depot(&v, 40, &f(0));
         {

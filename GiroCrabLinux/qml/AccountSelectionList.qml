@@ -16,6 +16,8 @@ ColumnLayout {
     property var choices: []
     /// account_ref → true ("Abrufen" on)
     property var enabledRefs: ({})
+    /// What was on when the list was loaded (AccountSelectionDraft.original).
+    property var originalRefs: ({})
     property bool loaded: false
     property string error: ""
 
@@ -34,6 +36,7 @@ ColumnLayout {
             const on = {}
             for (const c of rows) if (c.enabled) on[c.account_ref] = true
             list.enabledRefs = on
+            list.originalRefs = on
             list.loaded = true
         }, () => { list.loaded = true })
     }
@@ -47,12 +50,40 @@ ColumnLayout {
         enabledRefs = x
     }
     function detail(c) { return [c.number, c.owner].filter(s => s !== "").join(" · ") }
-    function save() {
+    /// AccountSelectionDraft.hasChanges
+    readonly property bool hasChanges: {
+        if (!loaded) return false
+        const a = Object.keys(enabledRefs), b = Object.keys(originalRefs)
+        return a.length !== b.length || a.some(r => !originalRefs[r])
+    }
+    /// AccountSelectionList.switchesAnythingOff: an account that was on is switched off by this
+    /// save. It gets archived, and the sidebar then hides archived accounts (#720).
+    function switchesAnythingOff() { return choices.some(c => c.enabled && !enabledRefs[c.account_ref]) }
+
+    /// AccountSelectionDraft.save: `done(true, "")` or `done(false, message)`. The callbacks
+    /// only use what is captured here, so a sheet may close before the core answers.
+    function commit(done) {
         const id = connection.id
-        AppModel.coreAsync("set_connection_account_choices", { connection_id: id, enabled_refs: Object.keys(enabledRefs) }, () => {
+        const refs = Object.keys(enabledRefs)
+        const switchedOff = switchesAnythingOff()
+        AppModel.coreAsync("set_connection_account_choices", { connection_id: id, enabled_refs: refs }, () => {
+            if (switchedOff) AppModel.showArchivedAccounts = false
             AppModel.reloadAll()
+            done(true, "")
+        }, err => done(false, AppModel.parseCoreError(err).message))
+    }
+    function save() {
+        commit((ok, message) => {
+            if (!ok) { list.error = message; return }
+            list.error = ""
+            list.originalRefs = list.enabledRefs
             list.saved()
-        }, err => { list.error = AppModel.parseCoreError(err).message })
+        })
+    }
+    /// AccountSelectionDraft.saveIfChanged: for a sheet's "Speichern"; nothing to do (true) unless changed.
+    function saveIfChanged(done) {
+        if (!hasChanges) { done(true, ""); return }
+        commit(done)
     }
 
     Spinner { visible: !list.loaded; size: 20; Layout.alignment: Qt.AlignHCenter }
@@ -92,7 +123,7 @@ ColumnLayout {
     Text {
         visible: list.loaded && list.choices.length > 0
         Layout.fillWidth: true; wrapMode: Text.WordWrap
-        text: qsTr("Abrufen: Konto, Umsätze und Dokumente werden über diesen Zugang importiert. Überspringen: nichts davon; das Konto wird archiviert (abgeblendet, nicht in der Summe) und behält seine gespeicherten Daten.")
+        text: qsTr("Abrufen: Konto, Umsätze und Dokumente werden über diesen Zugang importiert. Überspringen: nichts davon; das Konto wird archiviert und ausgeblendet und behält seine gespeicherten Daten. Das Archiv-Symbol in der Seitenleiste zeigt archivierte Konten wieder an.")
         font.pixelSize: Theme.caption; color: Theme.secondary
     }
     Text {

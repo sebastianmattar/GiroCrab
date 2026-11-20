@@ -8,7 +8,7 @@
 //! and stays deleted unless it was edited again after that. Creditor IDs: the
 //! newest value wins (a removed ID is an empty value with a stamp).
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 
 use crate::error::CoreResult;

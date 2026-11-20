@@ -76,7 +76,7 @@ pub fn sync_connection<S: Stepper, U: Ui>(
         Auth::Unsupported => {
             return Err(format!(
                 "{bank}: Dieser Zugang wird von der Windows-App noch nicht unterstützt."
-            ))
+            ));
         }
     };
     // Move the PIN out: the core wipes its copy when the session ends, ours is left empty.
@@ -214,6 +214,7 @@ mod tests {
             new_accounts: vec![],
             revoked_accounts: vec![],
             postbox_documents: None,
+            warnings: vec![],
         }
     }
 

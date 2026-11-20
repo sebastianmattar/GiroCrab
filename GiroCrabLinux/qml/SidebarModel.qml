@@ -5,9 +5,8 @@ import QtCore
 // Sidebar state that came to the Mac app after 0.7.0, kept out of AppModel.qml:
 // the collapsible section headers (SidebarView.swift), the badge counts of „Geplant“ and
 // „Lastschriften“ (AppModel+Loading.swift › refreshSidebarCounts), the custom name of
-// „Ohne Kategorie“ (AppModel.swift › uncategorizedLabel, #597), account notes
-// (AppModel.swift › accountNote, #605), the remembered expanded categories (#633) and
-// „Duplizieren“ of a category (AppModel+CategoryDuplicate.swift, #510).
+// „Ohne Kategorie“ (AppModel.swift › uncategorizedLabel, #597), the remembered expanded
+// categories (#633) and „Duplizieren“ of a category (AppModel+CategoryDuplicate.swift, #510).
 QtObject {
     id: sm
 
@@ -61,30 +60,8 @@ QtObject {
             uncategorizedName = t
     }
 
-    // MARK: account notes (vault setting `account.note.<id>`; `list_settings` only returns known keys)
-    property var noteCache: ({})
-    property int notesVersion: 0
-    function accountNote(id) {
-        void notesVersion
-        if (id === null || id === undefined || !AppModel.isUnlocked) return ""
-        if (!(id in noteCache)) {
-            let n = ""
-            try { n = (AppModel.core("get_setting", { key: "account.note." + id }) || "").trim() } catch (e) {}
-            noteCache[id] = n
-        }
-        return noteCache[id]
-    }
-    function setAccountNote(id, note) {
-        const t = (note || "").trim()
-        if (!AppModel.run(() => { AppModel.core("set_setting", { key: "account.note." + id, value: t }); return true })) return
-        noteCache[id] = t
-        notesVersion++
-    }
-
     /// The vault changed (unlocked, locked, demo ↔ own vault): its settings and counts.
     function reloadVaultState() {
-        noteCache = {}
-        notesVersion++
         let name = ""
         if (AppModel.isUnlocked) {
             try { name = (AppModel.core("get_setting", { key: "ui.uncategorized_name" }) || "").trim() } catch (e) {}

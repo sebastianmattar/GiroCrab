@@ -43,7 +43,11 @@
 //! - 30: `tx_date_id` covers `deleted_ms`, `account_id` and `category_id` ([`TX_DATE_ID_COVERING`]).
 //! - 31: `booking_documents.seen_at`: read status of documents (NULL = unread); documents that exist
 //!   count as read; the list index carries the column, a partial index finds the unread ones.
-//! - 32: repair (#998): accounts the MoneyMoney import archived because their last refresh there
+//! - 32: account notes sync (#980): `accounts.note` / `note_ms` replace the vault setting
+//!   `account.note.<id>` ([`account_notes`]).
+//! - 33: `hidden_recipients` (#978): IBANs left out of the transfer suggestions; index
+//!   `tx_recipients` over the outgoing bookings with an IBAN.
+//! - 34: repair (#998): accounts the MoneyMoney import archived because their last refresh there
 //!   was cancelled (`cancel_tsp`) are active again ([`unarchive_cancelled_refreshes`]).
 //!
 //! Schema changes are a new step at the end of [`STEPS`]; never edit an
@@ -92,10 +96,38 @@ const STEPS: &[Step] = &[
     Step::Sql(crate::depot_values::SCHEMA),                    // 29: depot value history
     Step::Sql(TX_DATE_ID_COVERING),                            // 30
     Step::Hook(document_seen),                                 // 31: read status of documents
-    Step::Hook(unarchive_cancelled_refreshes),                 // 32: repair (#998)
+    Step::Hook(account_notes),                                 // 32: account notes sync (#980)
+    Step::Sql(crate::recipients::SCHEMA),                      // 33: hidden recipients (#978)
+    Step::Hook(unarchive_cancelled_refreshes),                 // 34: repair (#998)
 ];
 
-/// Step 32 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
+/// Step 32 (#980): the account note moves from the vault setting `account.note.<id>` (keyed by
+/// this device's account id and never merged) to `accounts.note` with its edit stamp `note_ms`,
+/// so it syncs like the account name. Moved notes get [`MOVED_NOTE_MS`]; a peer's snapshot from
+/// an older build is migrated the same way before every merge. Idempotent.
+///
+/// [`MOVED_NOTE_MS`]: crate::user_groups::MOVED_NOTE_MS
+fn account_notes(conn: &Connection) -> CoreResult<()> {
+    for (col, def) in [
+        ("note", "TEXT NOT NULL DEFAULT ''"),
+        ("note_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !has_column(conn, "main", "accounts", col)? {
+            conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {col} {def};"))?;
+        }
+    }
+    conn.execute(
+        "UPDATE accounts SET note = (SELECT value FROM settings WHERE key = 'account.note.' || accounts.id),
+                note_ms = ?1
+          WHERE note = ''
+            AND EXISTS (SELECT 1 FROM settings WHERE key = 'account.note.' || accounts.id AND value != '')",
+        [crate::user_groups::MOVED_NOTE_MS],
+    )?;
+    conn.execute("DELETE FROM settings WHERE key GLOB 'account.note.*'", [])?;
+    Ok(())
+}
+
+/// Step 34 (#998): the MoneyMoney import of v0.8.5 read `cancel_tsp` (when the last refresh of an
 /// account was cancelled there, e.g. a TAN not confirmed) as "closed" and archived accounts that
 /// are in use: they left the totals and syncs skipped them. Such an archive carries MoneyMoney's
 /// earlier time next to the import's stamp; archiving in the app (`set_account_archived`, also the
@@ -860,17 +892,60 @@ CREATE INDEX loan_links_loan ON loan_links(loan_account_id);
 mod tests {
     use super::*;
 
-    fn schema25() -> Connection {
+    fn schema_at(version: usize) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-        for step in &STEPS[..25] {
+        for step in &STEPS[..version] {
             match step {
                 Step::Sql(sql) => conn.execute_batch(sql).unwrap(),
                 Step::Hook(f) => f(&conn).unwrap(),
             }
         }
-        conn.pragma_update(None, "user_version", 25).unwrap();
+        conn.pragma_update(None, "user_version", version as i64)
+            .unwrap();
         conn
+    }
+
+    /// Step 32 (#980): notes move from the settings onto their accounts; notes of accounts
+    /// that no longer exist go, other settings stay.
+    #[test]
+    fn account_notes_move_from_settings_to_the_account() {
+        let mut conn = schema_at(31);
+        conn.execute_batch(
+            "INSERT INTO account_groups(name) VALUES ('G');
+             INSERT INTO accounts(id, group_id, external_ref, name)
+                 SELECT 1, id, 'a', 'Giro' FROM account_groups WHERE name = 'G'
+                 UNION ALL SELECT 2, id, 'b', 'Bar' FROM account_groups WHERE name = 'G';
+             INSERT INTO settings(key, value) VALUES
+                 ('account.note.1', 'Reisekasse'), ('account.note.99', 'weg'),
+                 ('ui.uncategorized_name', 'Sonstiges');",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let notes = |conn: &Connection| -> Vec<(String, String, i64)> {
+            conn.prepare("SELECT name, note, note_ms FROM accounts ORDER BY id")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let expected = vec![
+            ("Giro".to_string(), "Reisekasse".to_string(), 1),
+            ("Bar".to_string(), String::new(), 0),
+        ];
+        assert_eq!(notes(&conn), expected);
+        let keys: Vec<String> = conn
+            .prepare("SELECT key FROM settings ORDER BY key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(keys, ["ui.uncategorized_name"]);
+        // idempotent: a second run changes nothing
+        account_notes(&conn).unwrap();
+        assert_eq!(notes(&conn), expected);
     }
 
     #[test]
@@ -891,7 +966,7 @@ mod tests {
 
     #[test]
     fn failed_role_migration_rolls_back_and_restores_foreign_keys() {
-        let mut conn = schema25();
+        let mut conn = schema_at(25);
         conn.execute_batch(
             "PRAGMA foreign_keys=OFF;
             INSERT INTO accounts(group_id,external_ref,name) VALUES (999,'test','Test');
@@ -906,14 +981,15 @@ mod tests {
                 .unwrap(),
             25
         );
-        assert!(conn
-            .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
-            .unwrap());
+        assert!(
+            conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
     }
 
     #[test]
     fn partial_development_migration_preserves_custom_provenance() {
-        let mut conn = schema25();
+        let mut conn = schema_at(25);
         conn.execute_batch("ALTER TABLE categories ADD COLUMN builtin_role TEXT;
             INSERT INTO categories(name,sf_symbol,color_hex) VALUES ('Freizeit','sparkles','#2F8F9D');").unwrap();
         migrate(&mut conn).unwrap();
@@ -928,7 +1004,7 @@ mod tests {
 
     #[test]
     fn roles_migrate_catalog_entries_but_not_custom_names() {
-        let mut conn = schema25();
+        let mut conn = schema_at(25);
         let (name, symbol, color, _) = crate::demo::STARTER_TREE
             .iter()
             .find(|r| r.0 == "Freizeit")
@@ -959,9 +1035,10 @@ mod tests {
         };
         assert_eq!(role(&conn, builtin).as_deref(), Some("Freizeit"));
         assert_eq!(role(&conn, custom), None);
-        assert!(conn
-            .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
-            .unwrap());
+        assert!(
+            conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
         assert_eq!(
             conn.query_row("SELECT count(*) FROM accounts", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
@@ -980,7 +1057,7 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 32);
+        assert_eq!(SCHEMA_VERSION, 34);
     }
 
     /// #998: what the MoneyMoney import archived from `cancel_tsp` is active again; an account
@@ -996,7 +1073,7 @@ mod tests {
                (1,'mm-2','Alte Karte',1790002000,1790002000456,NULL),
                (1,'mm-3','Gelöscht',1790000000,1790001000123,1790003000000),
                (1,'mm-4','Früher archiviert',1700000000,0,NULL);
-             PRAGMA user_version = 31;",
+             PRAGMA user_version = 33;",
         )
         .unwrap();
         migrate(&mut conn).unwrap();

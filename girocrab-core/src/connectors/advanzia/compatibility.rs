@@ -23,7 +23,7 @@ fn legacy_reference(reference: &str) -> bool {
 }
 /// Only one active EUR credit card already bound to this exact login is eligible.
 pub(super) fn legacy_account(db: &Connection, id: i64) -> CoreResult<Option<(i64, String)>> {
-    let mut q = db.prepare("SELECT id,external_ref,kind,currency,deleted_ms,archived_unix FROM accounts WHERE connection_id=?1")?;
+    let mut q = db.prepare("SELECT id,external_ref,kind,currency,archived_unix FROM accounts WHERE connection_id=?1 AND deleted_ms IS NULL")?;
     let rows = q
         .query_map([id], |r| {
             Ok((
@@ -32,12 +32,11 @@ pub(super) fn legacy_account(db: &Connection, id: i64) -> CoreResult<Option<(i64
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, Option<i64>>(4)?,
-                r.get::<_, Option<i64>>(5)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(match rows.as_slice() {
-        [(account, reference, kind, currency, None, None)]
+        [(account, reference, kind, currency, None)]
             if legacy_reference(reference) && kind == "credit_card" && currency == "EUR" =>
         {
             Some((*account, reference.clone()))
@@ -113,23 +112,27 @@ pub(super) fn prepare_ids(
         let old_row = stored.get(old);
         let new_row = stored.get(&t.external_id);
         if old_row.is_some() && new_row.is_some() {
-            return Err(invalid("Für einen Advanzia-Umsatz bestehen mehrere Kennungen. Es wurden keine Daten verändert."));
+            return Err(invalid(
+                "Für einen Advanzia-Umsatz bestehen mehrere Kennungen. Es wurden keine Daten verändert.",
+            ));
         }
         let row = old_row.or(new_row);
         if row.is_some_and(|(date, cents, currency)| {
             date != &t.booking_date || *cents != t.amount_cents || currency != &t.currency
         }) {
-            return Err(invalid("Eine bestehende Advanzia-Buchungskennung widerspricht den Bankdaten. Es wurden keine Daten verändert."));
+            return Err(invalid(
+                "Eine bestehende Advanzia-Buchungskennung widerspricht den Bankdaten. Es wurden keine Daten verändert.",
+            ));
         }
         let original = t.external_id.clone();
         if old_row.is_some() || (legacy && new_row.is_none()) {
             t.external_id = old.clone();
         }
         // FNV collisions in the same response must fail instead of dropping a booking.
-        if let Some(previous) = chosen.insert(t.external_id.clone(), original.clone()) {
-            if previous != original {
-                return Err(invalid("Widersprüchliche Buchungsreferenz."));
-            }
+        if let Some(previous) = chosen.insert(t.external_id.clone(), original.clone())
+            && previous != original
+        {
+            return Err(invalid("Widersprüchliche Buchungsreferenz."));
         }
     }
     Ok(())

@@ -307,16 +307,15 @@ pub(crate) fn repair_stored_text(conn: &Connection) -> rusqlite::Result<u32> {
                 Ok(s) => s,
                 Err(_) => continue, // table may not exist yet
             };
-            let r = st
-                .query_map([], |r| {
-                    let id: i64 = r.get(0)?;
-                    let vals = (0..cols.len())
-                        .map(|i| r.get::<_, String>(i + 1))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok((id, vals))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            r
+
+            st.query_map([], |r| {
+                let id: i64 = r.get(0)?;
+                let vals = (0..cols.len())
+                    .map(|i| r.get::<_, String>(i + 1))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((id, vals))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
         };
         for (id, vals) in rows {
             let fixed: Vec<String> = vals.iter().map(|v| clean_bank_text(v)).collect();

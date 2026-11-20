@@ -42,6 +42,25 @@ final class PortalCardsTests: XCTestCase {
         XCTAssertFalse(PortalBrowser.isBookingList("https://global.americanexpress.com/api/servicing/v1/financials/balances"))
     }
 
+    /// The card round does not depend on the older-periods mode, which the first sync of
+    /// a connection switches on: it used to hide the page for good (#1010).
+    func testCardSwitchRunsWhenThePageIsQuiet() {
+        XCTAssertTrue(PortalWebSheet.switchesCard(isAmex: true, recognized: 3, away: false, quietFor: 5))
+        XCTAssertFalse(PortalWebSheet.switchesCard(isAmex: true, recognized: 3, away: false, quietFor: 2))
+        XCTAssertFalse(PortalWebSheet.switchesCard(isAmex: true, recognized: 0, away: false, quietFor: 5))
+        XCTAssertFalse(PortalWebSheet.switchesCard(isAmex: true, recognized: 3, away: true, quietFor: 5))
+        XCTAssertFalse(PortalWebSheet.switchesCard(isAmex: false, recognized: 3, away: false, quietFor: 5))
+    }
+
+    /// A card round that never finishes gives up instead of blocking the import (#1010).
+    func testCardRoundGivesUpAfterTheTimeout() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertFalse(PortalWebSheet.cardRoundTimedOut(since: nil, now: start))
+        XCTAssertFalse(PortalWebSheet.cardRoundTimedOut(since: start, now: start.addingTimeInterval(30)))
+        XCTAssertTrue(PortalWebSheet.cardRoundTimedOut(since: start,
+                                                        now: start.addingTimeInterval(PortalWebSheet.cardRoundTimeout + 1)))
+    }
+
     /// The Amex user name is a vault secret next to the login's PIN (password), so the
     /// core deletes it with the connection.
     func testPortalLoginKeyIsASecretOfTheConnection() {

@@ -4,8 +4,8 @@
 use girocrab_core::batch_csv::{BatchCsvImport, BatchCsvRow};
 use girocrab_core::connectors::fints::pain008::SequenceType;
 use girocrab_core::mandates::{
-    next_sequence, return_reason, CollectionItem, DebitFile, Mandate, MandateBooking,
-    MandateCsvRow, MandateImportResult, MandateInput, MandateScheme,
+    CollectionItem, DebitFile, Mandate, MandateBooking, MandateCsvRow, MandateImportResult,
+    MandateInput, MandateScheme, next_sequence, return_reason,
 };
 
 pub const SCHEME_NAMES: [&str; 3] = [

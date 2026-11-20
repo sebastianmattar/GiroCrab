@@ -5,14 +5,14 @@ use std::{
     sync::Arc,
 };
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::Value;
 
 use super::{field, invalid, is_currency_code, open_rows, overview};
 use crate::{
     connectors::{
-        store_fetch, FetchResult, RemoteHolding, RemoteSecurityTransaction, RemoteTransaction,
-        SyncSummary,
+        FetchResult, RemoteHolding, RemoteSecurityTransaction, RemoteTransaction, SyncSummary,
+        store_fetch,
     },
     error::{CoreError, CoreResult},
     models::{Holding, SecurityDirection, SecurityTransaction},
@@ -23,7 +23,9 @@ use crate::{
 mod tests;
 
 fn incomplete() -> CoreError {
-    invalid("FNZ: Unvollständige Konten-, Bestands- oder Umsatzdaten. Es wurden keine Daten übernommen.")
+    invalid(
+        "FNZ: Unvollständige Konten-, Bestands- oder Umsatzdaten. Es wurden keine Daten übernommen.",
+    )
 }
 
 fn text<'a>(v: &'a Value, pointer: &str) -> CoreResult<&'a str> {
@@ -36,7 +38,7 @@ fn array<'a>(v: &'a Value, key: &str) -> CoreResult<&'a [Value]> {
 
 fn date(v: &Value, key: &str) -> CoreResult<String> {
     let s = text(v, key)?;
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| incomplete())?;
+    jiff::civil::Date::strptime("%Y-%m-%d", s).map_err(|_| incomplete())?;
     Ok(s.into())
 }
 

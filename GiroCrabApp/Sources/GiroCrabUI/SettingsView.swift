@@ -68,7 +68,8 @@ struct GeneralSettings: View {
     @AppStorage(NegativeAmountStyle.defaultsKey) private var negativeAmountStyle: NegativeAmountStyle = .neutral
     @AppStorage(AppTextSize.defaultsKey) private var textSize: AppTextSize = .standard
     @AppStorage(PrivacyMode.enabledKey) private var privacyMode = false
-    @AppStorage(PrivacyMode.scopeKey) private var privacyScope = PrivacyMode.Scope.amounts
+    @AppStorage(NaturalSearch.defaultsKey) private var naturalSearch = false
+    @AppStorage(PrivacyMode.scopeKey) private var privacyScope = PrivacyMode.defaultScope
     @AppStorage(AppAppearance.defaultsKey) private var appearance: AppAppearance = .system
     @AppStorage(BookingDensity.defaultsKey) private var bookingDensity: BookingDensity = .standard
 
@@ -117,8 +118,12 @@ struct GeneralSettings: View {
                 Picker("Im Privatmodus ausblenden", selection: $privacyScope) {
                     ForEach(PrivacyMode.Scope.allCases) { Text($0.title).tag($0) }
                 }
-                Text("Blendet Beträge aus, wenn du die App jemandem zeigst. Auf Wunsch auch Namen, Kontonummern und Verwendungszwecke.")
+                Text("Blendet Beträge, Namen, Kontonummern und Verwendungszwecke aus, wenn du die App jemandem zeigst. Auf Wunsch nur die Beträge.")
                     .appFont(.caption).foregroundStyle(.secondary)
+                if NaturalSearch.isAvailable {
+                    Toggle("Suche in natürlicher Sprache", isOn: $naturalSearch)
+                        .help("Versteht Angaben wie „Lebensmittel letzten Monat über 50 €“. Läuft vollständig auf diesem Gerät; an das Modell gehen nur Suchtext, heutiges Datum und Kategorienamen.")
+                }
                 Toggle("Auswertungen in der Übersicht anzeigen", isOn: $showStatistics)
                 Text("Blendet Saldoverlauf, Cashflow und Budgets über der Buchungsliste aus. Auch im Menü Ansicht umschaltbar.")
                     .appFont(.caption).foregroundStyle(.secondary)
@@ -141,7 +146,7 @@ struct GeneralSettings: View {
                 Picker("Als geprüft markieren", selection: $model.autoReviewDelay) {
                     ForEach(AutoReviewDelay.allCases) { Text($0.title).tag($0) }
                 }
-                Text("Eine ausgewählte Buchung gilt nach dieser Zeit als geprüft – wie eine gelesene E-Mail. Bei Mehrfachauswahl nie.")
+                Text(model.autoReviewDelay.helpText)
                     .appFont(.caption).foregroundStyle(.secondary)
                 Picker("Zeitraum beim ersten Abruf", selection: firstFetchDays) {
                     Text("90 Tage").tag(90)
@@ -160,7 +165,7 @@ struct GeneralSettings: View {
             MerchantLogoSettingsSection()
             #if os(macOS)
             AutoSyncSettingsSection()
-            MenuBarSettingsSection()
+            DockAndMenuBarSettingsSection()
             #endif
             #if os(iOS)
             Section {
@@ -277,7 +282,7 @@ struct BankConnectionsSettings: View {
                             .buttonStyle(.borderless)
                             .help("Bearbeiten / Details")
                             .accessibilityLabel("Bearbeiten / Details")
-                        Button { model.requestSync(c) } label: { Image(systemName: "arrow.triangle.2.circlepath") }
+                        Button { model.requestFullSync(c) } label: { Image(systemName: "arrow.triangle.2.circlepath") }
                             .buttonStyle(.borderless)
                             .help(model.bankingGate(for: c)?.message ?? String(localized: "Jetzt abrufen"))
                             .accessibilityLabel("Jetzt abrufen")
@@ -330,23 +335,16 @@ struct BankConnectionsSettings: View {
     @ViewBuilder private var fintsRegistrationSection: some View {
         Section {
             if model.fintsBuiltinAvailable {
-                Picker("Verwenden", selection: Binding(
-                    get: { model.fintsProductIDMode == "own" ? "own" : "builtin" },
-                    set: { model.setFintsProductIDMode($0) }
-                )) {
-                    Text("GiroCrab-Registrierung (empfohlen)").tag("builtin")
-                    Text("Eigene Registrierung").tag("own")
-                }
-                #if os(macOS)
-                .pickerStyle(.radioGroup)
-                #endif
-            } else if AppUpdateChannel.current != .stable {
-                Label("Dieser Beta-Build enthält die FinTS-Registrierung von GiroCrab nicht. Bitte melden Sie das den Entwicklern.", systemImage: "exclamationmark.triangle")
+                Label("Offizielle FinTS-Produktregistrierung von GiroCrab aktiv", systemImage: "checkmark.seal.fill")
                     .appFont(.callout)
-                    .foregroundStyle(Theme.warning)
-            }
-            // The own ID is entered right here, only when it is the one in use.
-            if !model.fintsBuiltinAvailable || model.fintsProductIDMode == "own" {
+                    .foregroundStyle(.secondary)
+            } else {
+                if AppUpdateChannel.current != .stable {
+                    Label("Dieser Beta-Build enthält die FinTS-Registrierung von GiroCrab nicht. Bitte melden Sie das den Entwicklern.", systemImage: "exclamationmark.triangle")
+                        .appFont(.callout)
+                        .foregroundStyle(Theme.warning)
+                }
+                // Own product ID is only needed in self-built / developer binaries without embedded ID (#1092).
                 OwnProductIDField()
             }
         } header: {
@@ -644,6 +642,8 @@ struct ICloudSyncSection: View {
     /// When the copied key leaves the clipboard; the button counts down to it (#909).
     @State private var keyCopiedUntil: Date?
     @State private var confirmKeyCopy = false
+    /// Shown in the section: a toast would land in the main window, behind Settings on macOS.
+    @State private var keyCopyError: String?
 
     var body: some View {
         Section {
@@ -738,15 +738,20 @@ struct ICloudSyncSection: View {
                     .confirmationDialog("Tresor-Schlüssel kopieren?", isPresented: $confirmKeyCopy, titleVisibility: .visible) {
                         Button("Schlüssel kopieren") {
                             Task {
-                                if let k = try? await VaultKeyManager.shared.exportKeyBase64() {
-                                    VaultKeyManager.copyKeyToPasteboard(k)
+                                // keychain failures show in the section; a cancelled unlock stays silent
+                                keyCopyError = nil
+                                do {
+                                    VaultKeyManager.copyKeyToPasteboard(try await VaultKeyManager.shared.exportKeyBase64())
                                     keyCopiedUntil = Date().addingTimeInterval(VaultKeyManager.keyClipboardLifetime)
+                                } catch VaultKeyManager.KeyError.cancelled {
+                                } catch {
+                                    keyCopyError = describe(error)
                                 }
                             }
                         }
                         Button("Abbrechen", role: .cancel) {}
                     } message: {
-                        Text("Der Schlüssel entschlüsselt Ihren gesamten Tresor. Er liegt 60 Sekunden in der Zwischenablage, nicht als Text, und lässt sich nur mit „Aus Zwischenablage einfügen“ in GiroCrab verwenden.")
+                        Text("Der Schlüssel entschlüsselt Ihren gesamten Tresor. Er liegt 60 Sekunden in der Zwischenablage, nicht als Text. Über die geteilte Zwischenablage (Handoff, gleicher Apple Account) übernehmen Sie ihn auf dem anderen Gerät mit „Schlüssel einfügen …“ › „Aus Zwischenablage einfügen“; danach wird er dort aus der Zwischenablage gelöscht.")
                     }
                     Button("Schlüssel einfügen …", systemImage: "square.and.pencil") { showKeySheet = true }
                 }
@@ -755,6 +760,10 @@ struct ICloudSyncSection: View {
                 // "Tresor-Schlüssel kopieren" opened the paste sheet too (#909).
                 .buttonStyle(.borderless)
                 #endif
+                if let keyCopyError {
+                    Label(keyCopyError, systemImage: "exclamationmark.triangle.fill")
+                        .appFont(.caption).foregroundStyle(Theme.negative)
+                }
                 if sync.keyMismatch {
                     Label("Der iCloud-Tresor nutzt einen anderen Schlüssel. Fügen Sie den Schlüssel von Ihrem anderen Gerät ein.", systemImage: "exclamationmark.triangle.fill")
                         .appFont(.caption).foregroundStyle(Theme.warning)

@@ -74,7 +74,7 @@ Card {
                     readonly property real v: card.maxValue * (3 - index) / 3
                     y: index * (140 / 3); width: parent.width; height: 1
                     Text { text: Number(v / 100).toLocaleString(Qt.locale(), "f", 0); font.pixelSize: Theme.caption; color: Theme.secondary; anchors.verticalCenter: parent.verticalCenter
-                           Sensitive {} }   // chart axis values
+                           Sensitive { amounts: true } }   // chart axis values
                     Row {
                         x: 44; width: parent.width - 44; spacing: 3; clip: true
                         Repeater { model: Math.max(0, Math.ceil(parent.width / 6)); Rectangle { width: 3; height: 0.5; color: Theme.border } }

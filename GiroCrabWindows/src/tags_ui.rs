@@ -12,8 +12,8 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::planning::{self, SplitDraft, TemplateForm};
 use crate::{
-    hex_color, privacy_on, refresh_dashboard, reload, with_state, BudgetRow, MainWindow, SplitRow,
-    TagRow, TemplateRow,
+    BudgetRow, MainWindow, SplitRow, TagRow, TemplateRow, hex_color, privacy_on, refresh_dashboard,
+    reload, with_state,
 };
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;

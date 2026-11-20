@@ -102,19 +102,13 @@ Item {
                 footer: AppModel.fintsBuiltinAvailable
                     ? qsTr("Das FinTS-Produkt von GiroCrab ist eingebaut. Eigene API-Anwendungen (zum Beispiel für comdirect oder PayPal) registrieren Sie selbst; die Werte liegen nur in Ihrem verschlüsselten Tresor.")
                     : qsTr("Nichts davon wird mit dieser Version ausgeliefert. Registrieren Sie Ihr eigenes FinTS-Produkt und Ihre eigenen API-Anwendungen; die Werte liegen nur in Ihrem verschlüsselten Tresor.")
-                SettingsFormRow {
+                Text {
                     visible: AppModel.fintsBuiltinAvailable
-                    label: qsTr("Verwenden")
-                    ColumnLayout {
-                        spacing: 2
-                        RadioButton { text: qsTr("GiroCrab-Registrierung (empfohlen)"); checked: AppModel.fintsProductIDMode !== "own"
-                                      onClicked: AppModel.setFintsProductIDMode("builtin") }
-                        RadioButton { text: qsTr("Eigene Registrierung"); checked: AppModel.fintsProductIDMode === "own"
-                                      onClicked: AppModel.setFintsProductIDMode("own") }
-                    }
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
+                    text: qsTr("Offizielle FinTS-Produktregistrierung von GiroCrab aktiv.")
                 }
-                // The own ID is entered right here, only when it is the one in use.
-                OwnProductIDField { visible: !AppModel.fintsBuiltinAvailable || AppModel.fintsProductIDMode === "own" }
+                // Own product ID is only needed in self-built / developer binaries without embedded ID (#1092).
+                OwnProductIDField { visible: !AppModel.fintsBuiltinAvailable || AppModel.showOwnProductID }
             }
             Item { implicitHeight: 8 }
         }
@@ -131,15 +125,26 @@ Item {
         function commit() {
             const v = field.text.trim()
             field.text = ""
-            if (v !== "") AppModel.saveSetting("fints.product_id", v)
+            if (v === "") return
+            AppModel.saveSetting("fints.product_id", v)
+            AppModel.setFintsProductIDMode("own")
         }
+        /// After a rejected registration the alert sends the user here (AppModel.enterOwnProductID).
+        function focusIfAsked() {
+            if (!AppModel.focusOwnProductID || !own.visible) return
+            AppModel.focusOwnProductID = false
+            Qt.callLater(() => field.forceActiveFocus())
+        }
+        Component.onCompleted: focusIfAsked()
+        onVisibleChanged: focusIfAsked()
+        Connections { target: AppModel; function onFocusOwnProductIDChanged() { own.focusIfAsked() } }
         SettingsFormRow {
             label: qsTr("Eigene Produktregistrierung")
-            TextField {
+            // SecureField in the grouped Form: no bezel, trailing text, at most 340 wide
+            FormTextField {
                 id: field
-                Layout.fillWidth: true; Layout.preferredWidth: 340
+                Layout.fillWidth: false; Layout.preferredWidth: 340
                 echoMode: TextInput.Password
-                horizontalAlignment: TextInput.AlignRight
                 placeholderText: own.hasValue ? qsTr("Gespeichert – zum Ersetzen neu eingeben") : qsTr("Registrierungsnummer eintragen")
                 onAccepted: own.commit()
                 onActiveFocusChanged: if (!activeFocus) own.commit()

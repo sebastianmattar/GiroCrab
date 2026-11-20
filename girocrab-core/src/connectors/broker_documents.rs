@@ -27,12 +27,10 @@ pub fn validate_pdf(bytes: &[u8]) -> CoreResult<()> {
     if is_pdf(bytes) {
         Ok(())
     } else {
-        Err(CoreError::Protocol {
-            message: format!(
-                "downloaded document is not a PDF ({} bytes, missing %PDF- header)",
-                bytes.len()
-            ),
-        })
+        Err(CoreError::protocol(format!(
+            "downloaded document is not a PDF ({} bytes, missing %PDF- header)",
+            bytes.len()
+        )))
     }
 }
 

@@ -15,7 +15,7 @@ final class CategoryTreeExpansionTests: XCTestCase {
 
     private func clearStoredState() {
         for demo in [false, true] {
-            UserDefaults.standard.removeObject(forKey: AppModel.expandedCategoriesKey(demo: demo))
+            AppDefaults.store.removeObject(forKey: AppModel.expandedCategoriesKey(demo: demo))
         }
     }
 

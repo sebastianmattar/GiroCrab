@@ -19,6 +19,12 @@ struct DemoBanner: View {
         return String(localized: "Erfundene Buchungen – keine echte Bank verbunden. Sobald echte Daten da sind, schützt Face ID bzw. Ihr Gerätecode den Tresor automatisch; hier können Sie den Sperrbildschirm testen.")
     }
 
+    /// The demo vault is rebuilt from scratch on every launch (`makeDemoVault`), so tags,
+    /// categories or rules tried out here are gone after quitting (#952).
+    static var resetNote: String {
+        String(localized: "Änderungen werden beim Beenden zurückgesetzt.")
+    }
+
     var body: some View {
         let button = HStack(spacing: 14) {
             if !AppModel.vaultMayHoldRealData {
@@ -38,6 +44,10 @@ struct DemoBanner: View {
                 Text("Demo-Daten").appFont(.subheadline, weight: .semibold).foregroundStyle(Theme.text)
                 Text(Self.message(hasOwnVault: model.hasOwnVault, mayHoldRealData: AppModel.vaultMayHoldRealData))
                     .appFont(.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Label(Self.resetNote, systemImage: "arrow.counterclockwise")
+                    .appFont(.caption, weight: .medium)
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

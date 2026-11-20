@@ -25,8 +25,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::{
-    http_client, BankConnector, ChallengeResponse, ConnectContext, FetchResult, Phase,
-    RemoteAccount, RemoteTransaction,
+    BankConnector, ChallengeResponse, ConnectContext, FetchResult, KnownDocuments, Phase,
+    RemoteAccount, RemoteTransaction, http_client_same_host,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::{tr, trf};
@@ -58,12 +58,10 @@ Kvxz6iV4YsGyYNyCKfR7qyY6G1keFNSX0SJUzTowCLIOJ6I/GGgRvcSDmzzMFmtu
 /// The portal no longer answers as expected: most likely a new fin4u release
 /// changed the interface.
 fn interface_changed(what: &str) -> CoreError {
-    CoreError::Protocol {
-        message: trf(
-            "fin4u hat unerwartet geantwortet ({0}). Wahrscheinlich wurde die Portal-Schnittstelle geändert; bitte GiroCrab aktualisieren.",
-            &[&what],
-        ),
-    }
+    CoreError::protocol(trf(
+        "fin4u hat unerwartet geantwortet ({0}). Wahrscheinlich wurde die Portal-Schnittstelle geändert; bitte GiroCrab aktualisieren.",
+        &[&what],
+    ))
 }
 
 /// Login failures that are no credential problem: the Keycloak client or
@@ -110,9 +108,9 @@ async fn login(client: &reqwest::Client, username: &str, password: &str) -> Core
         });
     }
     if v["access_token"].as_str().unwrap_or_default().is_empty() {
-        return Err(CoreError::Protocol {
-            message: tr("fin4u hat kein Zugriffstoken geliefert").into(),
-        });
+        return Err(CoreError::protocol(tr(
+            "fin4u hat kein Zugriffstoken geliefert",
+        )));
     }
     Ok(v)
 }
@@ -122,11 +120,8 @@ async fn login(client: &reqwest::Client, username: &str, password: &str) -> Core
 pub(crate) fn encrypt_password(password: &str) -> CoreResult<String> {
     use base64::Engine;
     use rsa::pkcs8::DecodePublicKey;
-    let key = rsa::PublicKey::from_public_key_pem(PASSWORD_PUBLIC_KEY).map_err(|e| {
-        CoreError::Protocol {
-            message: format!("fin4u public key: {e}"),
-        }
-    })?;
+    let key = rsa::PublicKey::from_public_key_pem(PASSWORD_PUBLIC_KEY)
+        .map_err(|e| CoreError::protocol(format!("fin4u public key: {e}")))?;
     let cipher = oaep_encrypt(&key, password)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(cipher))
 }
@@ -135,19 +130,10 @@ pub(crate) fn encrypt_password(password: &str) -> CoreResult<String> {
 fn oaep_encrypt(key: &rsa::PublicKey, password: &str) -> CoreResult<Vec<u8>> {
     let padding = rsa::Oaep::<sha2::Sha256, sha1::Sha1>::new_with_mgf_hash();
     key.encrypt(&mut getrandom::SysRng, padding, password.as_bytes())
-        .map_err(|e| CoreError::Protocol {
-            message: format!("fin4u password encryption: {e}"),
-        })
+        .map_err(|e| CoreError::protocol(format!("fin4u password encryption: {e}")))
 }
 
 pub struct Fin4uConnector {
-    /// `documentReferenceId`s already downloaded (connector state).
-    known_documents: Vec<String>,
-    /// Accounts whose data GiroCrab does not store this time (switched off,
-    /// archived …): their documents are neither downloaded nor remembered.
-    skipped_accounts: std::collections::HashSet<String>,
-    /// Document retrieval switched off for this connection: no documents downloaded or remembered.
-    documents_off: bool,
     client: Option<reqwest::Client>,
     access_token: SecretString,
     refresh_token: SecretString,
@@ -156,9 +142,6 @@ pub struct Fin4uConnector {
 impl Fin4uConnector {
     pub fn new() -> Self {
         Fin4uConnector {
-            known_documents: Vec::new(),
-            skipped_accounts: Default::default(),
-            documents_off: false,
             client: None,
             access_token: SecretString::default(),
             refresh_token: SecretString::default(),
@@ -344,10 +327,10 @@ fn cents_of(v: &Value) -> Option<i64> {
 fn date_of(v: &Value) -> Option<String> {
     let s = v.as_str()?.trim();
     let d = s.get(..10)?;
-    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-        .or_else(|_| chrono::NaiveDate::parse_from_str(d, "%d.%m.%Y"))
+    jiff::civil::Date::strptime("%Y-%m-%d", d)
+        .or_else(|_| jiff::civil::Date::strptime("%d.%m.%Y", d))
         .ok()
-        .map(|d| d.format("%Y-%m-%d").to_string())
+        .map(crate::dates::iso)
 }
 
 /// Booking objects of one transaction response: `{ items, total }` (what
@@ -495,8 +478,8 @@ fn attribute_value(a: &Value) -> String {
             .unwrap_or(text),
         "NUMBER" => number().map(|x| german_number(x, 0, 3)).unwrap_or(text),
         "DATE" => date_of(v)
-            .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-            .map(|d| d.format("%d.%m.%Y").to_string())
+            .and_then(|d| jiff::civil::Date::strptime("%Y-%m-%d", &d).ok())
+            .map(|d| d.strftime("%d.%m.%Y").to_string())
             .unwrap_or(text),
         "YEARS" => plural("Jahr", "Jahre"),
         "MONTHS" => plural("Monat", "Monate"),
@@ -568,23 +551,23 @@ pub(crate) fn complete_from_details(account: &mut RemoteAccount, details: &[Deta
             .map(|d| d.value.trim().to_string())
             .filter(|v| !v.is_empty())
     };
-    if account.iban.is_empty() {
-        if let Some(iban) = find(&["IBAN"]) {
-            let iban = normalize_iban(&iban);
-            if validate_iban(&iban) {
-                account.iban = iban;
-            }
+    if account.iban.is_empty()
+        && let Some(iban) = find(&["IBAN"])
+    {
+        let iban = normalize_iban(&iban);
+        if validate_iban(&iban) {
+            account.iban = iban;
         }
     }
-    if account.account_number.is_empty() {
-        if let Some(n) = find(&["Vertragsnummer", "Kontonummer"]) {
-            account.account_number = n;
-        }
+    if account.account_number.is_empty()
+        && let Some(n) = find(&["Vertragsnummer", "Kontonummer"])
+    {
+        account.account_number = n;
     }
-    if account.owner.is_empty() {
-        if let Some(o) = find(&["Inhaber", "Kontoinhaber"]) {
-            account.owner = o;
-        }
+    if account.owner.is_empty()
+        && let Some(o) = find(&["Inhaber", "Kontoinhaber"])
+    {
+        account.owner = o;
     }
 }
 
@@ -771,24 +754,12 @@ pub(crate) fn parse_transactions_for(
 #[async_trait]
 impl BankConnector for Fin4uConnector {
     async fn begin(&mut self, ctx: &ConnectContext) -> CoreResult<Phase> {
-        self.known_documents = ctx.state["documents"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect();
-        self.skipped_accounts = ctx
-            .settings
-            .get(super::SKIPPED_ACCOUNTS)
-            .map(|v| v.expose().lines().map(str::to_string).collect())
-            .unwrap_or_default();
-        self.documents_off = ctx.settings.contains_key(super::DOCUMENTS_OFF);
         if ctx.login_name.trim().is_empty() || ctx.secret.expose().is_empty() {
             return Err(CoreError::Authentication {
                 message: tr("Benutzername (E-Mail) und Passwort für fin4u erforderlich").into(),
             });
         }
-        let client = http_client()?;
+        let client = http_client_same_host()?;
         let username = ctx.login_name.trim();
         let v = login(&client, username, ctx.secret.expose()).await?;
         self.access_token =
@@ -807,7 +778,7 @@ impl BankConnector for Fin4uConnector {
         Ok(Phase::Ready)
     }
 
-    async fn fetch(&mut self, _ctx: &ConnectContext) -> CoreResult<FetchResult> {
+    async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult> {
         let list = self.get("/bankaccounts/bank-account").await?;
         if !list["bankAccounts"].is_array() && !list.is_array() {
             return Err(interface_changed("Kontoliste ohne „bankAccounts“"));
@@ -824,6 +795,7 @@ impl BankConnector for Fin4uConnector {
             .map(|a| str_of(a, "id"))
             .collect();
         let accounts = parse_accounts(&list, false, &super::today());
+        let mut known = KnownDocuments::from_state(&ctx.state);
         let mut out = FetchResult::default();
         for (mut id, mut account) in accounts {
             let alh = alh_ids.contains(&id);
@@ -835,15 +807,15 @@ impl BankConnector for Fin4uConnector {
                 // „Dokumente einsehen“: download the ones not fetched before –
                 // but only for accounts that are stored now: remembered
                 // documents of a switched-off account would never come back.
-                let documents = if self.skipped_accounts.contains(&account.external_ref)
-                    || self.documents_off
+                let documents = if ctx.skipped_accounts.contains(&account.external_ref)
+                    || !ctx.documents.enabled()
                 {
                     Vec::new()
                 } else {
                     parse_documents(&detail)
                 };
                 for d in documents {
-                    if self.known_documents.contains(&d.reference_id) {
+                    if known.contains(&d.reference_id) {
                         continue;
                     }
                     let Ok(bytes) = self.document(&d.reference_id).await else {
@@ -863,27 +835,26 @@ impl BankConnector for Fin4uConnector {
                         source_url: format!("fin4u:document:{}", d.reference_id),
                         date: d.date.clone(),
                     });
-                    self.known_documents.push(d.reference_id);
+                    known.insert(d.reference_id);
                 }
                 let refreshed = detail["reloadAccountDetailSuccessful"]
                     .as_bool()
                     .unwrap_or(true);
                 let has_title = !str_of(&detail, "customTitle").is_empty()
                     || !str_of(&detail, "title").is_empty();
-                if refreshed {
-                    if let Some((did, mut acc)) =
+                if refreshed
+                    && let Some((did, mut acc)) =
                         parse_accounts(&Value::Array(vec![detail]), true, &super::today())
                             .into_iter()
                             .next()
-                    {
-                        // keep the stable reference from the list entry
-                        acc.external_ref = account.external_ref.clone();
-                        if !has_title {
-                            acc.name = account.name.clone();
-                        }
-                        id = did;
-                        account = acc;
+                {
+                    // keep the stable reference from the list entry
+                    acc.external_ref = account.external_ref.clone();
+                    if !has_title {
+                        acc.name = account.name.clone();
                     }
+                    id = did;
+                    account = acc;
                 }
                 // IBAN, contract number and holder of Bausparverträge are only
                 // in the details; the external ref stays the list's.
@@ -908,10 +879,7 @@ impl BankConnector for Fin4uConnector {
             ));
             out.accounts.push(account);
         }
-        let keep: Vec<&String> = self.known_documents.iter().rev().take(2000).collect();
-        out.state = Some(serde_json::json!({
-            "documents": keep.into_iter().rev().collect::<Vec<_>>(),
-        }));
+        out.state = known.to_state();
         Ok(out)
     }
 
@@ -1039,12 +1007,14 @@ mod tests {
             .unwrap();
         assert_eq!(plain, b"geheim");
         // The server would reject MGF1-SHA-256.
-        assert!(private
-            .decrypt(
-                rsa::Oaep::<sha2::Sha256, sha2::Sha256>::new_with_mgf_hash(),
-                &cipher
-            )
-            .is_err());
+        assert!(
+            private
+                .decrypt(
+                    rsa::Oaep::<sha2::Sha256, sha2::Sha256>::new_with_mgf_hash(),
+                    &cipher
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -1204,31 +1174,6 @@ mod tests {
         assert!(login_error_kind(400, &json!({"error": "invalid_grant"})).is_ok());
         assert!(login_error_kind(401, &json!({"error": "invalid_client"})).is_err());
         assert!(login_error_kind(404, &Value::Null).is_err());
-    }
-
-    #[tokio::test]
-    async fn reads_the_accounts_a_sync_does_not_store() {
-        let mut settings = std::collections::HashMap::new();
-        settings.insert(
-            super::super::SKIPPED_ACCOUNTS.to_string(),
-            SecretString::new("fin4u:a1\nfin4u:a2".into()),
-        );
-        let ctx = ConnectContext {
-            connection_id: 1,
-            login_name: String::new(),
-            secret: SecretString::default(),
-            settings,
-            state: serde_json::json!({ "documents": ["d1"] }),
-            since: "2026-01-01".into(),
-            since_by_account: Default::default(),
-        };
-        let mut c = Fin4uConnector::new();
-        // no login: begin stops before the network, after reading the context
-        assert!(c.begin(&ctx).await.is_err());
-        assert_eq!(c.known_documents, vec!["d1".to_string()]);
-        let mut skipped: Vec<&String> = c.skipped_accounts.iter().collect();
-        skipped.sort();
-        assert_eq!(skipped, vec!["fin4u:a1", "fin4u:a2"]);
     }
 
     #[test]

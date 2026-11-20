@@ -14,6 +14,12 @@ final class DemoBannerTextTests: XCTestCase {
         XCTAssertTrue(DemoBanner.message(hasOwnVault: true, mayHoldRealData: false).contains("noch leer"))
     }
 
+    /// #952: the banner says that changes to the throw-away demo vault are reset.
+    func testResetNoteMentionsReset() {
+        XCTAssertTrue(DemoBanner.resetNote.contains("zurückgesetzt"), DemoBanner.resetNote)
+        XCTAssertTrue(DemoBanner.resetNote.contains("Beenden"), DemoBanner.resetNote)
+    }
+
     func testNoBankCount() {
         for own in [true, false] {
             for real in [true, false] {

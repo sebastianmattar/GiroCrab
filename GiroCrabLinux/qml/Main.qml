@@ -18,7 +18,10 @@ ApplicationWindow {
     // The booking list gives up width first (560 → 360) so the inspector never leaves the
     // window on small screens (e.g. 1920 px at 200 % scaling).
     minimumWidth: 240 * Theme.textScale + 360 + 280; minimumHeight: 480
-    title: AppModel.isUnlocked ? AppModel.title + " – GiroCrab" : "GiroCrab"
+    // BookingListView.swift › WindowTitle: an account or category name stays out of the title
+    // while privacy mode (or the report) hides personal data or labels
+    title: AppModel.isUnlocked && (AppModel.effectiveRedaction & (AppModel.redactPersonal | AppModel.redactLabels)) === 0
+           ? AppModel.title + " – GiroCrab" : "GiroCrab"
     color: Theme.canvas
 
     // LanguagePreference.startupQuestion (RootView on the Mac): decided once at start-up.
@@ -92,6 +95,8 @@ ApplicationWindow {
             Action { text: qsTr("Budgets anzeigen"); checkable: true; checked: AppModel.showBudgets; enabled: AppModel.isUnlocked; onToggled: AppModel.showBudgets = checked }
             // RootView.swift › Toggle("Kopfbereich minimieren") (#358)
             Action { text: qsTr("Kopfbereich minimieren"); checkable: true; checked: AppModel.compactHeader; enabled: AppModel.isUnlocked; onToggled: AppModel.compactHeader = checked }
+            // RootView.swift › Toggle("Privatmodus") ⇧⌘H (#719): hides amounts (or all personal data, Einstellungen › Allgemein)
+            Action { text: qsTr("Privatmodus"); shortcut: "Ctrl+Shift+H"; checkable: true; checked: PrivacyMode.enabled; onToggled: PrivacyMode.setEnabled(checked) }
             AppMenuSeparator {}
             // Like Mail/Notes: text size of the whole app (#343).
             Action { text: qsTr("Größer"); shortcut: "Ctrl++"; enabled: Theme.steppedTextSize(1) !== ""
@@ -339,6 +344,14 @@ ApplicationWindow {
                 checkable: true; checked: AppModel.showInspector
                 onToggled: AppModel.showInspector = checked
                 ToolTip.text: AppModel.showInspector ? qsTr("Informationen ausblenden (Strg+Alt+I)") : qsTr("Informationen einblenden (Strg+Alt+I)")
+                ToolTip.visible: hovered
+            }
+            // MainToolbar › ToolbarItem(id: "privacy") (BookingListView.swift, #719)
+            IconButton {
+                symbol: PrivacyMode.enabled ? "eye.slash" : "eye"
+                checkable: true; checked: PrivacyMode.enabled
+                onToggled: PrivacyMode.setEnabled(checked)
+                ToolTip.text: PrivacyMode.enabled ? qsTr("Privatmodus beenden (Strg+Umschalt+H)") : qsTr("Privatmodus: Beträge ausblenden (Strg+Umschalt+H)")
                 ToolTip.visible: hovered
             }
             TextField {

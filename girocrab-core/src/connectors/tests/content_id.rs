@@ -42,7 +42,7 @@ fn ids_count_per_content_not_per_position() {
 
 #[test]
 fn since_is_per_account_with_a_common_floor() {
-    let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+    let d = |s: &str| jiff::civil::Date::strptime("%Y-%m-%d", s).unwrap();
     let newest = vec![
         ("A".to_string(), Some("2026-11-01".to_string())),
         ("B".to_string(), Some("2026-10-01".to_string())), // lagging behind
@@ -235,6 +235,47 @@ fn refetch_fills_empty_field_groups_and_heals_text() {
     );
 }
 
+#[test]
+fn refetch_names_a_stored_booking_without_counterparty() {
+    // comdirect card payments were stored without counterparty before #1135
+    let (v, conn) = setup();
+    let counterparty = || -> String {
+        v.db()
+            .unwrap()
+            .query_row("SELECT counterparty FROM transactions", [], |r| r.get(0))
+            .unwrap()
+    };
+    let mut first = tx("2026-11-14", -2_340, "");
+    first.external_id = "t1".into();
+    store_fetch(
+        &v,
+        ConnectorKind::Comdirect,
+        conn,
+        fetch(vec![first.clone()]),
+    )
+    .unwrap();
+    let named = RemoteTransaction {
+        counterparty: "Beispielladen GmbH".into(),
+        ..first
+    };
+    let s = store_fetch(
+        &v,
+        ConnectorKind::Comdirect,
+        conn,
+        fetch(vec![named.clone()]),
+    )
+    .unwrap();
+    assert_eq!(s.transactions_imported, 0);
+    assert_eq!(counterparty(), "Beispielladen GmbH");
+    // a stored name is never replaced by another one
+    let other = RemoteTransaction {
+        counterparty: "Anderer Name".into(),
+        ..named
+    };
+    store_fetch(&v, ConnectorKind::Comdirect, conn, fetch(vec![other])).unwrap();
+    assert_eq!(counterparty(), "Beispielladen GmbH");
+}
+
 /// A booking imported from a MoneyMoney export into the fetched account.
 fn imported_row(v: &Vault, ext: &str, t: &RemoteTransaction, note: &str) {
     v.db()
@@ -324,4 +365,42 @@ fn refetch_merges_an_untouched_duplicate_into_its_imported_twin() {
             ("mm-3".into(), String::new()),
         ]
     );
+}
+
+#[test]
+fn bank_dates_are_stored_as_real_days() {
+    let (v, conn) = setup();
+    let with = |booking: &str, value: &str| RemoteTransaction {
+        booking_date: booking.into(),
+        value_date: value.into(),
+        ..tx("", -100, booking)
+    };
+    let txs = vec![
+        with("2026-11-05T10:00:00", "2026-11-04"),
+        with("2026-02-30", "2026-02-27"),
+        with("../x", "2026-13-01"),
+    ];
+    store_fetch(&v, ConnectorKind::Comdirect, conn, fetch(txs.clone())).unwrap();
+    let rows: Vec<(String, String)> = {
+        let db = v.db().unwrap();
+        let mut st = db
+            .prepare("SELECT booking_date, value_date FROM transactions ORDER BY id")
+            .unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let row = |b: &str, v: &str| (b.to_string(), v.to_string());
+    assert_eq!(
+        rows,
+        vec![
+            row("2026-11-05", "2026-11-04"),
+            row("2026-02-27", "2026-02-27"),
+            row(&crate::dates::today_iso(), ""),
+        ]
+    );
+    // the content ids come from what the bank sent, so the next sync adds nothing
+    let s = store_fetch(&v, ConnectorKind::Comdirect, conn, fetch(txs)).unwrap();
+    assert_eq!(s.transactions_imported, 0);
 }

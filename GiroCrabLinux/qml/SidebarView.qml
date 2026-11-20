@@ -44,8 +44,9 @@ Rectangle {
                     const byBank = m.accountView === "byBank"
                     for (const g of (byBank ? m.bankGroups : m.groups)) {
                         const listed = g.accounts.filter(shown)
-                        // while searching, hide empty sections so only hits remain
-                        if (m.isSidebarAccountSearching && !listed.length) continue
+                        // hide sections without a hit while searching, and ones holding only
+                        // archived accounts while those are hidden (#814)
+                        if (!m.isSidebarSectionListed(g.accounts)) continue
                         const open = byBank ? m.isBankGroupOpen(g.id) : m.isKindGroupOpen(g.id)
                         out.push({ type: "kindGroup", group: g, open: open, bank: byBank })
                         if (open) for (const a of listed) out.push({ type: "account", account: a, indent: 0 })
@@ -116,7 +117,7 @@ Rectangle {
         for (i += delta; i >= 0 && i < all.length; i += delta) {
             const key = rowKey(all[i])
             if (key === "") continue
-            AppModel.sidebarSelection = key
+            AppModel.selectFromSidebar(key)
             // a header page or the first row bring the header back into view
             if (i <= top) list.contentY = -list.topMargin
             else list.positionViewAtIndex(i - top, ListView.Contain)
@@ -214,7 +215,7 @@ Rectangle {
                                    text: Fmt.money(modelData.cents, modelData.currency)
                                    font.pixelSize: Theme.caption; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                                    color: allRow.selected ? Theme.text : (modelData.cents < 0 ? Theme.negative : Theme.secondary)
-                                   Sensitive {} }
+                                   Sensitive { amounts: true } }
                         }
                     }
                 } }
@@ -246,7 +247,7 @@ Rectangle {
                         Text { text: Fmt.money(g.balance_cents); font.pixelSize: Theme.caption; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                                opacity: g.in_total ? 1 : 0.6
                                color: selected ? Theme.text : (g.balance_cents < 0 ? Theme.negative : Theme.secondary)
-                               Sensitive {} }
+                               Sensitive { amounts: true } }
                     }
                     // an account goes to the top of this group; a group above it
                     // (upper half) or into it as a subgroup (lower half)
@@ -283,7 +284,7 @@ Rectangle {
                                Sensitive { labels: true; when: !modelData.bank } }   // bank names stay visible
                         Text { text: Fmt.money(g.balance_cents); font.pixelSize: Theme.caption; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                                color: selected ? Theme.text : (g.balance_cents < 0 && isLoanGroup ? Theme.loan : (g.balance_cents < 0 ? Theme.negative : Theme.secondary))
-                               Sensitive {} }
+                               Sensitive { amounts: true } }
                     }
                 } }
                 DelegateChoice { roleValue: "hint"; delegate: Item {
@@ -376,7 +377,7 @@ Rectangle {
                             Layout.fillWidth: true
                             SFIcon { symbol: c.sf_symbol; size: 15; color: Theme.withAlpha(Theme.readable(c.color_hex), 0.85); Layout.preferredWidth: 20 }
                             Text { text: c.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { labels: true } }
-                            Text { visible: c.total_cents !== 0; text: Fmt.money(c.total_cents); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive {} }
+                            Text { visible: c.total_cents !== 0; text: Fmt.money(c.total_cents); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } }
                         }
                     }
                 } }

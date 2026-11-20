@@ -666,7 +666,7 @@ extension Result where Failure == Error {
     }
 }
 
-/// Account kinds the user can pick (import, „Kontoart ändern …“), on Mac and iPhone.
+/// Account kinds the user can pick (import, Konto-Einstellungen), on Mac and iPhone.
 extension AccountKind {
     static let importChoices: [AccountKind] = [.checking, .savings, .creditCard, .paymentService, .brokerage, .cash, .loan]
 

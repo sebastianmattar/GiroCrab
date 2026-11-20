@@ -144,3 +144,104 @@ fn independent_reference_vectors_match_transport_signature_and_cbc() {
     assert_eq!(*aes(&padded, &session, Mode::Encrypt).unwrap(), encrypted);
     assert_eq!(*aes(&encrypted, &session, Mode::Decrypt).unwrap(), padded);
 }
+
+// Decrypts a response with the client key and returns the signed inner plaintext.
+fn open_inner(client_key: &PrivateKey, wire: &[u8]) -> Vec<u8> {
+    let outer = syntax::parse(wire).unwrap();
+    let Some(Value::Binary(enc_key)) = outer[1].element(6).get(3) else {
+        panic!("no session key");
+    };
+    let session = unwrap_key(client_key, enc_key).unwrap();
+    let mut plain = aes(outer[2].binary(1).unwrap(), session.as_ref(), Mode::Decrypt)
+        .unwrap()
+        .to_vec();
+    while plain.last() == Some(&0) {
+        plain.pop();
+    }
+    assert_eq!(plain.pop(), Some(0x80));
+    plain
+}
+
+// Encrypts an inner plaintext again with only the client's public key, as anyone can.
+fn reseal(client: &PublicKey, inner: &[u8], dialog: &str, message: u32) -> Vec<u8> {
+    let mut padded = inner.to_vec();
+    padded.push(0x80);
+    while !padded.len().is_multiple_of(16) {
+        padded.push(0);
+    }
+    let session = [7u8; 32];
+    let encrypted_key = wrap_key(client, &session).unwrap();
+    let mut head = SegmentBuilder::new("HNVSK", 998, 3)
+        .raw("RAH:10")
+        .raw("4")
+        .raw("1")
+        .raw("1::1")
+        .raw("1:20260101:000000")
+        .build();
+    head.pop();
+    head.extend_from_slice(format!("+2:2:14:@{}@", encrypted_key.len()).as_bytes());
+    head.extend_from_slice(&encrypted_key);
+    head.extend_from_slice(b":6:1+280:12345678:client:V:1:1+0'");
+    let data = SegmentBuilder::new("HNVSD", 999, 1)
+        .binary(&aes(&padded, &session, Mode::Encrypt).unwrap())
+        .build();
+    let end = SegmentBuilder::new("HNHBS", 9, 1)
+        .raw(&message.to_string())
+        .build();
+    let assemble = |size: usize| {
+        let mut out = SegmentBuilder::new("HNHBK", 1, 3)
+            .raw(&format!("{size:012}"))
+            .raw("300")
+            .de(&[dialog])
+            .raw(&message.to_string())
+            .build();
+        out.extend_from_slice(&head);
+        out.extend_from_slice(&data);
+        out.extend_from_slice(&end);
+        out
+    };
+    assemble(assemble(0).len())
+}
+
+#[test]
+fn segment_inserted_before_signature_is_rejected_even_with_mid_text_binary_marker() {
+    let client_key = PrivateKey::new(&mut getrandom::SysRng, 2048).unwrap();
+    let bank_key = PrivateKey::new(&mut getrandom::SysRng, 2048).unwrap();
+    let client = peer(client_key.clone(), &bank_key, "client", "bank");
+    let mut bank = peer(bank_key, &client_key, "bank", "client");
+    let payload = vec![SegmentBuilder::new("HIRMG", 3, 2).raw("0010::OK").build()];
+    let wire = bank.build(&payload, "1", "dialog", 1).unwrap();
+    let plain = open_inner(&client_key, &wire);
+    let public = client_key.to_public_key();
+    let split = plain.windows(6).position(|w| w == b"HNSHA:").unwrap();
+    let (signed, trailer) = plain.split_at(split);
+    // A text value ending in '@<length of HNSHA>@' must not hide the HNSHA framing.
+    let mut forged = signed.to_vec();
+    forged.extend_from_slice(format!("HISAL:4:5+X:Y:1,00@{}@'", trailer.len()).as_bytes());
+    forged.extend_from_slice(trailer);
+    assert!(
+        syntax::parse(&forged)
+            .unwrap()
+            .iter()
+            .any(|s| s.id() == "HISAL")
+    );
+    assert!(
+        client
+            .unwrap(&reseal(&public, &forged, "dialog", 1), 1, "dialog")
+            .is_err()
+    );
+    // Control: the genuine plaintext, sealed again, still verifies.
+    assert!(
+        client
+            .unwrap(&reseal(&public, &plain, "dialog", 1), 1, "dialog")
+            .is_ok()
+    );
+}
+
+#[test]
+fn segment_ranges_follow_parser_binary_rule() {
+    let data = b"A:1:1+x@3@'b'B:2:1+@2@'@'\r\nC:3:1+y'";
+    let ranges = segment_ranges(data).unwrap();
+    assert_eq!(ranges.len(), syntax::parse(data).unwrap().len());
+    assert_eq!(&data[ranges[0].0..ranges[0].1], b"A:1:1+x@3@'");
+}

@@ -179,7 +179,7 @@ Sheet {
                     FormRow {
                         label: qsTr("Ursprünglicher Kreditbetrag")
                         TextField { Layout.preferredWidth: 260; placeholderText: qsTr("optional")
-                                    text: sheet.originalText; onTextEdited: sheet.originalText = text }
+                                    text: sheet.originalText; onTextEdited: sheet.originalText = text; Sensitive { amounts: true; when: parent.text !== "" } }
                     }
                 }
                 FormSection {
@@ -192,7 +192,7 @@ Sheet {
                     FormRow {
                         label: qsTr("Restschuld am Stichtag")
                         TextField { id: balanceField; Layout.preferredWidth: 260; placeholderText: qsTr("z. B. %1").arg(Fmt.plain(840000))
-                                    text: sheet.balanceText; onTextEdited: sheet.balanceText = text }
+                                    text: sheet.balanceText; onTextEdited: sheet.balanceText = text; Sensitive { amounts: true; when: parent.text !== "" } }
                     }
                 }
                 FormSection {
@@ -274,8 +274,8 @@ Sheet {
                 spacing: 8
                 Text { text: Fmt.medium(modelData.booking_date); font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.secondary }
                 Text { text: modelData.merchant.name === "" ? modelData.counterparty : modelData.merchant.name
-                       font.pixelSize: Theme.callout; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
-                Text { text: Fmt.money(modelData.amount_cents); font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.text }
+                       font.pixelSize: Theme.callout; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
+                Text { text: Fmt.money(modelData.amount_cents); font.pixelSize: Theme.callout; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
             }
         }
         Text {
@@ -289,19 +289,19 @@ Sheet {
         id: pr
         readonly property var s: sheet.preview ? sheet.preview.status : null
         spacing: 8
-        FormRow { visible: pr.s !== null && sheet.isAnchor && sheet.existing !== null; label: qsTr("Restschuld bisher")
+        FormRow { visible: pr.s !== null && sheet.isAnchor && sheet.existing !== null; label: qsTr("Restschuld bisher"); amounts: true
                   value: sheet.existing ? Fmt.money(-sheet.existing.status.remaining_cents) : "" }
         RowLayout {
             visible: pr.s !== null
             Layout.fillWidth: true
             Text { text: qsTr("Restschuld"); font.pixelSize: Theme.body; font.weight: Font.Bold; color: Theme.text; Layout.fillWidth: true }
             Text { text: pr.s ? Fmt.money(-pr.s.remaining_cents) : ""; font.pixelSize: Theme.body; font.weight: Font.Bold
-                   font.features: { "tnum": 1 }; color: Theme.text }
+                   font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
         }
         FormRow { visible: pr.s !== null; label: qsTr("Stand vom"); value: pr.s ? Fmt.medium(pr.s.as_of_date) : "" }
-        FormRow { visible: pr.s !== null; label: qsTr("Raten seit Stichtag")
+        FormRow { visible: pr.s !== null; label: qsTr("Raten seit Stichtag"); amounts: true
                   value: pr.s ? pr.s.payment_count + " · " + Fmt.money(pr.s.paid_cents) : "" }
-        FormRow { visible: pr.s !== null && pr.s.interest_cents > 0; label: qsTr("davon Zinsen / Tilgung")
+        FormRow { visible: pr.s !== null && pr.s.interest_cents > 0; label: qsTr("davon Zinsen / Tilgung"); amounts: true
                   value: pr.s ? Fmt.money(pr.s.interest_cents) + " / " + Fmt.money(pr.s.principal_cents) : "" }
         FormRow { visible: pr.s !== null && pr.s.before_anchor_count > 0; label: qsTr("Ältere Buchungen (nicht gezählt)")
                   value: pr.s ? String(pr.s.before_anchor_count) : "" }

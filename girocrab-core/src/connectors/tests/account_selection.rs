@@ -65,10 +65,11 @@ fn second_login_defers_the_shared_child_account() {
     .unwrap();
     assert_eq!(count(&v), 2);
     // nothing to choose on the first login
-    assert!(v
-        .pending_account_selection_connections()
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.pending_account_selection_connections()
+            .unwrap()
+            .is_empty()
+    );
 
     store_fetch(
         &v,
@@ -119,10 +120,11 @@ fn choosing_fetch_imports_the_held_back_account() {
         .set_connection_account_choices(b, vec!["KIND".into()])
         .unwrap();
     assert_eq!(count(&v), 2);
-    assert!(v
-        .pending_account_selection_connections()
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.pending_account_selection_connections()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -145,10 +147,11 @@ fn choosing_skip_keeps_it_out_permanently() {
     )
     .unwrap();
     v.clone().set_connection_account_choices(b, vec![]).unwrap();
-    assert!(v
-        .pending_account_selection_connections()
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.pending_account_selection_connections()
+            .unwrap()
+            .is_empty()
+    );
     store_fetch(
         &v,
         ConnectorKind::Fnz,
@@ -159,9 +162,11 @@ fn choosing_skip_keeps_it_out_permanently() {
     assert_eq!(count(&v), 1);
     // still listed (and re-enableable) in the settings
     let choices = v.connection_account_choices(b).unwrap();
-    assert!(choices
-        .iter()
-        .any(|c| c.account_ref == "KIND" && !c.enabled));
+    assert!(
+        choices
+            .iter()
+            .any(|c| c.account_ref == "KIND" && !c.enabled)
+    );
 }
 
 #[test]
@@ -178,10 +183,11 @@ fn same_number_at_a_different_bank_is_no_overlap() {
     )
     .unwrap();
     assert_eq!(count(&v), 2);
-    assert!(v
-        .pending_account_selection_connections()
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.pending_account_selection_connections()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -228,10 +234,11 @@ fn deleting_a_login_forgets_its_account_choice() {
     assert_eq!(v.pending_account_selection_connections().unwrap(), vec![b]);
     let key_b = crate::connectors::account_selection::key(&v.db().unwrap(), b).unwrap();
     v.delete_bank_connection(b).unwrap();
-    assert!(v
-        .pending_account_selection_connections()
-        .unwrap()
-        .is_empty());
+    assert!(
+        v.pending_account_selection_connections()
+            .unwrap()
+            .is_empty()
+    );
     let left: i64 = v
         .db()
         .unwrap()
@@ -254,9 +261,11 @@ fn skipped_refs_name_switched_off_and_archived_accounts() {
     store_fetch(&v, ConnectorKind::AlteLeipziger, conn, fetch(all)).unwrap();
     {
         let db = v.db().unwrap();
-        assert!(super::super::account_selection::skipped_refs(&db, conn)
-            .unwrap()
-            .is_empty());
+        assert!(
+            super::super::account_selection::skipped_refs(&db, conn)
+                .unwrap()
+                .is_empty()
+        );
     }
     v.clone()
         .set_connection_account_choices(conn, vec!["A".into(), "C".into()])

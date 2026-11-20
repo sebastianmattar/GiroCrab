@@ -1,14 +1,18 @@
 import QtQuick
 
 // PrivacyRedaction.swift `.sensitive()` (#301): put `Sensitive {}` inside an item that shows
-// personal or financial data (`Sensitive { labels: true }` for category, group, budget and
-// security names, hidden only on request). While Hilfe › Problem melden captures the main
-// window (or with `--redact` / `--redact=labels`) it covers its parent with an opaque box,
+// personal data, `Sensitive { amounts: true }` on money (amounts, balances, sums, shares, chart
+// axis values and readouts; also text that mixes names and amounts, `[.personal, .amounts]`) and
+// `Sensitive { labels: true }` on category, group, budget and security names (hidden only on
+// request). While Hilfe › Problem melden captures the main window, in privacy mode (#719,
+// PrivacyMode) or with `--redact[=labels]` / `--privacy[=all]` it covers its parent with an opaque box,
 // above the parent's own children (a text field's text, a chart's marks). A Text is covered
 // only where it draws glyphs, so a label that fills its row does not black out the row.
 Rectangle {
     /// `.sensitive(.labels)`
     property bool labels: false
+    /// `.sensitive(.amounts)`: hidden by privacy mode „Beträge“ and by every personal redaction.
+    property bool amounts: false
     /// `.sensitive([])`: false when there is nothing personal (bank name, empty field).
     property bool when: true
 
@@ -21,7 +25,7 @@ Rectangle {
         : Math.max(6, overflows || parent.height <= 0 ? parent.paintedHeight : Math.min(parent.height, parent.paintedHeight))
 
     visible: when && parent !== null
-             && (AppModel.redaction & (labels ? AppModel.redactLabels : AppModel.redactPersonal)) !== 0
+             && (AppModel.effectiveRedaction & (labels ? AppModel.redactLabels : amounts ? AppModel.redactAmounts : AppModel.redactPersonal)) !== 0
     z: 100000
     radius: 3
     color: Theme.redactionFill

@@ -1,8 +1,8 @@
 [package]
 name = "girocrab-windows"
 # Kept equal to [workspace.package] in ../Cargo.toml.
-version = "0.8.5"
-edition = "2021"
+version = "0.8.6"
+edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/GiroCrab/GiroCrab"
 description = "GiroCrab for Windows (MVP): Slint front end on the GiroCrab Rust core"

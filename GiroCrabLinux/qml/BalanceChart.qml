@@ -225,7 +225,7 @@ Item {
             font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.tertiary
             x: chart.plotWidth + 4
             y: Math.max(0, Math.min(chart.height - chart.axisHeight - height, chart.yAt(modelData) - height / 2))
-            Sensitive {}
+            Sensitive { amounts: true }
         }
     }
     // x-axis like BalanceHeaderView.swift › xAxis: marks on calendar boundaries –
@@ -312,12 +312,12 @@ Item {
             Text { anchors.horizontalCenter: parent.horizontalCenter; font.pixelSize: Theme.caption; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                    color: readout.cents < 0 ? Theme.outflow : Theme.text
                    text: readout.visible ? (chart.isBars ? "Ø " : "") + Fmt.money(readout.cents) : ""
-                   Sensitive {} }
+                   Sensitive { amounts: true } }
         }
     }
     Accessible.role: Accessible.Chart
     Accessible.name: qsTr("Saldoverlauf")
-    Accessible.description: hovered < 0 || hovered >= count ? ""
+    Accessible.description: hovered < 0 || hovered >= count || (AppModel.effectiveRedaction & AppModel.redactAmounts) !== 0 ? ""
         : isBars ? qsTr("%1: Ø %2, Ende %3").arg(title(hovered)).arg(Fmt.money(bars[hovered].average)).arg(Fmt.money(bars[hovered].closing))
                  : title(hovered) + ": " + Fmt.money(points[hovered].balance_cents)
     MouseArea {

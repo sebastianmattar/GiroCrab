@@ -77,6 +77,7 @@ public struct GiroCrabScenes: Scene {
         .defaultSize(width: 460, height: 360)
         Window("Abruf-Protokoll", id: "sync-log") {
             SyncLogView()
+                .toastOverlay()
                 .environment(model)
                 .privacyModeEnvironment()
                 .appTextSize(textSize.effective)
@@ -103,6 +104,8 @@ public struct GiroCrabScenes: Scene {
             // (a window of its own, like a sheet) over the main window, so its
             // views get the same redaction and mark personal data.
             SettingsView()
+                // Notices raised here appear here, not behind it in the main window (#1145).
+                .toastOverlay()
                 .environment(model)
                 .privacyModeEnvironment()
                 .appTextSize(textSize.effective)
@@ -731,12 +734,16 @@ struct MainSplitView: View {
         .alert(model.errorTitle ?? String(localized: "Etwas ist schiefgelaufen"),
                isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             if let retry = model.errorRetry {
-                Button("Erneut versuchen") { model.errorMessage = nil; retry() }
+                Button("Erneut versuchen") { model.errorOnClose = nil; model.errorMessage = nil; retry() }
             }
             ForEach(Array(model.errorAlternatives.enumerated()), id: \.offset) { _, alt in
-                Button(alt.title) { model.errorMessage = nil; alt.action() }
+                Button(alt.title) { model.errorOnClose = nil; model.errorMessage = nil; alt.action() }
             }
-            Button("OK", role: .cancel) { model.errorMessage = nil }
+            if let close = model.errorCloseTitle {
+                Button(close, role: .cancel) { model.errorMessage = nil }
+            } else {
+                Button("OK", role: .cancel) { model.errorMessage = nil }
+            }
         } message: {
             Text(model.errorMessage ?? "")
         }
@@ -762,24 +769,7 @@ struct MainSplitView: View {
                 }
                 .dialogSuppressionToggle(isSuppressed: $enableBankingNoticeSuppressed)
         }
-        .overlay(alignment: .bottom) {
-            if let toast = model.toast {
-                Label(toast, systemImage: "checkmark.circle.fill")
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-                    .padding(.bottom, 22)
-                    .transition(Motion.slide(.bottom))
-                    // id: a changed or extended notice gets its full time again
-                    .task(id: toast) {
-                        try? await Task.sleep(nanoseconds: 3_500_000_000)
-                        // replaced meanwhile: the new notice's own task takes over
-                        guard !Task.isCancelled else { return }
-                        withAnimation { model.toast = nil }
-                    }
-            }
-        }
-        .animation(Motion.animation(.spring(duration: 0.3)), value: model.toast)
+        .toastOverlay()
     }
 }
 

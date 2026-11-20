@@ -6,7 +6,7 @@
 //! delete".
 
 use super::syntax::{Segment, SegmentBuilder};
-use super::{sepa, FinTsConnector, SepaAccount};
+use super::{FinTsConnector, SepaAccount, sepa};
 use crate::connectors::{ConnectContext, RemoteStandingOrder};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;

@@ -4,9 +4,9 @@
 
 use std::collections::HashSet;
 
-use super::syntax::{escape, SegmentBuilder};
-use super::{fints_date, mt535, FinTsConnector, SepaAccount, UpdAccount, CONSORSBANK_BLZ, COUNTRY};
-use crate::connectors::{today, ConnectContext};
+use super::syntax::{SegmentBuilder, escape};
+use super::{CONSORSBANK_BLZ, COUNTRY, FinTsConnector, SepaAccount, UpdAccount, fints_date, mt535};
+use crate::connectors::{ConnectContext, today};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::trf;
 use crate::iban::normalize_iban;

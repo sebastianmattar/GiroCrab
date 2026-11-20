@@ -15,6 +15,14 @@ final class KeychainSyncAvailabilityTests: XCTestCase {
         XCTAssertTrue(VaultKeyManager.iCloudKeychainAvailable(probe: errSecSuccess))
     }
 
+    #if os(macOS)
+    /// The `swift test` process carries no entitlements, like the notarized Mac app.
+    /// Only a write reveals that: a lookup answers "not found" either way.
+    func testUnentitledProcessCannotShare() {
+        XCTAssertFalse(VaultKeyManager.canShareViaICloudKeychain)
+    }
+    #endif
+
     func testUnavailableSwitchExplainsItself() {
         XCTAssertNil(KeychainSyncNote.text(available: true))
         let note = KeychainSyncNote.text(available: false)

@@ -1,7 +1,9 @@
 #!/bin/sh
-# Spiegelt den ersten CI-Schritt: ein Formatfehler lässt sonst den ganzen Rust-Job scheitern.
+# Runs every cheap CI lint (fmt, FinTS ID scan, notices, scripts/lint-*.sh, catalogs, Linux texts)
+# in a few seconds: a red lint step otherwise fails the whole Rust job and skips the Swift job.
+# Compile checks (clippy, swift build): scripts/verify-fast.sh without --lint-only.
 # Aktivieren: git config core.hooksPath .githooks
-cargo fmt --all -- --check || { echo "pre-push: cargo fmt --all ausführen und erneut pushen." >&2; exit 1; }
-scripts/fints-registrierung.sh scan >/dev/null || { echo "pre-push: scripts/fints-registrierung.sh scan meldet eine eingecheckte Produkt-ID." >&2; exit 1; }
-scripts/xcstrings.py check >/dev/null || { echo "pre-push: String Catalog nicht sortiert – scripts/xcstrings.py format ausführen." >&2; exit 1; }
-scripts/lint-vault-access.sh >/dev/null || { echo "pre-push: Vault-Zugriff aus einer View – über AppModel (vaultOffMain/isUnlocked) gehen." >&2; exit 1; }
+scripts/verify-fast.sh --lint-only >/dev/null || {
+  echo "pre-push: scripts/verify-fast.sh --lint-only ist rot (Ausgabe oben); beheben und erneut pushen." >&2
+  exit 1
+}

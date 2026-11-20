@@ -206,10 +206,10 @@ pub fn parse_ebon_text(text: &str) -> Result<Ebon, EbonError> {
     // VAT letters from the footer (`A  7,0 %`).
     let mut vat_by_letter: BTreeMap<char, u32> = BTreeMap::new();
     for line in &lines[total_idx..] {
-        if let Some(c) = RE_VAT_LINE.captures(line) {
-            if let (Some(l), Some(r)) = (c["l"].chars().next(), parse_rate_bp(&c["r"])) {
-                vat_by_letter.entry(l).or_insert(r);
-            }
+        if let Some(c) = RE_VAT_LINE.captures(line)
+            && let (Some(l), Some(r)) = (c["l"].chars().next(), parse_rate_bp(&c["r"]))
+        {
+            vat_by_letter.entry(l).or_insert(r);
         }
     }
 

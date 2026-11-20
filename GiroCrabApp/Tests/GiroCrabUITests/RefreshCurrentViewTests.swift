@@ -30,13 +30,28 @@ final class RefreshCurrentViewTests: XCTestCase {
         XCTAssertEqual(started, [.group("g-1")])
     }
 
-    func testSingleAccountSyncsItsConnection() async throws {
+    func testSingleAccountSyncsOnlyThatAccount() async throws {
         let account = try XCTUnwrap(model.allAccounts.first { acc in
             acc.connectionId.flatMap { cid in model.connections.first { $0.id == cid } }.map { !model.usesPortal($0) } ?? false
         })
         model.sidebarSelection = .account(account.id)
         await model.refreshCurrentView()
-        XCTAssertEqual(started, [.connection(try XCTUnwrap(account.connectionId))])
+        XCTAssertEqual(started, [.account(account.id)])
+    }
+
+    /// A failed "<Konto> abrufen" is retried for the account only (#1124);
+    /// "Abrufen" of the login fetches all of it again.
+    func testFailedAccountSyncKeepsItsAccountUntilAFullSync() throws {
+        let account = try XCTUnwrap(model.allAccounts.first { acc in
+            acc.connectionId.flatMap { cid in model.connections.first { $0.id == cid } }.map { !model.usesPortal($0) } ?? false
+        })
+        let connection = try XCTUnwrap(model.connections.first { $0.id == account.connectionId })
+        model.syncAccountID = account.id
+        model.syncingConnectionID = connection.id
+        model.finishSync(error: NSError(domain: "test", code: 1))
+        XCTAssertEqual(model.syncAccountID, account.id)
+        model.requestFullSync(connection)
+        XCTAssertNil(model.syncAccountID)
     }
 
     func testAccountWithoutConnectionDoesNotSync() async throws {

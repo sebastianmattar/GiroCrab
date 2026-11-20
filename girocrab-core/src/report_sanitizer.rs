@@ -50,10 +50,10 @@ pub fn sanitize_report_text(text: String, known_terms: Vec<String>) -> String {
 fn cached_terms_regexes(known_terms: &[String]) -> Result<Arc<Vec<Regex>>, regex::Error> {
     static CACHE: Mutex<Option<(u64, Arc<Vec<Regex>>)>> = Mutex::new(None);
     let key = terms_key(known_terms);
-    if let Some((cached_key, regexes)) = CACHE.lock().ok().as_deref().and_then(Option::as_ref) {
-        if *cached_key == key {
-            return Ok(Arc::clone(regexes));
-        }
+    if let Some((cached_key, regexes)) = CACHE.lock().ok().as_deref().and_then(Option::as_ref)
+        && *cached_key == key
+    {
+        return Ok(Arc::clone(regexes));
     }
     let regexes = Arc::new(terms_regexes(known_terms)?);
     if let Ok(mut cache) = CACHE.lock() {

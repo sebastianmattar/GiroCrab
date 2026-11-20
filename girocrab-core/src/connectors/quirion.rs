@@ -2,8 +2,8 @@
 //! WKWebView; only the selected account/portfolio data crosses the bridge.
 use std::{collections::HashSet, sync::Arc};
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rusqlite::{params, OptionalExtension};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 
 use super::{FetchResult, RemoteAccount, RemoteHolding, RemoteTransaction, SyncSummary};
@@ -27,7 +27,7 @@ fn text<'a>(v: &'a Value, key: &str) -> CoreResult<&'a str> {
 
 fn date(v: &Value, key: &str) -> CoreResult<String> {
     let s = text(v, key)?.get(..10).ok_or_else(invalid)?;
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| invalid())?;
+    jiff::civil::Date::strptime("%Y-%m-%d", s).map_err(|_| invalid())?;
     Ok(s.into())
 }
 
@@ -530,29 +530,43 @@ mod tests {
                 .len(),
             1
         );
-        assert!(vault
-            .clone()
-            .import_quirion_document(connection, metadata.clone(), b"not a PDF".to_vec())
-            .is_err());
-        assert!(vault
-            .clone()
-            .import_quirion_document(connection, metadata.clone(), b"%PDF-1.7 synthetic".to_vec())
-            .unwrap());
-        assert!(!vault
-            .clone()
-            .import_quirion_document(connection, metadata, b"%PDF-1.7 synthetic".to_vec())
-            .unwrap());
-        assert!(vault
-            .clone()
-            .pending_quirion_documents(connection, list)
-            .unwrap()
-            .is_empty());
+        assert!(
+            vault
+                .clone()
+                .import_quirion_document(connection, metadata.clone(), b"not a PDF".to_vec())
+                .is_err()
+        );
+        assert!(
+            vault
+                .clone()
+                .import_quirion_document(
+                    connection,
+                    metadata.clone(),
+                    b"%PDF-1.7 synthetic".to_vec()
+                )
+                .unwrap()
+        );
+        assert!(
+            !vault
+                .clone()
+                .import_quirion_document(connection, metadata, b"%PDF-1.7 synthetic".to_vec())
+                .unwrap()
+        );
+        assert!(
+            vault
+                .clone()
+                .pending_quirion_documents(connection, list)
+                .unwrap()
+                .is_empty()
+        );
         let wrong = vault
             .add_bank_connection(ConnectorKind::PayPal, "Other".into(), "test".into())
             .unwrap();
-        assert!(vault
-            .clone()
-            .import_quirion_snapshot(wrong, fixture().to_string())
-            .is_err());
+        assert!(
+            vault
+                .clone()
+                .import_quirion_snapshot(wrong, fixture().to_string())
+                .is_err()
+        );
     }
 }

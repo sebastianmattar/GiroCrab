@@ -21,11 +21,14 @@ use async_trait::async_trait;
 use regex::Regex;
 use zeroize::Zeroize;
 
-use super::{
-    http_client_same_host, BankConnector, ChallengeResponse, ConnectContext, ContentIds,
-    FetchResult, Phase, RemoteAccount, RemoteTransaction,
+use super::html::{
+    FORM, INPUT, LINK, attr, attrs, element_by_id, parse_amount, parse_date, table_cells,
+    table_texts, text,
 };
-use crate::dates::{find_de_date, iso};
+use super::{
+    BankConnector, ChallengeResponse, ConnectContext, ContentIds, FetchResult, Phase,
+    RemoteAccount, RemoteTransaction, http_client_same_host,
+};
 use crate::error::{CoreError, CoreResult};
 use crate::i18n::tr;
 use crate::models::AccountKind;
@@ -35,36 +38,19 @@ const BASE: &str = "https://dashboard.uberspace.de";
 /// Account external refs: `uberspace:<asteroid>`.
 pub(crate) const REF_PREFIX: &str = "uberspace:";
 
-static TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>").unwrap());
-static ATTR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)([A-Za-z_:][-A-Za-z0-9_:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?"#)
-        .unwrap()
-});
-pub(super) static FORM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<form\b([^>]*)>(.*?)</form\s*>").unwrap());
-pub(super) static INPUT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<input\b([^>]*)>").unwrap());
-static ROW: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<tr\b[^>]*>(.*?)</tr\s*>").unwrap());
-static CELL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<(td|th)\b[^>]*>(.*?)</(?:td|th)\s*>").unwrap());
-static ANY_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").unwrap());
-pub(super) static LINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<a\b[^>]*>.*?</a\s*>").unwrap());
 static ASTEROID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_-]{0,31}$").unwrap());
 
 fn page_changed() -> CoreError {
-    CoreError::Protocol {
-        message: tr("Uberspace: Anmeldeseite nicht erkannt (Dashboard geändert?).").into(),
-    }
+    CoreError::protocol(tr(
+        "Uberspace: Anmeldeseite nicht erkannt (Dashboard geändert?).",
+    ))
 }
 
 fn invalid() -> CoreError {
-    CoreError::InvalidInput {
-        message: tr("Uberspace: Unvollständige oder ungültige Dashboard-Antwort. Es wurden keine Daten übernommen.").into(),
-    }
+    CoreError::invalid(tr(
+        "Uberspace: Unvollständige oder ungültige Dashboard-Antwort. Es wurden keine Daten übernommen.",
+    ))
 }
 
 fn wrong_credentials() -> CoreError {
@@ -76,106 +62,7 @@ fn wrong_credentials() -> CoreError {
     }
 }
 
-// ------------------------------------------------------------------ HTML helpers
-
-/// Attributes of a tag body (`name="x" type=hidden checked`), names lower-case.
-pub(super) fn attrs(body: &str) -> Vec<(String, String)> {
-    ATTR.captures_iter(body)
-        .map(|c| {
-            let v = c
-                .get(2)
-                .or(c.get(3))
-                .or(c.get(4))
-                .map(|m| crate::text::decode_html_entities(m.as_str()))
-                .unwrap_or_default();
-            (c[1].to_ascii_lowercase(), v)
-        })
-        .collect()
-}
-
-pub(super) fn attr<'a>(a: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    a.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
-}
-
-/// Visible text of an HTML fragment, whitespace collapsed.
-pub(super) fn text(fragment: &str) -> String {
-    let plain = ANY_TAG.replace_all(fragment, " ");
-    crate::text::decode_html_entities(&plain)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Inner HTML of the element with `id` (nested elements of the same tag are
-/// counted, so the matching end tag is found).
-pub(super) fn element_by_id<'a>(html: &'a str, id: &str) -> Option<&'a str> {
-    let open = TAG
-        .captures_iter(html)
-        .find(|c| attr(&attrs(&c[2]), "id") == Some(id))?;
-    let name = open[1].to_ascii_lowercase();
-    let start = open.get(0)?.end();
-    if open[2].trim_end().ends_with('/') {
-        return Some("");
-    }
-    let lower = html[start..].to_ascii_lowercase();
-    let (o, c) = (format!("<{name}"), format!("</{name}"));
-    // Next `<name` that is the whole tag name (`<b` must not match `<br`).
-    let find_open = |from: usize| {
-        let mut from = from;
-        while let Some(i) = lower[from..].find(&o).map(|i| from + i) {
-            let end = i + o.len();
-            if lower[end..]
-                .chars()
-                .next()
-                .is_none_or(|ch| !ch.is_ascii_alphanumeric())
-            {
-                return Some(i);
-            }
-            from = end;
-        }
-        None
-    };
-    let mut depth = 1usize;
-    let mut pos = 0usize;
-    loop {
-        let next_close = lower[pos..].find(&c).map(|i| pos + i)?;
-        match find_open(pos) {
-            Some(i) if i < next_close => {
-                depth += 1;
-                pos = i + o.len();
-            }
-            _ => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(&html[start..start + next_close]);
-                }
-                pos = next_close + c.len();
-            }
-        }
-    }
-}
-
-/// Inner HTML of the `<td>` cells of each `<tr>`; rows of only `<th>` cells
-/// come back empty.
-pub(super) fn table_cells(table: &str) -> Vec<Vec<&str>> {
-    ROW.captures_iter(table)
-        .map(|r| {
-            let row = r.get(1).map_or("", |m| m.as_str());
-            CELL.captures_iter(row)
-                .filter(|c| c[1].eq_ignore_ascii_case("td"))
-                .filter_map(|c| c.get(2).map(|m| m.as_str()))
-                .collect()
-        })
-        .collect()
-}
-
-/// `<td>` texts of each `<tr>`; rows of only `<th>` cells come back empty.
-fn table_rows(table: &str) -> Vec<Vec<String>> {
-    table_cells(table)
-        .into_iter()
-        .map(|cells| cells.into_iter().map(text).collect())
-        .collect()
-}
+// ------------------------------------------------------------------ parsing
 
 /// Text of a booking cell without its links: those are actions next to the
 /// booking ("Einzahlung | <a>Quittung</a>" issues a receipt), not part of
@@ -232,10 +119,9 @@ fn ensure_dashboard(url: &url::Url) -> CoreResult<()> {
     if url.scheme() == "https" && url.host_str() == Some(HOST) {
         return Ok(());
     }
-    Err(CoreError::Protocol {
-        message: tr("Uberspace: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.")
-            .into(),
-    })
+    Err(CoreError::protocol(tr(
+        "Uberspace: Unerwartete Weiterleitung zu einer fremden Adresse – abgebrochen.",
+    )))
 }
 
 fn login_form(html: &str, page: &url::Url) -> CoreResult<LoginForm> {
@@ -299,7 +185,7 @@ fn parse_asteroids(html: &str) -> Vec<String> {
     let Some(table) = element_by_id(html, "dotqmailtable") else {
         return out;
     };
-    for row in table_rows(table) {
+    for row in table_texts(table) {
         let Some(name) = row.first().map(|s| s.trim().to_string()) else {
             continue;
         };
@@ -308,25 +194,6 @@ fn parse_asteroids(html: &str) -> Vec<String> {
         }
     }
     out
-}
-
-/// "-12,34 €", "1.234,56&nbsp;EUR", "−5,00" → cents.
-fn parse_amount(s: &str) -> Option<i64> {
-    let cleaned: String = s
-        .replace(['\u{2212}', '\u{2013}'], "-")
-        .replace("EUR", "")
-        .chars()
-        .filter(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | ',' | '.'))
-        .collect();
-    if !cleaned.chars().any(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    crate::money::parse_cents(&cleaned).ok()
-}
-
-/// `DD.MM.YYYY` anywhere in the cell → `YYYY-MM-DD`.
-pub(super) fn parse_date(s: &str) -> Option<String> {
-    find_de_date(s).map(iso)
 }
 
 /// Balance and bookings of one Asteroid from its accounting page. Rows
@@ -465,9 +332,9 @@ impl BankConnector for UberspaceConnector {
     async fn fetch(&mut self, ctx: &ConnectContext) -> CoreResult<FetchResult> {
         let asteroids = parse_asteroids(&self.page("/meta").await?);
         if asteroids.is_empty() {
-            return Err(CoreError::Protocol {
-                message: tr("Uberspace: Keine Asteroids gefunden (Dashboard geändert?).").into(),
-            });
+            return Err(CoreError::protocol(tr(
+                "Uberspace: Keine Asteroids gefunden (Dashboard geändert?).",
+            )));
         }
         let mut out = FetchResult::default();
         for asteroid in asteroids {
@@ -640,24 +507,5 @@ mod tests {
         let (acc, tx) =
             parse_accounting(r#"<b id="total">0,00 €</b>"#, "neu", "2000-01-01").unwrap();
         assert_eq!((acc.balance_cents, tx.len()), (0, 0));
-    }
-
-    #[test]
-    fn element_by_id_handles_nesting() {
-        let html = r#"<div id="a"><div>x</div><div>y</div></div><div>z</div>"#;
-        assert_eq!(element_by_id(html, "a"), Some("<div>x</div><div>y</div>"));
-        assert_eq!(element_by_id(html, "b"), None);
-        let bold = r#"<b id="t">1<br>2<b>3</b>4</b>rest"#;
-        assert_eq!(element_by_id(bold, "t"), Some("1<br>2<b>3</b>4"));
-    }
-
-    #[test]
-    fn amounts_and_dates() {
-        assert_eq!(parse_amount("−12,30 €"), Some(-1230));
-        assert_eq!(parse_amount("1.234,56 EUR"), Some(123_456));
-        assert_eq!(parse_amount("+0,07"), Some(7));
-        assert_eq!(parse_amount("—"), None);
-        assert_eq!(parse_date("1.2.2026").as_deref(), Some("2026-02-01"));
-        assert_eq!(parse_date("31.02.2026"), None);
     }
 }

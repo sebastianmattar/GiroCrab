@@ -96,6 +96,24 @@ ScrollView {
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
                    text: qsTr("Vergrößert die Schrift in der ganzen App. Auch im Menü Darstellung mit %1 / %2 / %3.")
                              .arg(Fmt.keys("Strg+Plus")).arg(Fmt.keys("Strg+Minus")).arg(Fmt.keys("Strg+0")) }
+            // SettingsView.swift › Toggle("Privatmodus") + Picker("Im Privatmodus ausblenden") (#719)
+            CheckBox {
+                text: qsTr("Privatmodus")
+                checked: PrivacyMode.enabled
+                onToggled: PrivacyMode.setEnabled(checked)
+            }
+            SettingsFormRow {
+                label: qsTr("Im Privatmodus ausblenden")
+                AppComboBox {
+                    Layout.preferredWidth: 260 * Theme.textScale
+                    model: PrivacyMode.scopes
+                    textRole: "title"; valueRole: "id"
+                    currentIndex: PrivacyMode.scopes.findIndex(s => s.id === PrivacyMode.scope)
+                    onActivated: PrivacyMode.setScope(currentValue)
+                }
+            }
+            Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
+                   text: qsTr("Blendet Beträge, Namen, Kontonummern und Verwendungszwecke aus, wenn du die App jemandem zeigst. Auf Wunsch nur die Beträge.") }
             CheckBox {
                 text: qsTr("Auswertungen in der Übersicht anzeigen")
                 checked: AppModel.showStatistics
@@ -137,7 +155,9 @@ ScrollView {
                 }
             }
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
-                   text: qsTr("Eine ausgewählte Buchung gilt nach dieser Zeit als geprüft – wie eine gelesene E-Mail. Bei Mehrfachauswahl nie.") }
+                   text: AppModel.autoReviewDelay === "account"
+                         ? qsTr("Angeklickte Umsätze werden sofort als gelesen markiert. Beim Wechsel auf ein anderes Konto werden alle übrigen ungelesenen Umsätze des vorherigen Kontos als gelesen markiert, unabhängig von Zeitraum und Filtern.")
+                         : qsTr("Eine ausgewählte Buchung gilt nach dieser Zeit als geprüft – wie eine gelesene E-Mail. Bei Mehrfachauswahl nie.") }
         }
         // SettingsView.swift › TransferSettingsSection: opt-in clipboard check (#663), per device
         SettingsFormSection {
@@ -197,6 +217,27 @@ ScrollView {
                 text: qsTr("Logo-Cache leeren")
                 onClicked: MerchantLogos.clearLogoCache()
             }
+        }
+        // AutomationSettings.swift › AutoSyncSettingsSection (#546): kept outside the vault (QSettings
+        // `[autoSync] hours`), so it is active again after a relaunch. Logic: AutoSync.qml
+        SettingsFormSection {
+            title: qsTr("Abruf")
+            SettingsFormRow {
+                label: qsTr("Automatischer Abruf")
+                AppComboBox {
+                    readonly property int current: AutoSync.selection
+                    // a value set elsewhere stays selectable
+                    readonly property var options: AutoSync.hourOptions.indexOf(current) >= 0
+                        ? AutoSync.hourOptions : AutoSync.hourOptions.concat([current])
+                    Layout.preferredWidth: 200 * Theme.textScale
+                    model: options.map(h => ({ id: h, title: AutoSync.label(h) }))
+                    textRole: "title"; valueRole: "id"
+                    currentIndex: options.indexOf(current)
+                    onActivated: AutoSync.setHours(currentValue)
+                }
+            }
+            Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
+                   text: qsTr("Ruft die Kontostände im gewählten Abstand ab, solange GiroCrab läuft und der Tresor entsperrt ist. Bei gesperrtem Tresor wird der Abruf übersprungen und nach dem Entsperren nachgeholt. Es werden nur Zugänge mit gespeicherter PIN oder gültiger Freigabe abgerufen, nie mit einem Anmeldedialog.") }
         }
         Item { implicitHeight: 8 }
     }

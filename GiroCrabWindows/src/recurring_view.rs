@@ -2,14 +2,14 @@
 //! recurring, the month overview, planned payments, standing orders and the salary cycle.
 //! Pure functions over core records, unit-tested on every platform.
 
+use girocrab_core::StandingOrderLimits;
 use girocrab_core::planned::{PlannedKind, PlannedPayment, PlannedTotals};
 use girocrab_core::recurring::{
-    normalize_custom_dates, IgnoredRecurring, RecurrenceInterval, RecurringMonthItem,
-    RecurringMonthOverview, RecurringSeries,
+    IgnoredRecurring, RecurrenceInterval, RecurringMonthItem, RecurringMonthOverview,
+    RecurringSeries, normalize_custom_dates,
 };
 use girocrab_core::salary::SalaryCycle;
 use girocrab_core::standing_orders::StandingOrderInfo;
-use girocrab_core::StandingOrderLimits;
 
 /// Intervals offered when marking a booking; index = `RecurrenceInterval` order below.
 pub const INTERVAL_CHOICES: [&str; 5] = [
@@ -325,11 +325,7 @@ pub fn planned_summary(t: &PlannedTotals, badge: u32, money: &dyn Fn(i64) -> Str
 }
 
 fn unit_text(unit: &str) -> &'static str {
-    if unit == "W" {
-        "Wochen"
-    } else {
-        "Monate"
-    }
+    if unit == "W" { "Wochen" } else { "Monate" }
 }
 
 pub fn standing_lines(

@@ -19,13 +19,29 @@ pub(crate) struct DebitSubmission {
 
 /// What the session sends to the bank.
 pub(crate) enum OrderKind {
-    Single,
-    /// `job` then describes the sum (see `Vault::begin_batch_transfer`).
-    Batch(BatchTransferJob),
-    /// `job` then describes the sum.
+    Single(TransferJob),
+    /// `summary` is the whole batch as one transfer (sum, shared date and
+    /// reference), recorded when the bank books it as one line.
+    Batch {
+        batch: BatchTransferJob,
+        summary: TransferJob,
+    },
     Debit(DebitSubmission),
-    /// `job` is then a placeholder.
     Standing(StandingOrderJob),
+}
+
+impl OrderKind {
+    /// The EndToEndId the outcome reports. Collections and standing orders
+    /// have no single one for the whole order, so they get a fresh id that is
+    /// never sent to the bank.
+    fn end_to_end_id(&self) -> String {
+        match self {
+            OrderKind::Single(job) | OrderKind::Batch { summary: job, .. } => {
+                job.end_to_end_id.clone()
+            }
+            OrderKind::Debit(_) | OrderKind::Standing(_) => new_end_to_end_id(),
+        }
+    }
 }
 
 /// Where the session stands. Every stage after `Submitted` closes the dialog
@@ -49,7 +65,6 @@ enum Stage {
 struct TransferState {
     connector: Box<dyn BankConnector>,
     ctx: ConnectContext,
-    job: TransferJob,
     order: OrderKind,
     account_id: i64,
     stage: Stage,
@@ -79,7 +94,6 @@ impl TransferSession {
         connector: Box<dyn BankConnector>,
         ctx: ConnectContext,
         order: OrderKind,
-        job: TransferJob,
         account_id: i64,
     ) -> Self {
         Self {
@@ -87,7 +101,6 @@ impl TransferSession {
             state: AsyncMutex::new(TransferState {
                 connector,
                 ctx,
-                job,
                 order,
                 account_id,
                 stage: Stage::LoggingIn,
@@ -129,17 +142,19 @@ impl TransferSession {
                     return Err(e);
                 }
                 Ok(Phase::Challenge(c)) => {
-                    return Ok(TransferStep::NeedsChallenge { challenge: c })
+                    return Ok(TransferStep::NeedsChallenge { challenge: c });
                 }
                 Ok(Phase::Pending(c)) => return Ok(TransferStep::StillWaiting { challenge: c }),
                 Ok(Phase::ConfirmPayee(check)) => {
-                    return Ok(TransferStep::NeedsPayeeConfirmation { check })
+                    return Ok(TransferStep::NeedsPayeeConfirmation { check });
                 }
                 Ok(Phase::Ready) if st.stage == Stage::LoggingIn => {
                     st.stage = Stage::Submitted;
                     phase = match &st.order {
-                        OrderKind::Single => st.connector.send_transfer(&st.ctx, &st.job).await,
-                        OrderKind::Batch(b) => st.connector.send_batch_transfer(&st.ctx, b).await,
+                        OrderKind::Single(job) => st.connector.send_transfer(&st.ctx, job).await,
+                        OrderKind::Batch { batch, .. } => {
+                            st.connector.send_batch_transfer(&st.ctx, batch).await
+                        }
                         OrderKind::Debit(d) => {
                             st.connector.send_direct_debit(&st.ctx, &d.job).await
                         }
@@ -163,7 +178,7 @@ impl TransferSession {
                             Ok(TransferStep::Finished {
                                 outcome: TransferOutcome {
                                     instant,
-                                    end_to_end_id: st.job.end_to_end_id.clone(),
+                                    end_to_end_id: st.order.end_to_end_id(),
                                     record_error,
                                 },
                             })
@@ -185,15 +200,18 @@ impl TransferSession {
         match &st.order {
             OrderKind::Standing(o) => self.vault.record_standing_order(st.account_id, o),
             OrderKind::Debit(d) => self.vault.record_direct_debit(st.account_id, d),
-            OrderKind::Batch(b) => self.vault.record_batch_transfer(st.account_id, b, &st.job),
+            OrderKind::Batch { batch, summary } => {
+                self.vault
+                    .record_batch_transfer(st.account_id, batch, summary)
+            }
             // scheduled: shown under "Geplant" until the bank books it, not
             // as a booking dated today
-            OrderKind::Single if st.job.execution_date.is_some() => {
-                self.vault.record_planned_transfer(st.account_id, &st.job)
+            OrderKind::Single(job) if job.execution_date.is_some() => {
+                self.vault.record_planned_transfer(st.account_id, job)
             }
-            OrderKind::Single => self.vault.record_pending_transfer(
+            OrderKind::Single(job) => self.vault.record_pending_transfer(
                 st.account_id,
-                &st.job,
+                job,
                 if instant {
                     "Echtzeitüberweisung (vorgemerkt)"
                 } else {
@@ -213,14 +231,14 @@ impl TransferSession {
             // money: no optimistic booking and no mandate update. Either way
             // the user checks with the bank first.
             OrderKind::Standing(_) | OrderKind::Debit(_) => Ok(()),
-            OrderKind::Batch(b) => {
+            OrderKind::Batch { batch, summary } => {
                 self.vault
-                    .record_batch_pending(st.account_id, b, &st.job, "(Status unklar)")
+                    .record_batch_pending(st.account_id, batch, summary, "(Status unklar)")
             }
-            OrderKind::Single => self.vault.record_pending_transfer(
+            OrderKind::Single(job) => self.vault.record_pending_transfer(
                 st.account_id,
-                &st.job,
-                if st.job.instant {
+                job,
+                if job.instant {
                     "Echtzeitüberweisung (Status unklar)"
                 } else {
                     "Überweisung (Status unklar)"
@@ -234,7 +252,7 @@ impl TransferSession {
         }
         TransferStep::OutcomeUnknown {
             reason,
-            end_to_end_id: st.job.end_to_end_id.clone(),
+            end_to_end_id: st.order.end_to_end_id(),
         }
     }
 }
@@ -281,12 +299,12 @@ impl TransferSession {
             Stage::Executed => {
                 return CancelOutcome::CancellationFailed {
                     reason: tr("Die Überweisung wurde bereits ausgeführt.").into(),
-                }
+                };
             }
             Stage::OutcomeUnknown if !st.connector.has_open_order() => {
                 return CancelOutcome::CancellationUnknown {
                     reason: tr("Ob die Überweisung ausgeführt wurde, ist unklar.").into(),
-                }
+                };
             }
             // A closed session only needs another round if the bank may still
             // hold an open order from an earlier, unconfirmed cancellation.

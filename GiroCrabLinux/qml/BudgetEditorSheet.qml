@@ -35,6 +35,7 @@ Sheet {
                 horizontalAlignment: TextInput.AlignRight
                 font.features: { "tnum": 1 }
                 onAccepted: sheet.save()
+                Sensitive { amounts: true; when: parent.text !== "" }
             }
             Text { text: qsTr("€ pro Monat"); font.pixelSize: Theme.body; color: Theme.secondary }
         }

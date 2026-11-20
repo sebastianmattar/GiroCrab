@@ -25,7 +25,7 @@ type GraySink = extern "C" fn(
     stride: c_int,
 );
 
-extern "C" {
+unsafe extern "C" {
     fn girocrab_scan_page(
         data: *const c_uchar,
         len: usize,
@@ -101,10 +101,10 @@ pub fn epc_payload(data: &[u8]) -> Option<String> {
     for (index, size) in sizes.into_iter().take(SHARP_PAGES).enumerate() {
         let (_, page) = render(data, index as c_int, SHARP_SCALE);
         // a photo (or a page already at MAX_SIDE) comes back unchanged: nothing new to find
-        if let Some(g) = page.filter(|g| (g.width, g.height) != size) {
-            if let Some(found) = first_epc(&g) {
-                return Some(found);
-            }
+        if let Some(g) = page.filter(|g| (g.width, g.height) != size)
+            && let Some(found) = first_epc(&g)
+        {
+            return Some(found);
         }
     }
     None

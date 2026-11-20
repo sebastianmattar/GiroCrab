@@ -18,7 +18,7 @@ GiroCrab ist eine lokale Anwendung: Ein Rust-Kern (`girocrab-core`) hält alle D
 | Bereich | Maßnahme |
 |---|---|
 | Daten in Ruhe | Der Tresor ist eine **SQLCipher**-Datenbank (verschlüsselt, mit Schlüsselableitung aus dem Tresorschlüssel). Speicherschutz (`cipher_memory_security`) ist in Produktions-Builds aktiv. |
-| Schlüssel und Zugangsdaten | Der Tresorschlüssel und Bank-Zugangsdaten liegen im **Schlüsselbund** (macOS/iOS Keychain) bzw. im **Secret Service** (Linux), nicht in Dateien oder Einstellungen. |
+| Schlüssel und Zugangsdaten | Der Tresorschlüssel und Bank-Zugangsdaten liegen im **Schlüsselbund** (macOS/iOS Keychain), im **Secret Service** (Linux) bzw. im **Windows Credential Manager** (Windows), nicht in Dateien oder Einstellungen (der Android-Alpha-Build öffnet noch keinen eigenen Tresor). |
 | Geheimnisse im Speicher | PINs, Passwörter, Tokens und Schlüssel werden in `Zeroizing`-Containern gehalten und beim Freigeben überschrieben. |
 | Netzwerk | Verbindungen zu Banken und Portalen nutzen **striktes TLS** (Zertifikatsprüfung, kein Abschalten per Option). Weiterleitungen werden nur **innerhalb desselben Hosts** gefolgt, damit Zugangsdaten und Tokens nie an Dritte gehen. |
 | Oberfläche | Die Ansicht kann mit `.sensitive()` Personenbezogenes, Beträge und Bezeichnungen verdecken (Datenschutzmodus, Fehlerbericht-Screenshots). Texte für öffentliche Fehlerberichte laufen durch `sanitize_report_text`. |
@@ -67,7 +67,7 @@ display it. There is no GiroCrab account and no GiroCrab server that sees financ
 | Area | Measure |
 |---|---|
 | Data at rest | The vault is a **SQLCipher** database (encrypted, key derived from the vault key). Memory security (`cipher_memory_security`) is on in production builds. |
-| Keys and credentials | The vault key and bank credentials live in the **Keychain** (macOS/iOS) or the **Secret Service** (Linux), never in files or preferences. |
+| Keys and credentials | The vault key and bank credentials are stored in the **Keychain** (macOS/iOS), **Secret Service** (Linux), or **Windows Credential Manager** (Windows), never in plain files or settings (the Android alpha build does not open an own vault yet). |
 | Secrets in memory | PINs, passwords, tokens and keys are held in `Zeroizing` containers and overwritten on drop. |
 | Network | Bank and portal connections use **strict TLS** (certificate validation, no opt-out). Redirects are followed **only within the same host**, so credentials and tokens never reach third parties. |
 | UI | `.sensitive()` can hide personal data, amounts and labels (privacy mode, bug-report screenshots). Text for public bug reports passes through `sanitize_report_text`. |

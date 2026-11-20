@@ -161,7 +161,9 @@ QtObject {
         }
         if (used.length === 1) {
             out.title = used[0].name
-            out.filter_notes = (out.filter_notes || []).filter(n => n.indexOf(used[0].name) < 0)
+            // the tag note stays even when the account name is part of it („Auto“ in „Tags: Auto-Kosten“)
+            const tagNote = report.tag_note || ""
+            out.filter_notes = (out.filter_notes || []).filter(n => n === tagNote || n.indexOf(used[0].name) < 0)
         } else {
             out.title = qsTr("Umsätze")
         }
@@ -214,7 +216,7 @@ QtObject {
     // MARK: - AppModel+Printing (export queries)
 
     /// Vault filter for an export: the list's filter with the sheet's accounts and period.
-    /// `ignoreListFilters` (CAMT.053) drops search, category, direction, merchant and
+    /// `ignoreListFilters` (CAMT.053) drops search, category, direction, tags, merchant and
     /// review status, so the closing balance matches the bank's.
     function exportFilter(accountIDs, preset, o, ignoreListFilters) {
         const filter = AppModel.currentFilter()
@@ -230,6 +232,8 @@ QtObject {
             filter.merchant_key = null
             filter.direction = "All"
             filter.checked = null
+            filter.tag_ids = []
+            filter.untagged_only = false
         }
         const salary = AppModel.salaryCycle ? AppModel.salaryCycle.last_date : null
         const range = presetRange(preset, o ? o.customFrom : "", o ? o.customTo : "", salary)
@@ -240,10 +244,12 @@ QtObject {
     /// Bookings for an export, read on a worker thread (`list_transactions` enriches every row).
     function loadExportBookings(accountIDs, preset, bookingIDs, o, ignoreListFilters, done, failed) {
         const filter = exportFilter(accountIDs, preset, o, ignoreListFilters)
+        // the tag note of exactly this query, taken when it starts (`exportReport`)
+        const tagNote = TagFilter.noteFor(filter)
         AppModel.coreAsync("list_transactions", { filter: filter }, page => {
             let rows = page.transactions
             if (bookingIDs) rows = rows.filter(b => bookingIDs.indexOf(b.id) >= 0)
-            done(rows)
+            done(rows, tagNote)
         }, failed)
     }
 
@@ -258,7 +264,8 @@ QtObject {
     }
 
     /// Report for already loaded export bookings (cheap: no vault access).
-    function exportReport(bookings, accountIDs, preset, bookingIDs, o) {
+    /// `tagNote`: from `loadExportBookings`, the tag filter its query applied.
+    function exportReport(bookings, accountIDs, preset, bookingIDs, o, tagNote) {
         const accounts = AppModel.allAccounts.map(a => ({ id: a.id, name: a.name, iban: a.iban, balance_cents: a.balance_cents,
                                                           balance_date: a.balance_date, currency: a.currency, owner: a.owner }))
         let title = AppModel.title
@@ -269,9 +276,11 @@ QtObject {
         // The list's own income/expense filter is named in the printout header.
         const notes = AppModel.directionFilter === "Income" ? [PrintReport.directionTitle("income")]
                     : AppModel.directionFilter === "Expense" ? [PrintReport.directionTitle("expenses")] : []
+        // and the tag filter (#228)
+        if (tagNote) notes.push(tagNote)
         return { title: title, period_label: exportPeriodLabel(preset, bookingIDs, o),
                  rows: bookings.map(b => PrintReport.rowFromBooking(b)), accounts: accounts, daily_balances: ({}),
-                 generated_at: new Date(), filter_notes: notes }
+                 generated_at: new Date(), filter_notes: notes, tag_note: tagNote || "" }
     }
 
     // MARK: - ExportSheet › buildFileOptional
@@ -281,10 +290,10 @@ QtObject {
     function buildFile(accountIDs, bookingIDs, o, done, failed) {
         const preset = o.scope === "selection" ? "current" : o.periodPreset
         const camt = isCamt(o.format)
-        loadExportBookings(accountIDs.length ? accountIDs : null, preset, bookingIDs, o, camt, bookings => {
+        loadExportBookings(accountIDs.length ? accountIDs : null, preset, bookingIDs, o, camt, (bookings, tagNote) => {
             if (!bookings.length) { done(null); return }
             try {
-                let report = exportReport(bookings, accountIDs, preset, bookingIDs, o)
+                let report = exportReport(bookings, accountIDs, preset, bookingIDs, o, tagNote)
                 report.generated_at = new Date()
                 report = prepareStatement(report)
                 // CAMT.053: the core reads the booked balances itself (#483)

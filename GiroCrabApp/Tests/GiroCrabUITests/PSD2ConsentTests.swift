@@ -47,12 +47,18 @@ final class PSD2ConsentTests: XCTestCase {
         let conn = BankConnection(id: 1, connector: .enableBanking, displayName: "C24", loginName: "", bankCode: "",
                                   sfSymbol: "", lastSyncUnix: nil, allAccountsArchived: false)
         let plain = model.syncNotice(conn, SyncSummary(accountsUpdated: 1, transactionsImported: 5, transactionsCategorized: 2, transactionsSkippedArchived: 0,
-                                                       newAccounts: [], revokedAccounts: [], postboxDocuments: nil))
+                                                       newAccounts: [], revokedAccounts: [], postboxDocuments: nil, warnings: []))
         XCTAssertTrue(plain.contains("C24"))
         XCTAssertFalse(plain.contains("·"))
         let changed = model.syncNotice(conn, SyncSummary(accountsUpdated: 1, transactionsImported: 0, transactionsCategorized: 0, transactionsSkippedArchived: 0,
-                                                         newAccounts: ["GLS Giro"], revokedAccounts: ["Pocket", "Gemeinschaftskonto"], postboxDocuments: nil))
+                                                         newAccounts: ["GLS Giro"], revokedAccounts: ["Pocket", "Gemeinschaftskonto"], postboxDocuments: nil, warnings: []))
         XCTAssertTrue(changed.contains("GLS Giro"))
         XCTAssertTrue(changed.contains("Pocket, Gemeinschaftskonto"))
+        // #1083: failed parts point to the log; their texts (account names) stay out of the notice
+        let partial = model.syncNotice(conn, SyncSummary(accountsUpdated: 1, transactionsImported: 0, transactionsCategorized: 0, transactionsSkippedArchived: 0,
+                                                         newAccounts: [], revokedAccounts: [], postboxDocuments: nil,
+                                                         warnings: ["Cash: Umsätze (HKCAZ/camt.052) – TAN verlangt"]))
+        XCTAssertTrue(partial.contains("Abruf-Protokoll"), partial)
+        XCTAssertFalse(partial.contains("Cash"), partial)
     }
 }

@@ -13,11 +13,11 @@
 
 use std::ops::{Deref, DerefMut};
 use std::panic::Location;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use zeroize::Zeroizing;
 
 use crate::error::{CoreError, CoreResult};
@@ -26,6 +26,7 @@ pub(crate) mod accounts;
 mod backup;
 mod balances;
 pub(crate) mod bookings;
+pub(crate) mod cache;
 mod categories;
 pub(crate) mod connections;
 pub(crate) mod enable_banking_apps;
@@ -35,7 +36,7 @@ mod rules;
 mod settings;
 mod transfer_pairs;
 
-pub(crate) use bookings::{enrich, sql_int_list, LIVE_BOOKINGS_SQL, PENDING_SQL};
+pub(crate) use bookings::{LIVE_BOOKINGS_SQL, PENDING_SQL, enrich, sql_int_list};
 pub use connections::ConnectionStatus;
 pub use enable_banking_apps::ConnectionEnableBankingApp;
 pub use merge::MergeStats;
@@ -209,7 +210,11 @@ pub struct Vault {
     /// doesn't ask the keychain again. Wiped on drop.
     key: Mutex<Zeroizing<Vec<u8>>>,
     /// Booking history behind category suggestions, kept until the data changes (#664).
-    pub(crate) suggestions: crate::suggestions::HistoryCache,
+    pub(crate) suggestions: cache::ChangeCache<crate::suggestions::History>,
+    /// Known recipients of the transfer form, kept until the data changes (#978).
+    pub(crate) recipients: cache::ChangeCache<crate::recipients::Recipients>,
+    /// Bumped when the data is replaced without moving the change count (`cache::DataStamp`).
+    data_generation: AtomicU64,
     _open: OpenVault,
 }
 
@@ -282,9 +287,10 @@ impl Vault {
     pub(crate) fn db(&self) -> CoreResult<DbGuard<'_>> {
         let caller = Location::caller();
         let asked = Instant::now();
-        let conn = self.conn.lock().map_err(|_| CoreError::Database {
-            message: "vault lock poisoned".into(),
-        })?;
+        let conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(poisoned) => self.recover_poisoned(poisoned.into_inner())?,
+        };
         let waited = asked.elapsed();
         if cfg!(debug_assertions) && waited > SLOW_LOCK {
             eprintln!(
@@ -301,10 +307,35 @@ impl Vault {
         })
     }
 
-    fn kept_key(&self) -> CoreResult<MutexGuard<'_, Zeroizing<Vec<u8>>>> {
-        self.key.lock().map_err(|_| CoreError::Database {
-            message: "vault key lock poisoned".into(),
-        })
+    /// A panic while a `DbGuard` was held poisons the mutex, which would fail
+    /// every later call until restart. The connection itself is still usable,
+    /// but the panicking call may have left a transaction open or a database
+    /// attached (merge, snapshot): undo both, then lift the poison. If that
+    /// fails the mutex stays poisoned, so the next call tries again.
+    #[cold]
+    fn recover_poisoned<'a>(
+        &'a self,
+        conn: MutexGuard<'a, Connection>,
+    ) -> CoreResult<MutexGuard<'a, Connection>> {
+        if !conn.is_autocommit() {
+            conn.execute_batch("ROLLBACK")?;
+        }
+        let attached: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_database_list WHERE name NOT IN ('main', 'temp')")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        for name in attached {
+            conn.execute("DETACH DATABASE ?1", [name])?;
+        }
+        self.conn.clear_poison();
+        eprintln!("vault: recovered the connection after a panic");
+        Ok(conn)
+    }
+
+    /// The key is only ever replaced as a whole, so a panic while it was
+    /// locked can't leave it half-written: ignore the poison.
+    fn kept_key(&self) -> MutexGuard<'_, Zeroizing<Vec<u8>>> {
+        self.key.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn apply_key(conn: &Connection, key: &[u8]) -> CoreResult<()> {
@@ -338,6 +369,12 @@ impl Vault {
 
     /// Best-effort repairs after opening (or restoring) a vault.
     fn repair(conn: &Connection) {
+        // triggers/views the app never creates (e.g. restored by older versions
+        // from a crafted backup) could rewrite device settings on later writes
+        let _ = backup::drop_triggers_and_views(conn, "main");
+        // stored secrets of logins whose deletion an older version merged in
+        // from another device
+        let _ = Self::purge_deleted_connection_secrets(conn);
         // categories/rules without a sync key (rows written outside the app's own
         // paths); used to happen as part of the per-open schema probes
         let _ = crate::sync_merge::fill_missing_uuids(conn);
@@ -346,10 +383,23 @@ impl Vault {
         // fold MoneyMoney accounts a merge added next to the bank account
         // that took them over (keeps bookings)
         let _ = crate::sync_merge::twins::fold_twins(conn);
+        // card holds an older „Abrufweg umstellen“ turned into bookings (#1134)
+        let _ = connections::drop_switched_holds(conn);
         // repair "MÃ¼ller" -> "Müller" stored by older versions
         let _ = crate::text::repair_stored_text(conn);
         // one-time purge of favicons that don't belong to a known brand
         let _ = crate::insights::purge_untrusted_logos(conn);
+    }
+
+    fn purge_deleted_connection_secrets(conn: &Connection) -> CoreResult<()> {
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM bank_connections WHERE deleted_ms IS NOT NULL")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        for id in ids {
+            Self::purge_connection_secrets(conn, id)?;
+        }
+        Ok(())
     }
 
     fn migrate(conn: &mut Connection) -> CoreResult<()> {
@@ -361,6 +411,8 @@ impl Vault {
         crate::schema::check_not_too_new(conn)?;
         // Connection settings first: neither pragma takes effect inside a transaction.
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        // Drop untrusted triggers/views before schema steps or marker writes can fire them.
+        let _ = backup::drop_triggers_and_views(conn, "main");
         // All pending steps in one transaction (SQLite DDL is transactional): an
         // aborted run leaves the old schema and `user_version`, never half of it.
         crate::schema::migrate(conn)
@@ -411,7 +463,7 @@ impl Vault {
         let key = Zeroizing::new(key);
         // Default (SQLCipher 4 settings) first; if the key check fails, retry with
         // explicit compatibility modes for vaults written by older SQLCipher builds.
-        // The cipher_compatibility pragma must be issued before the key.
+        // SQLCipher wants cipher_compatibility after the key, so it is set second.
         let mut tried: Vec<&str> = Vec::new();
         let mut opened: Option<Connection> = None;
         let mut first_err: Option<CoreError> = None;
@@ -482,6 +534,8 @@ impl Vault {
             list_cache: bookings::ListCache::default(),
             key: Mutex::new(key),
             suggestions: Default::default(),
+            recipients: Default::default(),
+            data_generation: AtomicU64::new(0),
             _open: OpenVault::new(),
         }))
     }
@@ -496,7 +550,7 @@ impl Vault {
         }
         let pragma = Zeroizing::new(format!("PRAGMA rekey = \"x'{}'\";", hex::encode(&*key)));
         self.db()?.execute_batch(&pragma)?;
-        *self.kept_key()? = key;
+        *self.kept_key() = key;
         Ok(())
     }
 
@@ -504,7 +558,7 @@ impl Vault {
     /// (replacing it), for the sync folder. Runs under the connection lock,
     /// so concurrent writes never end up half in the copy.
     pub fn write_snapshot(&self, dest_path: String) -> Result<(), CoreError> {
-        let raw_key = Zeroizing::new(format!("x'{}'", hex::encode(&**self.kept_key()?)));
+        let raw_key = Zeroizing::new(format!("x'{}'", hex::encode(&**self.kept_key())));
         self.export_to(&dest_path, &raw_key)
     }
 
@@ -590,12 +644,11 @@ mod upgrade_tests {
             let mut st = c
                 .prepare("SELECT name FROM pragma_table_info('transactions')")
                 .unwrap();
-            let names = st
-                .query_map([], |r| r.get(0))
+
+            st.query_map([], |r| r.get(0))
                 .unwrap()
                 .collect::<Result<_, _>>()
-                .unwrap();
-            names
+                .unwrap()
         };
         for col in ["purpose_code", "gvc", "salary_flag"] {
             assert!(cols.iter().any(|c| c == col), "{col} missing");
@@ -689,5 +742,54 @@ mod index_tests {
         assert_eq!(old, 0);
         drop(db);
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod poison_tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    /// A panic inside an open transaction with a database attached neither
+    /// locks the vault for good nor leaves the transaction or the attachment
+    /// behind.
+    #[test]
+    fn panic_under_the_lock_rolls_back_and_recovers() {
+        let dir = crate::test_support::TempDir::new("gc-poison");
+        let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![5u8; 32]).unwrap();
+        let res = catch_unwind(AssertUnwindSafe(|| {
+            let db = v.db().unwrap();
+            db.execute_batch(
+                "ATTACH DATABASE ':memory:' AS other KEY '';
+                 BEGIN; INSERT INTO account_groups(name) VALUES ('G');",
+            )
+            .unwrap();
+            panic!("panic inside a transaction");
+        }));
+        assert!(res.is_err());
+        assert!(v.conn.is_poisoned());
+
+        let db = v.db().unwrap();
+        assert!(db.is_autocommit());
+        let groups: i64 = db
+            .query_row("SELECT count(*) FROM account_groups", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(groups, 0);
+        db.execute_batch("ATTACH DATABASE ':memory:' AS other KEY ''")
+            .unwrap();
+        drop(db);
+        assert!(!v.conn.is_poisoned());
+    }
+
+    #[test]
+    fn panic_under_the_key_lock_keeps_the_key() {
+        let dir = crate::test_support::TempDir::new("gc-poison-key");
+        let v = Vault::open(dir.join("v.db").to_string_lossy().into(), vec![6u8; 32]).unwrap();
+        let res = catch_unwind(AssertUnwindSafe(|| {
+            let _key = v.kept_key();
+            panic!("panic while holding the key");
+        }));
+        assert!(res.is_err());
+        assert_eq!(**v.kept_key(), [6u8; 32]);
     }
 }

@@ -9,14 +9,16 @@ Rust core (`girocrab-core`, UniFFI) + SwiftUI app (`GiroCrabApp`). Root = this d
 - `girocrab-core/src/vault/` – `impl Vault` per feature: `accounts.rs`, `bookings.rs` (list_transactions/paging), `categories.rs`, `connections.rs` (bank logins, stored PIN), `rules.rs`, `settings.rs`, `merge.rs`
 - `girocrab-core/src/schema.rs` – versioned schema migrations (see `docs/ARCHITECTURE.md`)
 - `girocrab-core/src/connectors/` – `mod.rs` (submodule decls + shared HTTP helpers), `types.rs` (`BankConnector`
-  trait + DTOs), `catalog.rs` (`descriptor`, `make_connector*`), `sync_session.rs` / `transfer_session.rs` (FFI state
-  machines), `persist.rs` (`impl Vault`: `store_fetch`, `begin_sync`/`begin_transfer`), tests in `connectors/tests/`;
-  connector impls alongside: `fints/`, `comdirect.rs`, `trade_republic.rs`, `enable_banking.rs`, `paypal.rs`
+  trait + DTOs), `catalog.rs` (`descriptor`, `make_connector*`), `bank_directory.rs` (search routing + curated PSD2 catalog),
+  `sync_session.rs` / `transfer_session.rs` (FFI state machines), `persist.rs` (`impl Vault`: `store_fetch`,
+  `begin_sync`/`begin_transfer`), `html.rs` (helpers for connectors that read web pages), tests in `connectors/tests/`; connector impls alongside: `fints/`, `comdirect.rs`,
+  `trade_republic.rs`, `enable_banking.rs` (`needs_lean_request` 90d cap for Revolut/Spuerkeess/N26), `paypal.rs`
 - `girocrab-core/src/importers/` – one-off file/web-capture importers: `moneymoney_db.rs` (encrypted SQLCipher database import),
   `moneymoney_import.rs` (CSV/XML/CAMT/MT940 exports), `portal_import.rs` (Amex/Amazon Visa web + CSV/PDF import),
   `amazon_orders.rs`
 - `girocrab-core/src/tags.rs` – booking tags (#228): schema step, `impl Vault` API, booking tag loading; `tags/merge.rs` (iCloud merge of tags and tag sets), `tags/tests.rs`
 - `girocrab-core/src/merchants.rs` – merchant matching
+- `girocrab-core/src/recipients.rs` – known recipients of the transfer form (one per IBAN, cached), hidden IBANs + merge (#978)
 - `girocrab-core/src/documents.rs` – booking documents / PDF text extraction
 - `girocrab-core/src/text.rs` – text helpers (mojibake repair etc.)
 - `girocrab-core/src/local_api.rs` + `local_api/server.rs` – read-only local interface for external analysis (#136): queries, scope/token, Unix socket server (`docs/local-api.md`)
@@ -39,7 +41,8 @@ Other UI files live in the same `GiroCrabUI/` dir. A view with its own design pa
 ## Builds
 - **Swift-only change** (only `GiroCrabApp/**/*.swift`): NEVER rebuild `girocrab-core` or run `./build-xcframework.sh`. Run only `swift build -q` (in `GiroCrabApp/`) or `xcodebuild -quiet`.
 - Rust change: `cargo check -q -p girocrab-core`; rebuild the xcframework only if the UniFFI API changed.
-- Before every push run `cargo fmt --all`: CI fails on `cargo fmt --check` and then skips the Swift job. Enable the hook once: `git config core.hooksPath .githooks`.
+- Before every push run `cargo fmt --all`: CI fails on `cargo fmt --check` and then skips the Swift job. Enable the hook once: `git config core.hooksPath .githooks`
+  (pre-push runs every cheap CI lint via `scripts/verify-fast.sh --lint-only`, ~10 s; without the flag it adds clippy and the serde check for the changed files, `--tests` the unit tests).
 - Always pass `-q`/`--quiet` to `cargo check`, `cargo test`, `xcodebuild`. If output is still long, pipe through `tail -n 40`.
 - Before pushing a PR (also Swift-only ones; CI runs these on every PR): `cargo fmt --all -- --check` and `cargo clippy -q --workspace --all-targets -- -D warnings`. After pushing, check `gh pr checks`.
   Under clippy the root `build.rs` skips the xcframework + Swift app build (~8 s instead of ~90 s after a core
@@ -89,6 +92,11 @@ Internal code identifiers (module, function, test and file names) are exempt; `s
   `scripts/lint-vault-access.sh` enforces this in CI.
 - `vault.list_transactions` enriches every row in the filter (merchant, flow, sums); `limit`/`offset`
   only trim the result. Never call it for a count or a sum – add a SQL aggregate.
+- **Multi-currency invariant (#569):** Never sum amounts across different currencies into one total. `EUR` is the primary
+  aggregate currency; non-EUR currencies are grouped and displayed separately per currency (*„Zusätzlich: …“*).
+- **PR size & schema splitting:** Keep each PR to one focused concern (~15–20 files max). Oversized multi-feature PRs are
+  automatically put on `hold` by the review gate. If a feature needs a schema migration, land the schema step + core model
+  in a small standalone PR first so parallel PRs do not collide on `STEPS` numbers.
 - An edit must either reload synchronously or declare what it invalidates (`rulesStale`,
   `dashboardStale`, `categoryRefreshTask`). A cancelled background load must never be the only
   thing that would have refreshed a view.

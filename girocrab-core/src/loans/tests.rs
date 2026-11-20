@@ -215,10 +215,11 @@ fn rule_links_rates_and_drives_the_account_balance() {
         })
         .unwrap();
     assert_eq!(page.transactions.len(), 3);
-    assert!(page
-        .transactions
-        .iter()
-        .all(|b| b.flow == crate::merchants::FlowKind::Loan));
+    assert!(
+        page.transactions
+            .iter()
+            .all(|b| b.flow == crate::merchants::FlowKind::Loan)
+    );
     assert_eq!(page.consumption_cents, 0);
     // the Giro view is unchanged
     let page = v
@@ -272,9 +273,11 @@ fn rule_links_rates_and_drives_the_account_balance() {
     v.update_manual_loan(loan, s2.clone()).unwrap();
     let links = v.list_loan_links().unwrap();
     assert_eq!(links.len(), 3); // r3 has no "Kreditvertrag", rates[2] is manual now
-    assert!(links
-        .iter()
-        .any(|l| l.transaction_id == rates[2] && !l.by_rule));
+    assert!(
+        links
+            .iter()
+            .any(|l| l.transaction_id == rates[2] && !l.by_rule)
+    );
     s2.match_expr = String::new();
     v.update_manual_loan(loan, s2).unwrap();
     assert_eq!(v.list_loan_links().unwrap().len(), 1);
@@ -371,6 +374,32 @@ fn merge_takes_over_manual_loans_and_hand_made_links() {
     drop(b);
     let _ = std::fs::remove_file(pa);
     let _ = std::fs::remove_file(pb);
+}
+
+/// A manual loan turned into a cash account is valued by its opening balance
+/// and bookings from then on; turned back, it is a loan again.
+#[test]
+fn loan_changed_to_cash_is_an_ordinary_account_until_changed_back() {
+    let (v, p) = temp_vault();
+    seed(&v);
+    let loan = v
+        .create_manual_loan(setup("2026-08-01", 8_400_00, None, "Autobank"))
+        .unwrap();
+    assert_eq!(balance(&v, loan).0, -7_800_00);
+
+    v.set_account_kind(loan, AccountKind::Cash).unwrap();
+    assert_eq!(balance(&v, loan).0, 0);
+    assert!(v.list_manual_loans().unwrap().is_empty());
+    v.set_account_opening_balance(loan, Some(100_00), String::new())
+        .unwrap();
+    apply_loan_rules(&v.db().unwrap()).unwrap();
+    assert_eq!(balance(&v, loan).0, 100_00);
+
+    v.set_account_kind(loan, AccountKind::Loan).unwrap();
+    assert_eq!(balance(&v, loan).0, -7_800_00);
+    assert_eq!(v.list_manual_loans().unwrap().len(), 1);
+    drop(v);
+    let _ = std::fs::remove_file(p);
 }
 
 #[test]

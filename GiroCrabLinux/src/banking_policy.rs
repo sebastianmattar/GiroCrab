@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::i18n::tr;
 
@@ -290,11 +290,11 @@ fn load_local(st: &mut State) {
         .as_ref()
         .and_then(|s| verified(&decode(&s.json), &decode(&s.signature)));
     let was_online = stored.as_ref().is_some_and(|s| s.verified_online);
-    if let Some(b) = verified(BUNDLED_JSON, BUNDLED_SIG) {
-        if doc.as_ref().is_none_or(|d| b.sequence > d.sequence) {
-            save_stored(BUNDLED_JSON, BUNDLED_SIG, was_online);
-            doc = Some(b);
-        }
+    if let Some(b) = verified(BUNDLED_JSON, BUNDLED_SIG)
+        && doc.as_ref().is_none_or(|d| b.sequence > d.sequence)
+    {
+        save_stored(BUNDLED_JSON, BUNDLED_SIG, was_online);
+        doc = Some(b);
     }
     st.document = doc;
     st.verified_online = was_online;
@@ -310,7 +310,9 @@ fn unchecked_title() -> String {
 }
 
 fn unchecked_detail() -> String {
-    tr("GiroCrab konnte nicht prüfen, ob diese Version noch sicher mit Banken kommunizieren darf. Bitte später erneut versuchen oder in der Firewall Verbindungen zu raw.githubusercontent.com erlauben.")
+    tr(
+        "GiroCrab konnte nicht prüfen, ob diese Version noch sicher mit Banken kommunizieren darf. Bitte später erneut versuchen oder in der Firewall Verbindungen zu raw.githubusercontent.com erlauben.",
+    )
 }
 
 /// Title and detail as one message (the core's error while no check has succeeded).
@@ -389,6 +391,7 @@ pub fn display_name(id: &str) -> String {
         "amazon-orders" => "Amazon",
         "fnz" => "FNZ Bank",
         "ibkr" => "Interactive Brokers",
+        "equateplus" => "EquatePlus",
         "quirion" => "quirion",
         "uberspace" => "Uberspace",
         "schwaebischhall" => "Schwäbisch Hall",
@@ -423,7 +426,9 @@ pub fn detail(g: &Gate) -> String {
         return unchecked_detail();
     }
     let mut t = if g.all {
-        tr("Bankverbindungen sind gesperrt, weil diese Version eine Sicherheitslücke oder einen schweren Fehler im Bankzugang enthält. Ihre Daten bleiben lesbar.")
+        tr(
+            "Bankverbindungen sind gesperrt, weil diese Version eine Sicherheitslücke oder einen schweren Fehler im Bankzugang enthält. Ihre Daten bleiben lesbar.",
+        )
     } else {
         let names: Vec<String> = g.connector_ids.iter().map(|id| display_name(id)).collect();
         tr("Verbindungen über %1 sind gesperrt, weil diese Version eine Sicherheitslücke oder einen schweren Fehler im Bankzugang enthält. Ihre Daten bleiben lesbar.")

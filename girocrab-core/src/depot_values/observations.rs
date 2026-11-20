@@ -17,8 +17,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
+use crate::dates::iso;
 use crate::error::CoreResult;
 use crate::models::Holding;
 
@@ -43,15 +44,10 @@ pub(crate) fn position_key(isin: &str, name: &str) -> Option<String> {
     }
 }
 
-/// `YYYY-MM-DD` of a local day.
-fn iso(day: chrono::NaiveDate) -> String {
-    day.format("%Y-%m-%d").to_string()
-}
-
 /// The valuation day of a fetch: the bank's date, unless it is missing, malformed or in the
 /// future; then the retrieval day (`true` = assumed).
-pub(crate) fn valuation_day(balance_date: &str, today: chrono::NaiveDate) -> (String, bool) {
-    match chrono::NaiveDate::parse_from_str(balance_date.trim(), "%Y-%m-%d") {
+pub(crate) fn valuation_day(balance_date: &str, today: jiff::civil::Date) -> (String, bool) {
+    match jiff::civil::Date::strptime("%Y-%m-%d", balance_date.trim()) {
         Ok(d) if d <= today => (iso(d), false),
         _ => (iso(today), true),
     }
@@ -147,7 +143,7 @@ pub(crate) fn record_fetch(
     else {
         return Ok(None);
     };
-    let today = chrono::Local::now().date_naive();
+    let today = crate::dates::today();
     let (value_date, date_assumed) = if balance_known {
         valuation_day(&balance_date, today)
     } else {

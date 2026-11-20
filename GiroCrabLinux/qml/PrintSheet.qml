@@ -157,7 +157,7 @@ Sheet {
                         Text { text: qsTr("%1 von %2 ausgewählt").arg(sheet.selectedRows.length).arg(sheet.visibleRows.length)
                                font.pixelSize: Theme.body; font.weight: Font.DemiBold; color: Theme.text }
                         Text { text: qsTr("Einnahmen %1 · Ausgaben %2").arg(Fmt.money(sheet.selectionTotals.income)).arg(Fmt.money(sheet.selectionTotals.expense))
-                               font.pixelSize: Theme.caption; color: Theme.secondary; font.features: { "tnum": 1 } }
+                               font.pixelSize: Theme.caption; color: Theme.secondary; font.features: { "tnum": 1 }; Sensitive { amounts: true } }
                     }
                     Item { Layout.fillWidth: true }
                     Button { text: qsTr("Alle auswählen"); enabled: sheet.selectedRows.length < sheet.visibleRows.length; onClicked: sheet.setSelected(sheet.visibleRows, true) }
@@ -202,6 +202,7 @@ Sheet {
                                 text: Fmt.money(rowItem.modelData.amount_cents, rowItem.modelData.currency)
                                 color: rowItem.modelData.amount_cents > 0 ? Theme.inflow : Theme.text
                                 font.pixelSize: Theme.body; font.features: { "tnum": 1 }
+                                Sensitive { amounts: true }
                             }
                         }
                         Rectangle { anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 44; height: 1; color: Theme.border; opacity: 0.6 }

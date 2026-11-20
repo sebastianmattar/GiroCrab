@@ -10,7 +10,7 @@ use girocrab_core::{Category, Vault};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::manage::{self, Command, Context, DeleteGate, Modal, Modals};
-use crate::{hex_color, show, CategoryRow, MainWindow, VERSION};
+use crate::{CategoryRow, MainWindow, VERSION, hex_color, show};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 

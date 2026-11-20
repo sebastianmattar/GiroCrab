@@ -114,7 +114,7 @@ Sheet {
                         color: line.invalid ? Theme.negative : Theme.text
                         text: line.amountText
                         onTextEdited: DirectDebits.setLine(line.index, { amountText: text })
-                        Sensitive {}
+                        Sensitive { amounts: true }
                     }
                 }
                 Rectangle { anchors.bottom: parent.bottom; x: 20; width: parent.width - 40; height: 1; color: Theme.withAlpha(Theme.border, 0.7) }
@@ -148,7 +148,7 @@ Sheet {
                                 Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.secondary
                                        text: qsTr("%1 · %2 · %3 Lastschriften · %4").arg(DirectDebits.schemeTitle(modelData.scheme)).arg(modelData.sequence)
                                              .arg(modelData.count).arg(Fmt.money(modelData.total_cents))
-                                       Sensitive {} }
+                                       Sensitive { amounts: true } }
                             }
                             Button { text: qsTr("Sichern …"); icon.name: SF.icon("square.and.arrow.down")
                                      onClicked: { sheet.exporting = modelData; saveDialog.open() } }
@@ -209,7 +209,7 @@ Sheet {
             Layout.margins: 14
             spacing: 8
             Text { visible: !sheet.hasFiles; text: qsTr("%1 Lastschriften · %2").arg(sheet.stats.count).arg(Fmt.money(sheet.stats.total))
-                   font.pixelSize: Theme.callout; color: Theme.secondary; Sensitive {} }
+                   font.pixelSize: Theme.callout; color: Theme.secondary; Sensitive { amounts: true } }
             Item { Layout.fillWidth: true }
             Button { text: qsTr("Schließen"); onClicked: DirectDebits.showCollectionSheet = false }
             Button {

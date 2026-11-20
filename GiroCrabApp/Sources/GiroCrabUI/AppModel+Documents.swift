@@ -23,7 +23,7 @@ extension AppModel {
     func setDocumentMirror(_ url: URL?) {
         if let url {
             documentMirrorPath = url.path
-            UserDefaults.standard.set(url.path, forKey: Self.mirrorDirKey)
+            AppDefaults.store.set(url.path, forKey: Self.mirrorDirKey)
             // Creating the folder (iCloud Drive can be slow) and resetting the
             // copy markers (vault mutex) stay off the main thread. `mirrorRunning`
             // keeps syncs from starting a copy in between.
@@ -44,7 +44,7 @@ extension AppModel {
         } else {
             documentMirrorPath = nil
             documentMirrorStatus = nil
-            UserDefaults.standard.removeObject(forKey: Self.mirrorDirKey)
+            AppDefaults.store.removeObject(forKey: Self.mirrorDirKey)
         }
     }
 
@@ -101,18 +101,21 @@ extension AppModel {
 
     func accountDocuments(_ accountID: Int64) -> [DocumentInfo] {
         _ = documentsVersion
-        let f = DocumentFilter(accountId: accountID, docType: nil, search: nil, unlinkedOnly: false)
+        let f = DocumentFilter(accountId: accountID, docType: nil, search: nil, unlinkedOnly: false, connectionId: nil)
         return (try? vault?.listAllDocuments(filter: f)) ?? []
     }
 
     /// Connections whose bank delivers documents but whose retrieval is switched off, for the whole
     /// list or (`accountFilter`) the one account on screen. "Belege & PostBox" explains why nothing new comes.
-    func connectionsWithDocumentsOff(accountFilter: Int64?) -> [BankConnection] {
+    func connectionsWithDocumentsOff(accountFilter: Int64?, connectionFilter: Int64? = nil) -> [BankConnection] {
         var ids: Set<Int64>?
         if let accountFilter {
             guard accountFilter != Self.documentsWithoutAccount else { return [] }
             guard let cid = accountsByID[accountFilter]?.connectionId else { return [] }
             ids = [cid]
+        } else if let connectionFilter {
+            guard connectionFilter != Self.documentsWithoutAccount else { return [] }
+            ids = [connectionFilter]
         }
         return connections.filter { c in
             (ids?.contains(c.id) ?? true) && documentsOffConnectionIDs.contains(c.id)
@@ -123,7 +126,7 @@ extension AppModel {
         guard let c = account.connector, account.kind != .loan else { return false }
         // switched off per connection (bank connection dialog): the core would refuse it
         if let cid = account.connectionId, documentsOffConnectionIDs.contains(cid) { return false }
-        return [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .easybank, .fordMoney, .opelDirektbank].contains(c)
+        return [.volksbankKasselGoettingen, .direkt1822, .finTsGeneric, .easybank, .fordMoney, .opelDirektbank, .ffb].contains(c)
     }
 
     /// Explicit "Kontoauszüge abrufen": regular syncs never fetch statements (speed, no extra TAN).
@@ -183,12 +186,38 @@ extension AppModel {
         return (try? vault?.listDocumentsForBooking(bookingId: booking.id)) ?? []
     }
 
-    func allDocuments(search: String = "", unlinkedOnly: Bool = false, accountId: Int64? = nil, scope: DocumentsScope = .all) -> [DocumentInfo] {
+    func allDocuments(search: String = "", unlinkedOnly: Bool = false, accountId: Int64? = nil, connectionId: Int64? = nil, scope: DocumentsScope = .all) -> [DocumentInfo] {
         _ = documentsVersion
-        let withoutAccount = accountId == Self.documentsWithoutAccount
-        let f = DocumentFilter(accountId: withoutAccount ? nil : accountId, docType: nil, search: search.isEmpty ? nil : search, unlinkedOnly: unlinkedOnly)
+        let withoutAccount = accountId == Self.documentsWithoutAccount || connectionId == Self.documentsWithoutAccount
+        let f = DocumentFilter(accountId: accountId == Self.documentsWithoutAccount ? nil : accountId, docType: nil, search: search.isEmpty ? nil : search,
+                               unlinkedOnly: unlinkedOnly, connectionId: connectionId == Self.documentsWithoutAccount ? nil : connectionId)
         return ((try? vault?.listAllDocuments(filter: f)) ?? [])
             .filter { scope.includes($0) && (!withoutAccount || $0.accountId == nil) }
+    }
+
+    /// Bank connections to offer in the "Belege & PostBox" filter: those with at least one account.
+    var documentsFilterConnections: [BankConnection] {
+        let used = Set(accountsByID.values.compactMap(\.connectionId))
+        return connections.filter { used.contains($0.id) }
+    }
+
+    /// The account menu of "Belege & PostBox", narrowed to the chosen bank connection (#1042).
+    var documentsAccountSections: [AccountMenuSection] {
+        guard let cid = documentsConnectionFilter, cid != Self.documentsWithoutAccount else { return accountMenuSections }
+        return accountMenuSections.compactMap { section in
+            let accounts = section.accounts.filter { $0.connectionId == cid }
+            return accounts.isEmpty ? nil : AccountMenuSection(id: section.id, title: section.title, accounts: accounts)
+        }
+    }
+
+    /// Picks the bank connection of the document list. An account filter that does not belong to it
+    /// (or "Ohne Konto") is reset, otherwise the list would be empty.
+    func selectDocumentsConnection(_ id: Int64?) {
+        documentsConnectionFilter = id
+        guard let id, let account = documentsAccountFilter else { return }
+        if id == Self.documentsWithoutAccount || accountsByID[account]?.connectionId != id {
+            documentsAccountFilter = nil
+        }
     }
 
     func documentData(_ doc: DocumentInfo) -> Data? {

@@ -42,7 +42,7 @@ Card {
                     AppMenuItem { text: qsTr("Budget entfernen"); icon.name: SF.icon("trash"); onTriggered: AppModel.setBudget(null, modelData.category_id) } }
                 RowLayout {
                     Text { text: modelData.name; font.pixelSize: Theme.callout + 1; color: Theme.text; Layout.fillWidth: true; Sensitive { labels: true } }
-                    Text { text: Fmt.money(modelData.spent_cents) + " / " + Fmt.money(modelData.budget_cents); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: tone(modelData.percent); Sensitive {} }
+                    Text { text: Fmt.money(modelData.spent_cents) + " / " + Fmt.money(modelData.budget_cents); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: tone(modelData.percent); Sensitive { amounts: true } }
                     // shows the row opens the editor (it looked read-only)
                     SFIcon { symbol: "pencil"; size: Theme.caption; opacity: rowHover.hovered ? 1 : 0 }
                 }

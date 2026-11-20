@@ -104,11 +104,11 @@ Rectangle {
                     GridLayout {
                         columns: 2; Layout.fillWidth: true; rowSpacing: 4
                         Text { text: qsTr("Summe"); color: Theme.text; font.pixelSize: Theme.callout + 1; Layout.fillWidth: true }
-                        Text { text: Fmt.money(multi.income + multi.expense); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive {} }
+                        Text { text: Fmt.money(multi.income + multi.expense); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive { amounts: true } }
                         Text { visible: multi.income !== 0; text: qsTr("Einnahmen"); color: Theme.text; font.pixelSize: Theme.callout + 1 }
-                        Text { visible: multi.income !== 0; text: Fmt.money(multi.income); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive {} }
+                        Text { visible: multi.income !== 0; text: Fmt.money(multi.income); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive { amounts: true } }
                         Text { visible: multi.expense !== 0; text: qsTr("Ausgaben"); color: Theme.text; font.pixelSize: Theme.callout + 1 }
-                        Text { visible: multi.expense !== 0; text: Fmt.money(multi.expense); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive {} }
+                        Text { visible: multi.expense !== 0; text: Fmt.money(multi.expense); color: Theme.secondary; font.pixelSize: Theme.callout + 1; Sensitive { amounts: true } }
                     }
                     // MultiSelectionTags (#228)
                     TagsSection { Layout.fillWidth: true; bookings: multi.visible ? AppModel.selectedBookings : [] }
@@ -277,7 +277,7 @@ Rectangle {
                         Layout.fillWidth: true
                         FontMetrics { id: nameMetrics; font: merchantName.font }
                         HoverHandler { id: nameHover; enabled: merchantName.truncated }
-                        ToolTip.visible: nameHover.hovered; ToolTip.text: text; ToolTip.delay: 500
+                        ToolTip.visible: nameHover.hovered; ToolTip.text: AppModel.masking(text); ToolTip.delay: 500
                         Sensitive {}
                     }
                     Text { text: rc.booking.account_name + " · " + rc.booking.payment_method; font.pixelSize: Theme.caption; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
@@ -298,7 +298,7 @@ Rectangle {
                 text: Fmt.signed(rc.booking.amount_cents)
                 font.pixelSize: Theme.largeTitle + 6; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                 color: rc.booking.amount_cents > 0 ? Theme.inflow : Theme.outflow
-                Sensitive {}
+                Sensitive { amounts: true }
             }
             RowLayout {
                 spacing: 6
@@ -537,7 +537,7 @@ Rectangle {
                     ? qsTr("Nicht als wiederkehrend erkannt. Markieren Sie die Buchung, damit sie in den anstehenden Fixkosten erscheint.")
                     : rec.series.source === "Manual" ? qsTr("Manuell markiert · ca. %1").arg(Fmt.money(rec.series.amount_cents))
                     : qsTr("Automatisch erkannt aus %1 Buchungen · ca. %2").arg(rec.series.occurrences).arg(Fmt.money(rec.series.amount_cents))
-                Sensitive { when: rec.series !== null }
+                Sensitive { amounts: true; when: rec.series !== null }
             }
         }
     }
@@ -559,7 +559,7 @@ Rectangle {
                 ColumnLayout { required property var modelData; spacing: 2; Layout.fillWidth: true; Layout.preferredWidth: 1
                     Text { text: modelData[0]; font.pixelSize: Theme.caption2; color: Theme.secondary }
                     Text { text: modelData[1]; font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true
-                           Sensitive { when: modelData[2] } } }
+                           Sensitive { amounts: true; when: modelData[2] } } }
             }
         }
         Text { visible: sr.stats !== null && sr.stats.first_date !== ""

@@ -271,15 +271,14 @@ pub fn fees_and_taxes(txs: &[SecurityTransaction], start: &Option<String>) -> Op
 }
 
 pub fn quantity_text(q: f64) -> String {
-    let s = if (q - q.round()).abs() < 1e-9 {
+    if (q - q.round()).abs() < 1e-9 {
         format!("{}", q.round() as i64)
     } else {
         let t = format!("{q:.4}");
         t.trim_end_matches('0')
             .trim_end_matches('.')
             .replace('.', ",")
-    };
-    s
+    }
 }
 
 impl Cells {

@@ -13,7 +13,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::groups;
 use crate::manage;
 use crate::planning::{self, euro};
-use crate::{hex_color, privacy_on, GroupAccountRow, GroupRow, GroupsState, MainWindow};
+use crate::{GroupAccountRow, GroupRow, GroupsState, MainWindow, hex_color, privacy_on};
 
 type VaultSlot = Arc<Mutex<Option<Arc<Vault>>>>;
 
@@ -241,10 +241,10 @@ fn load_account_info(win: &MainWindow, account: Account) {
     let weak = win.as_weak();
     std::thread::spawn(move || {
         let mut lines = Vec::new();
-        if let Some(c) = account.connection_id {
-            if let Ok(key) = v.connection_key(c) {
-                lines.push(groups::connection_line(&key));
-            }
+        if let Some(c) = account.connection_id
+            && let Ok(key) = v.connection_key(c)
+        {
+            lines.push(groups::connection_line(&key));
         }
         if let Ok(h) = v.balance_history(vec![account.id], 30) {
             lines.push(groups::history_summary(&h));
@@ -805,9 +805,11 @@ mod tests {
     fn amounts_are_optional_but_must_parse() {
         assert_eq!(amount_field("", "x"), Ok(None));
         assert_eq!(amount_field(" 1.234,56 ", "x"), Ok(Some(123_456)));
-        assert!(amount_field("abc", "Startsaldo")
-            .unwrap_err()
-            .starts_with("Startsaldo:"));
+        assert!(
+            amount_field("abc", "Startsaldo")
+                .unwrap_err()
+                .starts_with("Startsaldo:")
+        );
     }
 
     #[test]

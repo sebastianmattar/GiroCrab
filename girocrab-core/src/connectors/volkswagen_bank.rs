@@ -30,18 +30,19 @@
 //! a stable bank id leave `external_id` empty so `store_fetch` derives a
 //! content id.
 use async_trait::async_trait;
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Utc, Weekday};
-use reqwest::header::{HeaderMap, ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN, REFERER};
-use serde_json::{json, Value};
+use jiff::civil::{Date, DateTime, Weekday};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, ORIGIN, REFERER};
+use serde_json::{Value, json};
 
 use super::{
-    http_client_same_host, BankConnector, Challenge, ChallengeKind, ChallengeResponse,
-    ConnectContext, FetchResult, Phase, RemoteAccount, RemoteTransaction,
+    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, FetchResult, Phase,
+    RemoteAccount, RemoteTransaction, http_client_same_host,
 };
 use crate::{
     error::{CoreError, CoreResult},
     i18n::{tr, trf},
     models::AccountKind,
+    secret::SecretJson,
 };
 
 const BASE: &str = "https://banking.volkswagenbank.de";
@@ -73,7 +74,7 @@ pub(crate) trait Portal: Send {
         &mut self,
         user: &str,
         password: &str,
-        state: &serde_json::Value,
+        state: &SecretJson,
     ) -> CoreResult<LoginStep>;
     /// Ask whether the pushTAN was approved.
     async fn poll_push(&mut self) -> CoreResult<LoginStep>;
@@ -212,7 +213,7 @@ impl Portal for HttpPortal {
         &mut self,
         user: &str,
         password: &str,
-        _state: &serde_json::Value,
+        _state: &SecretJson,
     ) -> CoreResult<LoginStep> {
         self.token = None;
         self.request_key = None;
@@ -303,10 +304,7 @@ impl Portal for HttpPortal {
         let mut out = FetchResult::default();
         for account in accounts {
             if account.cash_flow {
-                let from = ctx
-                    .since_by_account
-                    .get(&account.remote.external_ref)
-                    .unwrap_or(&ctx.since);
+                let from = ctx.since_for(&account.remote.external_ref);
                 let (flow, _) = self
                     .call(
                         true,
@@ -350,7 +348,7 @@ fn account_kind(category: &str) -> AccountKind {
 
 /// `AccountListService/accountlist` → accounts. Any missing field fails the
 /// whole call so a changed portal never imports half a picture.
-fn parse_accounts(v: &Value, today: NaiveDate) -> CoreResult<Vec<PortalAccount>> {
+fn parse_accounts(v: &Value, today: Date) -> CoreResult<Vec<PortalAccount>> {
     let list = v
         .get("Accounts")
         .and_then(Value::as_array)
@@ -490,19 +488,17 @@ fn amount_or_zero(s: &str) -> Option<i64> {
     }
 }
 
-fn last_sunday(year: i32, month: u32) -> Option<NaiveDate> {
-    let mut d = NaiveDate::from_ymd_opt(year, month + 1, 1)?.pred_opt()?;
-    while d.weekday() != Weekday::Sun {
-        d = d.pred_opt()?;
-    }
-    Some(d)
+fn last_sunday(year: i32, month: u32) -> Option<Date> {
+    crate::dates::ymd(year, month, 1)?
+        .nth_weekday_of_month(-1, Weekday::Sunday)
+        .ok()
 }
 
 /// Hours Berlin is ahead of UTC: +2 from the last Sunday of March 01:00 UTC to
 /// the last Sunday of October 01:00 UTC, otherwise +1.
-fn berlin_offset_hours(utc: NaiveDateTime) -> i64 {
-    let start = last_sunday(utc.year(), 3).and_then(|d| d.and_hms_opt(1, 0, 0));
-    let end = last_sunday(utc.year(), 10).and_then(|d| d.and_hms_opt(1, 0, 0));
+fn berlin_offset_hours(utc: DateTime) -> i64 {
+    let start = last_sunday(utc.year().into(), 3).map(|d| d.at(1, 0, 0, 0));
+    let end = last_sunday(utc.year().into(), 10).map(|d| d.at(1, 0, 0, 0));
     match (start, end) {
         (Some(s), Some(e)) if utc >= s && utc < e => 2,
         _ => 1,
@@ -512,14 +508,16 @@ fn berlin_offset_hours(utc: NaiveDateTime) -> i64 {
 /// Portal timestamps are UTC (`2026-10-22T22:00:00.0000000Z`) but mark a
 /// Berlin calendar day (that one is 23 October), so convert before cutting
 /// off the time.
-fn portal_date(s: &str) -> Option<NaiveDate> {
-    let utc = NaiveDateTime::parse_from_str(s.get(..19)?, "%Y-%m-%dT%H:%M:%S").ok()?;
-    Some((utc + Duration::hours(berlin_offset_hours(utc))).date())
+fn portal_date(s: &str) -> Option<Date> {
+    let utc = jiff::civil::DateTime::strptime("%Y-%m-%dT%H:%M:%S", s.get(..19)?).ok()?;
+    // Portals write 9999-12-31T23:00:00Z for "no date": checked, it is past jiff's range.
+    let berlin = utc.checked_add(jiff::Span::new().hours(berlin_offset_hours(utc)));
+    Some(berlin.ok()?.date())
 }
 
-fn berlin_today() -> NaiveDate {
-    let now = Utc::now().naive_utc();
-    (now + Duration::hours(berlin_offset_hours(now))).date()
+fn berlin_today() -> Date {
+    let now = crate::dates::now_utc();
+    (now + jiff::Span::new().hours(berlin_offset_hours(now))).date()
 }
 
 fn photo_tan_challenge(image: Vec<u8>) -> Challenge {
@@ -640,7 +638,7 @@ impl BankConnector for VolkswagenBankConnector {
             _ => {
                 return Err(CoreError::InvalidInput {
                     message: tr("Volkswagen Bank: Unerwartete Antwort auf die TAN-Abfrage.").into(),
-                })
+                });
             }
         };
         Ok(self.advance(step))
@@ -692,7 +690,7 @@ mod tests {
             &mut self,
             _user: &str,
             _password: &str,
-            _state: &serde_json::Value,
+            _state: &SecretJson,
         ) -> CoreResult<LoginStep> {
             self.next()
         }
@@ -721,10 +719,8 @@ mod tests {
             connection_id: 1,
             login_name: user.into(),
             secret: SecretString::new(password.into()),
-            settings: Default::default(),
-            state: serde_json::Value::Null,
             since: "2026-01-01".into(),
-            since_by_account: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -908,7 +904,7 @@ mod tests {
 
     #[test]
     fn account_list_is_parsed_strictly() {
-        let today = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let today = jiff::civil::date(2026, 11, 16);
         let v = json!({"Accounts": [
             {"AccountNumber": "123", "Iban": "DE00123", "Balance": "71.01",
              "ProductName": "Plus Konto online", "Currency": "EUR",

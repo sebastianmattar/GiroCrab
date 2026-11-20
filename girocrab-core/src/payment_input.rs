@@ -167,10 +167,10 @@ pub fn parse_payment_text(text: String) -> PaymentDetails {
             })
             .map(|l| l.to_string());
     }
-    if p.purpose.is_none() {
-        if let Some(rn) = invoice_number(&text) {
-            p.purpose = Some(format!("Rechnung {rn}"));
-        }
+    if p.purpose.is_none()
+        && let Some(rn) = invoice_number(&text)
+    {
+        p.purpose = Some(format!("Rechnung {rn}"));
     }
     p
 }
@@ -248,10 +248,10 @@ fn amount(text: &str, lines: &[&str], plain: &[&str]) -> Option<i64> {
     }
     // 2. Labelled.
     for l in lines {
-        if AMOUNT_LABEL.is_match(l) {
-            if let Some(v) = amount_in(l) {
-                return normalize_amount(v);
-            }
+        if AMOUNT_LABEL.is_match(l)
+            && let Some(v) = amount_in(l)
+        {
+            return normalize_amount(v);
         }
     }
     // 3. Any decimal number outside IBAN lines.

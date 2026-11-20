@@ -9,7 +9,7 @@
 //! Only the subset of MCP a read-only tool server needs: `initialize`, `ping`,
 //! `tools/list`, `tools/call`; notifications are accepted and ignored.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};

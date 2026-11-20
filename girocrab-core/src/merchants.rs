@@ -394,6 +394,33 @@ fn needle_in(text: &str, needle: &str) -> bool {
 /// counterparty or purpose names the sub-brand, it wins over the parent.
 const SUB_BRANDS: &[(&str, &[&str])] = &[("telekom", &["fraenk", "congstar"])];
 
+/// Entries that stand for a whole group of independent banks (#1365). The booking
+/// keeps the group's logo, colour and key, but shows the bank's own name from the
+/// counterparty ("Volksbank Mittelhessen", "Stadtsparkasse München").
+const GROUP_BRANDS: &[&str] = &["volksbank", "sparkasse"];
+
+/// `entry` named after the member bank in `counterparty`; `None` for other entries
+/// or when the counterparty leaves no usable name.
+fn group_member(entry: &Entry, counterparty: &str) -> Option<MerchantInfo> {
+    if !GROUP_BRANDS.contains(&entry.key) {
+        return None;
+    }
+    // "VOLKSBANK MITTELHESSEN EG": `clean_name` only knows the mixed-case " eG".
+    let cp = counterparty.trim();
+    let cp = match cp.rsplit_once(' ') {
+        Some((head, last)) if last.eq_ignore_ascii_case("eg") => head,
+        _ => cp,
+    };
+    let name = clean_name(cp);
+    if name.is_empty() || name.chars().count() > 40 {
+        return None;
+    }
+    let mut info = to_info(entry);
+    info.monogram = monogram(&name);
+    info.name = name;
+    Some(info)
+}
+
 fn entry_by_key(key: &str) -> Option<&'static Entry> {
     entries().iter().find(|e| e.key == key)
 }
@@ -838,6 +865,10 @@ pub fn monogram(name: &str) -> String {
     m
 }
 
+/// Acronyms that stay upper-case when `clean_name` title-cases a shouting name
+/// ("VR BANK NORD" -> "VR Bank Nord", #1410).
+const KEEP_UPPER: &[&str] = &["VR"];
+
 /// Removes legal forms and trailing noise for display ("Muster GmbH & Co. KG" -> "Muster").
 pub fn clean_name(s: &str) -> String {
     let mut t = s.trim().to_string();
@@ -856,7 +887,16 @@ pub fn clean_name(s: &str) -> String {
         " sagt Danke",
         " SAGT DANKE",
     ] {
-        if let Some(p) = t.find(suffix) {
+        // Whole words only: " SE" must not cut "SPARKASSE SEELAND" (#1410). A suffix
+        // ending in a dot is its own boundary (" S.A." also cuts "S.A.R.L.").
+        let ends_word = suffix.ends_with(char::is_alphanumeric);
+        if let Some((p, _)) = t.match_indices(suffix).find(|(p, _)| {
+            !ends_word
+                || t[p + suffix.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_alphanumeric())
+        }) {
             t.truncate(p);
         }
     }
@@ -871,11 +911,21 @@ pub fn clean_name(s: &str) -> String {
     {
         t.split(' ')
             .map(|w| {
-                let mut cs = w.chars();
-                match cs.next() {
-                    Some(f) => f.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase(),
-                    None => String::new(),
-                }
+                w.split('-')
+                    .map(|part| {
+                        if KEEP_UPPER.contains(&part) {
+                            return part.to_string();
+                        }
+                        let mut cs = part.chars();
+                        match cs.next() {
+                            Some(f) => {
+                                f.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase()
+                            }
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("-")
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -965,20 +1015,22 @@ impl MerchantResolver {
                     return Self::resolve_uncached(&shop, purpose);
                 }
             }
-            if let Some((_, subs)) = SUB_BRANDS.iter().find(|(parent, _)| *parent == entry.key) {
-                if let Some(sub) = subs
+            if let Some((_, subs)) = SUB_BRANDS.iter().find(|(parent, _)| *parent == entry.key)
+                && let Some(sub) = subs
                     .iter()
                     .filter_map(|k| entry_by_key(k))
                     .find(|sub| sub.needles.iter().any(|n| needle_in(&ctx, n)))
-                {
-                    return to_info(sub);
-                }
+            {
+                return to_info(sub);
             }
-            return to_info(entry);
+            return group_member(entry, counterparty).unwrap_or_else(|| to_info(entry));
         }
         if let Some(entry) = find_checked(&pu, &ctx).filter(|e| {
             matches!(e.kind, K::Etf | K::Crypto | K::Stock | K::PaymentService)
-                || counterparty.trim().is_empty()
+                || (counterparty.trim().is_empty()
+                    && e.needles
+                        .iter()
+                        .any(|n| n.trim().len() >= 4 && needle_in(&pu, n)))
         }) {
             return to_info(entry);
         }
@@ -1531,9 +1583,11 @@ mod tests {
         assert!(!looks_like_person("Hotel Schwarzer Bock"));
         assert!(!looks_like_person("Eigenes Konto"));
         assert!(!looks_like_person("Mustermann Bau GmbH"));
-        assert!(MerchantResolver::resolve("Hotel Schwarzer Bock", "")
-            .domain
-            .is_empty());
+        assert!(
+            MerchantResolver::resolve("Hotel Schwarzer Bock", "")
+                .domain
+                .is_empty()
+        );
         assert_eq!(
             heuristic_domains("Gärtnerei Grünwald"),
             vec![
@@ -1556,6 +1610,16 @@ mod tests {
             "private persons get no domain"
         );
         assert!(heuristic_domains("Eigenes Konto").is_empty());
+        // #1133: bookings without counterparty must not match 2-letter acronyms like " TK " in purpose.
+        assert_eq!(
+            MerchantResolver::resolve("", "WP-ABRECHNUNG VERKAUF TK 45,20 EUR").domain,
+            ""
+        );
+        assert_eq!(MerchantResolver::resolve("TK", "Beitrag").domain, "tk.de");
+        assert_eq!(
+            MerchantResolver::resolve("", "Beitrag Techniker Krankenkasse").domain,
+            "tk.de"
+        );
     }
 
     #[test]
@@ -1566,9 +1630,58 @@ mod tests {
             name("Dt. Bausparkasse Badenia AG", ""),
             "Dt. Bausparkasse Badenia"
         );
-        assert_eq!(name("Stadtsparkasse Muenchen", ""), "Sparkasse");
-        assert_eq!(name("Kreissparkasse Koeln", ""), "Sparkasse");
-        assert_eq!(name("Sparkasse Hannover", ""), "Sparkasse");
+        let key = |cp: &str| resolve_merchant(cp.into(), String::new()).key;
+        assert_eq!(key("Stadtsparkasse Muenchen"), "sparkasse");
+        assert_eq!(key("Kreissparkasse Koeln"), "sparkasse");
+        assert_eq!(key("Sparkasse Hannover"), "sparkasse");
+    }
+
+    #[test]
+    fn clean_name_cuts_legal_forms_as_whole_words() {
+        // #1410: " SE" / " AG" / " eG" inside a word cut the name short.
+        assert_eq!(clean_name("HOTEL SEEBLICK"), "Hotel Seeblick");
+        assert_eq!(clean_name("MUELLER AGRARHANDEL"), "Mueller Agrarhandel");
+        assert_eq!(
+            clean_name("Foo eGovernment Service"),
+            "Foo eGovernment Service"
+        );
+        assert_eq!(clean_name("Muster AG, Berlin"), "Muster");
+        assert_eq!(clean_name("Muster AG"), "Muster");
+        assert_eq!(clean_name("MUSTER S.A.R.L."), "Muster");
+        assert_eq!(clean_name("MUSTER S.A.S."), "Muster");
+        assert_eq!(clean_name("Muster SE & Co. KGaA"), "Muster");
+        assert_eq!(clean_name("VR-BANK NORD"), "VR-Bank Nord");
+        let key = |cp: &str| resolve_merchant(cp.into(), String::new()).key;
+        assert_ne!(key("HOTEL SEEBLICK"), key("HOTEL SEEROSE"));
+    }
+
+    #[test]
+    fn group_banks_keep_their_own_name() {
+        // #1365: every Volksbank showed up as "Volksbank Kassel Göttingen".
+        let m = |cp: &str, pu: &str| resolve_merchant(cp.into(), pu.into());
+        for (cp, want) in [
+            ("Volksbank Mittelhessen eG", "Volksbank Mittelhessen"),
+            ("VOLKSBANK MITTELHESSEN EG", "Volksbank Mittelhessen"),
+            ("VR Bank Nord eG", "VR Bank Nord"),
+            ("VR BANK NORD EG", "VR Bank Nord"),
+            ("VEREINIGTE VR BANK EG", "Vereinigte VR Bank"),
+            ("SPARKASSE SEELAND", "Sparkasse Seeland"),
+            ("STADTSPARKASSE AGGERTAL", "Stadtsparkasse Aggertal"),
+            ("Raiffeisenbank Musterdorf eG", "Raiffeisenbank Musterdorf"),
+            ("Stadtsparkasse München", "Stadtsparkasse München"),
+        ] {
+            let info = m(cp, "Kontoführung");
+            assert_eq!(info.name, want, "{cp}");
+            assert!(info.known && info.kind == K::Bank, "{cp}");
+        }
+        let vb = m("Volksbank Mittelhessen eG", "");
+        assert_eq!((vb.key.as_str(), vb.monogram.as_str()), ("volksbank", "VM"));
+        // Only the purpose names the bank: the group's neutral name.
+        assert_eq!(
+            m("", "Abschluss Volksbank").name,
+            "Volksbank / Raiffeisenbank"
+        );
+        assert_eq!(m("", "Sparkasse Entgelt").name, "Sparkasse");
     }
 
     #[test]

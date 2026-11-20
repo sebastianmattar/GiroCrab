@@ -52,15 +52,15 @@ ColumnLayout {
                        Sensitive { labels: true } }
                 // PositionRow: the classification travels with its position, in front of the detail
                 Text { text: [AssetClassification.compactTitle(row.c), hc.qty(row.h.quantity) + " × " + Fmt.money(row.h.current_price_cents) + " · " + (row.h.isin || row.h.wkn)].join(" · ")
-                       font.pixelSize: Theme.caption2; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {}
+                       font.pixelSize: Theme.caption2; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true }
                        ToolTip.visible: hover.hovered; ToolTip.delay: 600; ToolTip.text: AssetClassification.sourceDescription(row.c)
                        HoverHandler { id: hover } } }
             ColumnLayout { spacing: 1
-                Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(row.h.value_cents); font.pixelSize: Theme.callout + 1; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(row.h.value_cents); font.pixelSize: Theme.callout + 1; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                 Text { visible: row.g !== null; Layout.alignment: Qt.AlignRight; font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }
                        readonly property var g: row.g
                        text: g ? qsTr("GuV (berechnet): %1 (%2 %)").arg(Fmt.money(g.cents)).arg(Number(g.percent).toLocaleString(Qt.locale(), "f", 2)) : ""
-                       color: g && g.cents < 0 ? "red" : "green"; Sensitive {} } }
+                       color: g && g.cents < 0 ? "red" : "green"; Sensitive { amounts: true } } }
             TapHandler { acceptedButtons: Qt.RightButton; onTapped: menu.popup() }
             AppMenu { id: menu
                 AppMenuItem { text: qsTr("Klassifizierung bearbeiten"); visible: !!row.c.security_key; height: visible ? implicitHeight : 0

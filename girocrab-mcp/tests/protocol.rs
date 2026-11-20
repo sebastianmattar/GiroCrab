@@ -3,9 +3,9 @@
 
 mod common;
 
-use common::{adapter_at, call, offline, rpc, text, ShortDir};
+use common::{ShortDir, adapter_at, call, offline, rpc, text};
 use girocrab_mcp::{Adapter, PROTOCOL_VERSIONS};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::sync::{Arc, Mutex};

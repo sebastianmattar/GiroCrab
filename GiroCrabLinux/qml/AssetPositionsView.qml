@@ -165,14 +165,14 @@ Item {
                     spacing: 3
                     SFIcon { visible: !!row.item.missing_price_date; symbol: "exclamationmark.triangle.fill"; size: 11; color: Theme.warning }
                     // PositionRow: the classification in front of the detail
-                    Text { text: (row.classification ? AssetClassification.compactTitle(row.classification) + " · " : "") + view.detail(row.item); font.pixelSize: Theme.callout; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
+                    Text { text: (row.classification ? AssetClassification.compactTitle(row.classification) + " · " : "") + view.detail(row.item); font.pixelSize: Theme.callout; color: Theme.secondary; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true } }
                 }
             }
             Text {
                 visible: !(row.item.sold && row.item.holding.value_cents === 0)
                 text: Fmt.money(row.item.holding.value_cents)
                 font.pixelSize: Theme.body; font.weight: Font.Medium; font.features: { "tnum": 1 }; color: Theme.text
-                Sensitive {}
+                Sensitive { amounts: true }
             }
         }
         MouseArea {

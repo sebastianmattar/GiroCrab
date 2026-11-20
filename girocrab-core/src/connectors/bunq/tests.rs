@@ -1,11 +1,26 @@
 use base64::Engine as _;
+use rsa::PrivateKey;
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::signature::{SignatureEncoding, Signer};
-use rsa::PrivateKey;
 
 use super::*;
 use crate::models::AccountKind;
 use crate::money::json_number_to_cents;
+
+#[test]
+fn stored_state_keeps_its_json_shape_and_hides_secrets() {
+    let stored = json!({
+        "env": "sandbox", "key_fp": "fp", "private_key_pem": "pem-secret",
+        "installation_token": "install-secret", "server_public_key": "server-pem",
+        "device_registered": true, "session_token": "session-secret", "user_id": 9,
+        "receipts_checked": {"7": "2026-11-09"}, "receipt_cursor": {"42": 7},
+        "attachments_done": [3], "statements_done": ["42:2026-10"]
+    });
+    let state: BunqState = serde_json::from_value(stored.clone()).unwrap();
+    assert_eq!(state.session_token.expose(), "session-secret");
+    assert_eq!(serde_json::to_value(&state).unwrap(), stored);
+    assert!(!format!("{state:?}").contains("-secret"));
+}
 
 #[test]
 fn parses_accounts_and_payments() {
@@ -53,7 +68,7 @@ fn parses_accounts_and_payments() {
 fn signature_roundtrip_and_find() {
     let key = PrivateKey::new(&mut getrandom::SysRng, 1024).unwrap();
     let mut c = BunqConnector::new();
-    c.state.private_key_pem = key.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
+    c.state.private_key_pem = key.to_pkcs8_pem(LineEnding::LF).unwrap().as_str().into();
     c.state.server_public_key = key
         .to_public_key()
         .to_public_key_pem(LineEnding::LF)
@@ -85,8 +100,7 @@ fn card_action_refusals() {
 #[test]
 fn card_holds_and_foreign_amounts() {
     let now =
-        chrono::NaiveDateTime::parse_from_str("2026-11-10 12:00:00.0", "%Y-%m-%d %H:%M:%S%.f")
-            .unwrap();
+        jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", "2026-11-10 12:00:00.0").unwrap();
     let mut a = json!({
         "id": 99, "created": "2026-11-08 10:00:00.000000",
         "amount_local": {"value": "20.00", "currency": "USD"},
@@ -227,12 +241,8 @@ async fn failing_draft_polls_end_as_unknown() {
     });
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
-        secret: crate::secret::SecretString::new(String::new()),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     for _ in 1..MAX_DRAFT_POLL_FAILURES {
         let p = c.respond(&ctx, ChallengeResponse::Poll).await.unwrap();
@@ -270,7 +280,7 @@ fn older_receipt_checks_rotate() {
 
 #[test]
 fn receipts_and_statement_documents() {
-    let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+    let d = |s: &str| jiff::civil::Date::strptime("%Y-%m-%d", s).unwrap();
     let months = completed_months(d("2026-03-15"), 3);
     assert_eq!(
         months,
@@ -401,12 +411,10 @@ async fn bunq_sandbox_live() {
     );
     let mut ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
         settings,
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     assert!(matches!(c.begin(&ctx).await.unwrap(), Phase::Ready));
@@ -414,7 +422,6 @@ async fn bunq_sandbox_live() {
     println!("accounts: {:?}", r.accounts);
     let (acc_id, _) = c.accounts().await.unwrap()[0].clone();
     // Ask the sandbox "Sugar Daddy" for money so there is a payment to read.
-    let token = c.state.session_token.clone();
     let path = format!(
         "/v1/user/{}/monetary-account/{acc_id}/request-inquiry",
         c.state.user_id
@@ -425,7 +432,7 @@ async fn bunq_sandbox_live() {
         "description": "GiroCrab test",
         "allow_bunqme": false
     });
-    c.call(reqwest::Method::POST, &path, Some(&body), Some(&token))
+    c.call(reqwest::Method::POST, &path, Some(&body), Auth::Session)
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -450,7 +457,7 @@ async fn bunq_sandbox_live() {
                 "counterparty_alias": {"type": "EMAIL", "value": "sugardaddy@bunq.com", "name": "Sugar Daddy"},
                 "description": "GiroCrab receipt test"
             })),
-            Some(&token),
+            Auth::Session,
         )
         .await
         .unwrap();
@@ -466,7 +473,7 @@ async fn bunq_sandbox_live() {
             &up_path,
             Some((png.clone(), "image/png")),
             &[("X-Bunq-Attachment-Description", "Kassenbon")],
-            Some(&token),
+            Auth::Session,
         )
         .await
         .unwrap();
@@ -480,7 +487,7 @@ async fn bunq_sandbox_live() {
         reqwest::Method::POST,
         &note_path,
         Some(&json!({"attachment_id": att_id, "description": "Kassenbon"})),
-        Some(&token),
+        Auth::Session,
     )
     .await
     .unwrap();
@@ -506,10 +513,9 @@ async fn bunq_sandbox_live() {
     assert!(receipt.bytes.starts_with(&png_ref[..8]), "PNG expected");
     assert_eq!(receipt.mime_type, "image/png");
     // Statement for the current month (the account is too new for a completed one).
-    let today = chrono::Local::now().date_naive();
-    use chrono::Datelike;
+    let today = crate::dates::today();
     let pdf = c
-        .export_statement(acc_id, today.with_day(1).unwrap(), today)
+        .export_statement(acc_id, today.first_of_month(), today)
         .await
         .unwrap_or_else(|e| panic!("statement: {} {}", e.status, e.message));
     assert!(pdf.starts_with(b"%PDF"));
@@ -517,10 +523,10 @@ async fn bunq_sandbox_live() {
 
     // Second sync reuses the stored session.
     ctx.state = r.state.unwrap();
-    let token_before = ctx.state["session_token"].clone();
+    let token_before = ctx.state.decode::<Value>().unwrap()["session_token"].clone();
     let mut c2 = BunqConnector::new();
     assert!(matches!(c2.begin(&ctx).await.unwrap(), Phase::Ready));
-    assert_eq!(Value::String(c2.state.session_token.clone()), token_before);
+    assert_eq!(token_before, c2.state.session_token.expose());
 
     // Transfer: draft payment stays pending (no app in the sandbox), then
     // cancelling in GiroCrab withdraws it at bunq.
@@ -568,7 +574,7 @@ async fn bunq_sandbox_live() {
         reqwest::Method::PUT,
         &path,
         Some(&json!({"status": "REJECTED"})),
-        Some(&token),
+        Auth::Session,
     )
     .await
     .map_err(ApiError::into_core)
@@ -615,19 +621,14 @@ async fn bunq_card_survey() {
     let key = std::env::var("BUNQ_API_KEY").expect("BUNQ_API_KEY");
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
-    let window = (chrono::Local::now().date_naive() - chrono::Duration::days(HOLD_WINDOW_DAYS))
-        .format("%Y-%m-%d")
-        .to_string();
-    let now = chrono::Utc::now().naive_utc();
+    let window = crate::dates::iso(crate::dates::today() - crate::dates::days(HOLD_WINDOW_DAYS));
+    let now = crate::dates::now_utc();
     let mut seen = std::collections::BTreeMap::new();
     for (id, acc) in c.accounts().await.unwrap() {
         let actions = match c.card_actions(id, &window).await {
@@ -653,8 +654,8 @@ async fn bunq_card_survey() {
             // Days relative to now (negative = past), rounded; "-" if absent.
             let rel = |k: &str| match a[k].as_str() {
                 None => "none".to_string(),
-                Some(t) => match chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f") {
-                    Ok(t) => format!("{:+}d", (t - now).num_days()),
+                Some(t) => match jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", t) {
+                    Ok(t) => format!("{:+}d", t.duration_since(now).as_hours() / 24),
                     Err(_) => format!("unparsed({})", t.len()),
                 },
             };
@@ -668,9 +669,15 @@ async fn bunq_card_survey() {
             };
             let row = format!(
                 "decision={} auth_status={} auth_type={} payment_status={} clearing={} settlement={} billing_sign={sign} foreign={foreign} created={} reservation_expiry={} clearing_expiry={} linked_payments={linked} => open_hold={}",
-                f("decision"), f("authorisation_status"), f("authorisation_type"),
-                f("payment_status"), f("clearing_status"), f("settlement_status"),
-                rel("created"), rel("reservation_expiry_time"), rel("clearing_expiry_time"),
+                f("decision"),
+                f("authorisation_status"),
+                f("authorisation_type"),
+                f("payment_status"),
+                f("clearing_status"),
+                f("settlement_status"),
+                rel("created"),
+                rel("reservation_expiry_time"),
+                rel("clearing_expiry_time"),
                 is_open_hold(a, now)
             );
             *seen.entry(row).or_insert(0) += 1;
@@ -692,16 +699,13 @@ async fn bunq_direct_debit_survey() {
     let key = std::env::var("BUNQ_API_KEY").expect("BUNQ_API_KEY");
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
-    let now = chrono::Utc::now().naive_utc();
+    let now = crate::dates::now_utc();
     let uid = c.state.user_id;
     // (path below the account, object key, label)
     let lists = [
@@ -787,19 +791,14 @@ async fn bunq_receipt_survey() {
         .abs();
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
-    let since = (chrono::Local::now().date_naive() - chrono::Duration::days(180))
-        .format("%Y-%m-%d")
-        .to_string();
-    let today = chrono::Local::now().date_naive();
+    let since = crate::dates::iso(crate::dates::today() - crate::dates::days(180));
+    let today = crate::dates::today();
     let shape = |v: &Value| match v {
         Value::Null => "null".to_string(),
         Value::Array(a) => format!("array[{}]", a.len()),
@@ -830,8 +829,8 @@ async fn bunq_receipt_survey() {
                 .as_str()
                 .and_then(local_date)
                 .unwrap_or_default();
-            let age = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
-                .map(|d| (today - d).num_days())
+            let age = jiff::civil::Date::strptime("%Y-%m-%d", &date)
+                .map(|d| crate::dates::days_between(d, today))
                 .unwrap_or(-1);
             println!(
                 "\nPAYMENT id={pid} date={date} age={age}d amount={cents} type={} sub_type={} updated={} payment.attachment={}",
@@ -864,8 +863,14 @@ async fn bunq_receipt_survey() {
                         }
                         println!(
                             "  REQUEST-RESPONSE id={} status={} type={} sub_type={} event_id={} time_responded={} created={} attachment={}",
-                            r["id"], r["status"], r["type"], r["sub_type"], r["event_id"],
-                            r["time_responded"], r["created"], shape(&r["attachment"]),
+                            r["id"],
+                            r["status"],
+                            r["type"],
+                            r["sub_type"],
+                            r["event_id"],
+                            r["time_responded"],
+                            r["created"],
+                            shape(&r["attachment"]),
                         );
                         for a in attachment_items(&r["attachment"]) {
                             println!("    own attachment: {}", shape(a));
@@ -917,7 +922,9 @@ async fn bunq_receipt_survey() {
                                                 b.len(),
                                                 String::from_utf8_lossy(&b[..b.len().min(5)])
                                             ),
-                                            Err(e) => println!("      download id={aid}: ERROR {e:?}"),
+                                            Err(e) => {
+                                                println!("      download id={aid}: ERROR {e:?}")
+                                            }
                                         }
                                     }
                                 }
@@ -960,21 +967,15 @@ async fn bunq_notes_survey() {
     let key = std::env::var("BUNQ_API_KEY").expect("BUNQ_API_KEY");
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
-    let since = (chrono::Local::now().date_naive() - chrono::Duration::days(RECEIPT_WINDOW_DAYS))
-        .format("%Y-%m-%d")
-        .to_string();
+    let since = crate::dates::iso(crate::dates::today() - crate::dates::days(RECEIPT_WINDOW_DAYS));
     let uid = c.state.user_id;
-    let ts =
-        |v: &Value| chrono::NaiveDateTime::parse_from_str(v.as_str()?, "%Y-%m-%d %H:%M:%S%.f").ok();
+    let ts = |v: &Value| jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", v.as_str()?).ok();
     let cents_of = |v: &Value| json_number_to_cents(v).map(i64::abs).unwrap_or(-1);
     // "ok:N" (N files) or "404" etc. per probed object
     async fn probe(c: &mut BunqConnector, path: String) -> (String, usize) {
@@ -1065,7 +1066,10 @@ async fn bunq_notes_survey() {
                             || cents_of(&r["amount_inquired"]["value"]) == cents.abs()
                     })
                     .filter_map(|r| {
-                        let gap = (ts(&r["time_responded"])? - paid?).num_seconds().abs();
+                        let gap = ts(&r["time_responded"])?
+                            .duration_since(paid?)
+                            .as_secs()
+                            .abs();
                         (gap <= 120).then_some((gap, r["id"].as_i64()?))
                     })
                     .min();
@@ -1083,7 +1087,7 @@ async fn bunq_notes_survey() {
                             || cents_of(&a["amount_local"]["value"]) == cents.abs()
                     })
                     .filter(|a| match (ts(&a["created"]), paid) {
-                        (Some(a), Some(p)) => (p - a).num_days().abs() <= 10,
+                        (Some(a), Some(p)) => (p.duration_since(a).as_hours() / 24).abs() <= 10,
                         _ => false,
                     })
                     .filter_map(|a| a["id"].as_i64())
@@ -1177,21 +1181,15 @@ async fn bunq_refused_notes_survey() {
     let key = std::env::var("BUNQ_API_KEY").expect("BUNQ_API_KEY");
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
-    let since = (chrono::Local::now().date_naive() - chrono::Duration::days(RECEIPT_WINDOW_DAYS))
-        .format("%Y-%m-%d")
-        .to_string();
+    let since = crate::dates::iso(crate::dates::today() - crate::dates::days(RECEIPT_WINDOW_DAYS));
     let uid = c.state.user_id;
-    let ts =
-        |v: &Value| chrono::NaiveDateTime::parse_from_str(v.as_str()?, "%Y-%m-%d %H:%M:%S%.f").ok();
+    let ts = |v: &Value| jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", v.as_str()?).ok();
     // object type -> endpoint segment that takes notes
     let segment = |t: &str| match t {
         "Payment" => Some("payment"),
@@ -1260,19 +1258,23 @@ async fn bunq_refused_notes_survey() {
             let paid = ts(&p["created"]);
             println!(
                 "PAYMENT id={pid} {} {:.2} type={} sub_type={} status={status} payment_keys=[{}] scheduled_id={} batch_id={}",
-                p["created"].as_str().and_then(local_date).unwrap_or_default(),
+                p["created"]
+                    .as_str()
+                    .and_then(local_date)
+                    .unwrap_or_default(),
                 cents as f64 / 100.0,
                 p["type"].as_str().unwrap_or("-"),
                 p["sub_type"].as_str().unwrap_or("-"),
                 keys(&p),
-                p["scheduled_id"], p["batch_id"],
+                p["scheduled_id"],
+                p["batch_id"],
             );
             for e in &events {
                 let Some((t, obj)) = e["object"].as_object().and_then(|o| o.iter().next()) else {
                     continue;
                 };
                 let near = match (ts(&e["created"]), paid) {
-                    (Some(a), Some(b)) => (a - b).num_minutes().abs() <= 3 * 24 * 60,
+                    (Some(a), Some(b)) => a.duration_since(b).as_mins().abs() <= 3 * 24 * 60,
                     _ => false,
                 };
                 let same_id = obj["id"].as_i64() == Some(pid);
@@ -1286,7 +1288,11 @@ async fn bunq_refused_notes_survey() {
                 }
                 println!(
                     "  EVENT {} action={} type={t} obj_id={} same_id={same_id} mentions_pid={} keys=[{}]",
-                    e["id"], e["action"], obj["id"], text.contains(&pid.to_string()), keys(obj),
+                    e["id"],
+                    e["action"],
+                    obj["id"],
+                    text.contains(&pid.to_string()),
+                    keys(obj),
                 );
                 if let (Some(seg), Some(oid)) = (segment(t), obj["id"].as_i64()) {
                     let path =
@@ -1325,12 +1331,9 @@ async fn bunq_live_transfer() {
     let to_name = std::env::var("BUNQ_TO_NAME").expect("BUNQ_TO_NAME");
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     assert!(matches!(c.begin(&ctx).await.unwrap(), Phase::Ready));
@@ -1418,12 +1421,9 @@ async fn bunq_pending_drafts() {
         .and_then(|v| v.trim().parse().ok());
     let ctx = ConnectContext {
         connection_id: 1,
-        login_name: String::new(),
         secret: SecretString::new(key),
-        settings: Default::default(),
-        state: Value::Null,
         since: "2020-01-01".into(),
-        since_by_account: Default::default(),
+        ..Default::default()
     };
     let mut c = BunqConnector::new();
     c.begin(&ctx).await.unwrap();
@@ -1496,14 +1496,13 @@ async fn bunq_pending_drafts() {
                     .unwrap_or_default(),
             );
             if target == Some(did) {
-                let token = c.state.session_token.clone();
                 let path = c.draft_path(id, Some(did));
                 match c
                     .call(
                         reqwest::Method::PUT,
                         &path,
                         Some(&json!({"status": "REJECTED"})),
-                        Some(&token),
+                        Auth::Session,
                     )
                     .await
                 {
@@ -1533,7 +1532,7 @@ async fn bunq_pending_drafts() {
 
 /// Privacy-safe outline of a bunq object for the live surveys: field names,
 /// a few enumerated values, amount signs and dates relative to `now`.
-fn survey_shape(o: &Value, now: chrono::NaiveDateTime, prefix: &str) -> String {
+fn survey_shape(o: &Value, now: jiff::civil::DateTime, prefix: &str) -> String {
     const ENUMS: [&str; 9] = [
         "status",
         "sub_status",
@@ -1552,14 +1551,12 @@ fn survey_shape(o: &Value, now: chrono::NaiveDateTime, prefix: &str) -> String {
     for (k, v) in map {
         let name = format!("{prefix}{k}");
         let part = match v {
-            Value::String(t) => {
-                match chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f") {
-                    Ok(t) => format!("{name}={:+}d", (t - now).num_days()),
-                    Err(_) if ENUMS.contains(&k.as_str()) => format!("{name}={t}"),
-                    Err(_) if t.is_empty() => format!("{name}=\"\""),
-                    Err(_) => name,
-                }
-            }
+            Value::String(t) => match jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S%.f", t) {
+                Ok(t) => format!("{name}={:+}d", t.duration_since(now).as_hours() / 24),
+                Err(_) if ENUMS.contains(&k.as_str()) => format!("{name}={t}"),
+                Err(_) if t.is_empty() => format!("{name}=\"\""),
+                Err(_) => name,
+            },
             Value::Number(n) if ENUMS.contains(&k.as_str()) => format!("{name}={n}"),
             Value::Null => format!("{name}=null"),
             Value::Object(m) if m.contains_key("value") && m.contains_key("currency") => {

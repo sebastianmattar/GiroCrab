@@ -97,4 +97,150 @@ final class OfflineAccountsTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(model.accountNote(for: id), "Reisekasse")
     }
+
+    /// #1049: kind and currency chosen in the sheet reach the new account, and its bookings carry the currency.
+    /// Goes through the vault directly: `createOfflineAccount` would switch the demo to the own vault first.
+    func testNewOfflineAccountTakesKindAndCurrency() async throws {
+        let vault = try XCTUnwrap(model.vault)
+        let id = try vault.createOfflineAccount(name: "Tagesgeld", kind: .savings, currency: "CHF", openingCents: 100_00)
+        model.offlineStore.accountIDs.insert(id)
+        model.reloadAccounts()
+        try await awaitBalance(of: id, 100_00)
+        let account = try XCTUnwrap(model.account(for: id))
+        XCTAssertEqual(account.kind, .savings)
+        XCTAssertEqual(account.currency, "CHF")
+        XCTAssertTrue(model.isOffline(id))
+        let booking = try model.saveManualBooking(accountId: id, bookingId: nil, setup: setup(-5_00, "Gebühr"))
+        let row = try XCTUnwrap(try bookings(of: id).first { $0.id == booking })
+        XCTAssertEqual(row.currency, "CHF")
+        try await awaitBalance(of: id, 95_00)
+    }
+
+    func testSheetOffersCashAndSavingsWithEuroFirst() {
+        XCTAssertEqual(OfflineAccountOptions.kinds, [.cash, .savings])
+        XCTAssertEqual(OfflineAccountOptions.currencies.first, "EUR")
+        XCTAssertEqual(OfflineAccountOptions.defaultCurrency, "EUR")
+        XCTAssertNotEqual(OfflineAccountOptions.title(.cash), OfflineAccountOptions.title(.savings))
+    }
+
+    /// #1049: header, chart axis and bookings of a USD account show dollars, not euros.
+    func testHeaderChartAndBookingsFollowTheAccountCurrency() async throws {
+        let vault = try XCTUnwrap(model.vault)
+        let id = try vault.createOfflineAccount(name: "Dollar", kind: .cash, currency: "USD", openingCents: 0)
+        model.offlineStore.accountIDs.insert(id)
+        model.reloadAccounts()
+        try await awaitBalance(of: id, 0)
+        model.sidebarSelection = .account(id)
+        XCTAssertEqual(model.balanceCurrency, "USD")
+        XCTAssertTrue(Money.format(-30_00, currency: model.balanceCurrency).contains("$"))
+        XCTAssertTrue(BalanceChart.compactEuros(-30, currency: "USD").hasSuffix("$"))
+        XCTAssertTrue(BalanceChart.compactEuros(-30).hasSuffix("€"))
+        model.sidebarSelection = .allAccounts
+        XCTAssertEqual(model.balanceCurrency, "EUR")
+        XCTAssertTrue(Money.format(100, currency: "").contains("€"))
+    }
+
+    /// #1049 (review): sums follow the currency of exactly one account, whether it is chosen by the
+    /// selection or by the account filter; several accounts sum in EUR only (as the core does).
+    func testSumCurrencyFollowsOneAccountOnly() async throws {
+        let vault = try XCTUnwrap(model.vault)
+        let id = try vault.createOfflineAccount(name: "Dollar", kind: .cash, currency: "USD", openingCents: 0)
+        model.offlineStore.accountIDs.insert(id)
+        model.reloadAccounts()
+        try await awaitBalance(of: id, 0)
+        XCTAssertEqual(model.sumCurrency(forAccounts: [id]), "USD")
+        XCTAssertEqual(model.sumCurrency(forAccounts: []), "EUR")
+        XCTAssertEqual(model.sumCurrency(forAccounts: [id, try XCTUnwrap(model.allAccounts.first { $0.id != id }).id]), "EUR")
+        model.sidebarSelection = .allAccounts
+        model.categoryAccountFilter = [id]
+        XCTAssertEqual(model.balanceCurrency, "USD")
+        XCTAssertEqual(model.categorySumCurrency, "EUR") // the sidebar sums ignore the filter outside the category views
+        model.sidebarSelection = .uncategorized
+        XCTAssertEqual(model.categorySumCurrency, "USD")
+        model.categoryAccountFilter = []
+        XCTAssertEqual(model.balanceCurrency, "EUR")
+        XCTAssertEqual(model.categorySumCurrency, "EUR")
+    }
+
+    /// #1049 (maintainer decision): curated list plus an own ISO code, and the header line "Sparkonto · USD".
+    func testCurrencyChoiceAndSubtitle() async throws {
+        XCTAssertEqual(OfflineAccountOptions.currencies,
+                       ["EUR", "USD", "CHF", "GBP", "SEK", "DKK", "NOK", "PLN", "CZK"])
+        XCTAssertEqual(OfflineAccountOptions.currency(picked: "SEK", typed: "xxx"), "SEK")
+        let other = OfflineAccountOptions.otherTag
+        XCTAssertEqual(OfflineAccountOptions.currency(picked: other, typed: " jpy "), "JPY")
+        for bad in ["", "JP", "JPYY", "J1Y", "€€€"] {
+            XCTAssertNil(OfflineAccountOptions.currency(picked: other, typed: bad), bad)
+        }
+        let vault = try XCTUnwrap(model.vault)
+        let id = try vault.createOfflineAccount(name: "Reserve", kind: .savings, currency: "JPY", openingCents: 0)
+        model.offlineStore.accountIDs.insert(id)
+        model.reloadAccounts()
+        try await awaitBalance(of: id, 0)
+        let account = try XCTUnwrap(model.account(for: id))
+        XCTAssertEqual(OfflineAccountOptions.subtitle(account), "\(OfflineAccountOptions.title(.savings)) · JPY")
+        XCTAssertNotEqual(account.sfSymbol, cash.sfSymbol, "kinds differ by symbol")
+    }
+
+    /// #1049: a category over all accounts counts EUR only and lists the other currencies as "Zusätzlich".
+    func testCategoryListsOtherCurrenciesSeparately() async throws {
+        let vault = try XCTUnwrap(model.vault)
+        let usd = try vault.createOfflineAccount(name: "Dollar", kind: .cash, currency: "USD", openingCents: 0)
+        model.offlineStore.accountIDs.insert(usd)
+        model.reloadAccounts()
+        try await awaitBalance(of: usd, 0)
+        let cat = try vault.createCategory(name: "Reisen \(UUID().uuidString.prefix(6))", parentId: nil, sfSymbol: "airplane", colorHex: "#336699")
+        var s = setup(-30_00, "Hotel")
+        s.categoryId = cat
+        _ = try model.saveManualBooking(accountId: usd, bookingId: nil, setup: s)
+
+        model.sidebarSelection = .category(cat)
+        model.reloadCategoryHistory()
+        var other: [CurrencyAmount] = []
+        for _ in 0..<300 {
+            other = model.categoryOtherCurrencies
+            if !other.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(other.map(\.currency), ["USD"])
+        XCTAssertEqual(other.first?.cents, -30_00)
+        XCTAssertEqual(model.categoryHistory.map(\.cents).reduce(0, +), 0, "EUR only: the dollars are not summed in")
+        XCTAssertEqual(model.balanceCurrency, "EUR")
+
+        model.sidebarSelection = .allAccounts
+        model.reloadCategoryHistory()
+        XCTAssertTrue(model.categoryOtherCurrencies.isEmpty)
+    }
+
+    /// #1049: "Zusätzlich" next to the sidebar total of a category and under the KPI tiles.
+    func testOtherCurrenciesAppearNextToTotalsAndKPIs() async throws {
+        let vault = try XCTUnwrap(model.vault)
+        let usd = try vault.createOfflineAccount(name: "Dollar", kind: .cash, currency: "USD", openingCents: 0)
+        model.offlineStore.accountIDs.insert(usd)
+        model.reloadAccounts()
+        try await awaitBalance(of: usd, 0)
+        let cat = try vault.createCategory(name: "Reisen \(UUID().uuidString.prefix(6))", parentId: nil, sfSymbol: "airplane", colorHex: "#336699")
+        var s = setup(-30_00, "Hotel")
+        s.categoryId = cat
+        _ = try model.saveManualBooking(accountId: usd, bookingId: nil, setup: s)
+
+        model.sidebarSelection = .allAccounts
+        model.refreshOtherCurrencies()
+        for _ in 0..<300 where model.categoryOtherTotals[cat] == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.categoryOtherTotals[cat]?.map(\.currency), ["USD"])
+        XCTAssertEqual(model.categoryOtherTotals[cat]?.first?.cents, -30_00)
+        XCTAssertEqual(model.otherCurrencyFlows.map(\.currency), ["USD"])
+        let text = try XCTUnwrap(model.otherCurrencyText { -$0.consumptionCents })
+        XCTAssertTrue(text.contains("$"), text)
+
+        // one account: its own currency is the main figure, nothing is "zusätzlich"
+        model.sidebarSelection = .account(usd)
+        model.refreshOtherCurrencies()
+        for _ in 0..<300 where !model.otherCurrencyFlows.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(model.otherCurrencyFlows.isEmpty)
+    }
 }

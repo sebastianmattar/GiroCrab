@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::CoreResult;
 
@@ -143,13 +143,36 @@ const OTHER_BOOKINGS: &str = "SELECT id, account_id, external_id, import_fp,
      FROM other.transactions ORDER BY account_id, external_id";
 
 /// The id both sides keep for one booking known under two ids: the bank's
-/// (not a MoneyMoney `mm-` id), else the smaller.
+/// (not a MoneyMoney `mm-` id), else the smaller. A card hold „Abrufweg
+/// umstellen“ dropped keeps its freed id (`switch-stale-<id>:pending-hold-…`):
+/// taking the hold's own id back would leave it deleted, and the bank's open
+/// hold, reported again after switching back, would stay deleted (#1134).
 fn canonical_external_id<'a>(a: &'a str, b: &'a str) -> &'a str {
+    let freed_hold = |s: &str| s.starts_with("switch-stale-") && s.contains(":pending-hold-");
+    match (freed_hold(a), freed_hold(b)) {
+        (true, false) => return a,
+        (false, true) => return b,
+        _ => {}
+    }
     match (a.starts_with("mm-"), b.starts_with("mm-")) {
         (true, false) => b,
         (false, true) => a,
         _ => a.min(b),
     }
+}
+
+/// A card hold of the bank in any of its forms: open or settled
+/// (`pending-hold-…`), dropped by „Abrufweg umstellen“
+/// (`switch-stale-<id>:pending-hold-…`) or marked by an older switch
+/// (`mm-switch-pending-hold-…`). The fingerprint pairs card holds only with
+/// card holds: a hold (often deleted) has the date, amount and text of its
+/// payment, and pairing it with the posted booking would delete the booking
+/// (#1134). Transfer bookings of the app (`pending-<e2e>`, marked
+/// `mm-switch-pending-<e2e>`) pair as before, both forms of one transfer alike.
+fn is_hold_id(ext: &str) -> bool {
+    ext.starts_with("pending-hold-")
+        || ext.starts_with("mm-switch-pending-hold-")
+        || (ext.starts_with("switch-stale-") && ext.contains(":pending-hold-"))
 }
 
 /// Merges `other.transactions` and their splits: bookings are matched by
@@ -204,7 +227,7 @@ pub(crate) fn merge_bookings(
     let mut local_splits = load_splits(conn, "main", local_uuid)?;
     let mut by_key: HashMap<(i64, String), i64> = HashMap::new();
     // (account, import_fp) -> (external_id, id) of local fingerprinted rows
-    let mut fp_rows: Vec<((i64, String), (String, i64))> = Vec::new();
+    let mut fp_rows: Vec<((i64, String, bool), (String, i64))> = Vec::new();
     let mut local: HashMap<i64, BookingFields> = HashMap::new();
     {
         let mut st = conn.prepare(
@@ -229,7 +252,7 @@ pub(crate) fn merge_bookings(
                 &r.get::<_, String>(11)?,
                 &r.get::<_, String>(12)?,
             );
-            fp_rows.push(((acc, fp), (ext, id)));
+            fp_rows.push(((acc, fp, is_hold_id(&ext)), (ext, id)));
             let source: String = r.get(5)?;
             let manual = if source == "manual" { r.get(4)? } else { None };
             local.insert(
@@ -311,12 +334,12 @@ pub(crate) fn merge_bookings(
     // pairing by status first would let the merge order decide which rows
     // pair, because a merged pair's status changes between the two merges.
     // Both sides then keep one id for the pair (`canonical_external_id`), so
-    // the next merge matches it by key.
+    // the next merge matches it by key. Holds pair only with holds (`is_hold_id`).
     let other_keys: HashSet<(i64, &str)> = others
         .iter()
         .filter_map(|o| Some((*acc_map.get(&o.account_id)?, o.external_id.as_str())))
         .collect();
-    let mut by_fp: HashMap<(i64, String), Vec<(String, i64)>> = HashMap::new();
+    let mut by_fp: HashMap<(i64, String, bool), Vec<(String, i64)>> = HashMap::new();
     for (k, (ext, id)) in fp_rows {
         if !other_keys.contains(&(k.0, ext.as_str())) {
             by_fp.entry(k).or_default().push((ext, id));
@@ -357,7 +380,7 @@ pub(crate) fn merge_bookings(
         o.fields.tags = other_tags.remove(&o.id).unwrap_or_default();
         let existing = match by_key.get(&(acc, o.external_id.clone())) {
             Some(&id) => Some((id, false)),
-            None => match by_fp.get_mut(&(acc, o.match_fp.clone())) {
+            None => match by_fp.get_mut(&(acc, o.match_fp.clone(), is_hold_id(&o.external_id))) {
                 Some(bucket) if !bucket.is_empty() => {
                     let (ext, id) = bucket.remove(0);
                     let key = canonical_external_id(&ext, &o.external_id).to_string();

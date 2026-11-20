@@ -1,6 +1,6 @@
 //! Web logins (WebLoginSheet.qml): the browser profile's cookies and the core
 //! calls of the portal flows (PortalUI.swift, AmazonUI.swift, FnzUI.swift,
-//! QuirionUI.swift, SchwaebischHallUI.swift, ConnectionsUI.swift › WebLoginSheet).
+//! QuirionUI.swift, SchwaebischHallUI.swift, EquatePlusUI.swift, ConnectionsUI.swift › WebLoginSheet).
 //!
 //! Cookies are read from the QtWebEngine cookie store (cpp/webcookies.cpp) and
 //! go straight into the vault; they never travel through QML / JavaScript and
@@ -21,7 +21,7 @@ use zeroize::Zeroizing;
 
 type R = Result<Value, String>;
 
-extern "C" {
+unsafe extern "C" {
     fn girocrab_web_attach() -> bool;
     fn girocrab_web_cookies_json() -> *mut std::os::raw::c_char;
     fn girocrab_web_free(s: *mut std::os::raw::c_char);
@@ -57,6 +57,9 @@ pub fn handles(method: &str) -> bool {
             | "import_schwaebisch_hall_snapshot"
             | "pending_schwaebisch_hall_documents"
             | "import_schwaebisch_hall_document"
+            | "import_equateplus_snapshot"
+            | "pending_equateplus_documents"
+            | "import_equateplus_document"
     )
 }
 
@@ -205,6 +208,15 @@ pub fn call(method: &str, a: &Value, vault: fn() -> Result<Arc<Vault>, String>) 
             .map_err(err)?),
         "import_schwaebisch_hall_document" => ok(vault()?
             .import_schwaebisch_hall_document(id()?, arg(a, "document_json")?, bytes(a)?)
+            .map_err(err)?),
+        "import_equateplus_snapshot" => ok(vault()?
+            .import_equateplus_snapshot(id()?, arg(a, "snapshot_json")?)
+            .map_err(err)?),
+        "pending_equateplus_documents" => ok(vault()?
+            .pending_equateplus_documents(id()?, arg(a, "documents_json")?)
+            .map_err(err)?),
+        "import_equateplus_document" => ok(vault()?
+            .import_equateplus_document(id()?, arg(a, "document_json")?, bytes(a)?)
             .map_err(err)?),
         _ => Err(format!("unknown core method `{method}`")),
     }
@@ -404,6 +416,64 @@ mod tests {
         // nothing left to keep: the setting is deleted
         assert!(to_store(&[], &amex, now).is_empty());
         assert!(from_store("", &amex, now, &[]).is_empty());
+    }
+
+    static EQUATEPLUS_VAULT: std::sync::OnceLock<Arc<Vault>> = std::sync::OnceLock::new();
+    fn equateplus_vault() -> Result<Arc<Vault>, String> {
+        EQUATEPLUS_VAULT
+            .get()
+            .cloned()
+            .ok_or_else(|| "no vault".into())
+    }
+
+    /// EquatePlusWebLoginFlow.qml: the three core calls with the JSON the flow sends
+    /// (synthetic snapshot and library as in girocrab-core's equateplus tests).
+    #[test]
+    fn equateplus_calls_round_trip() {
+        use serde_json::json;
+        let dir = std::env::temp_dir().join(format!("girocrab-equateplus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::open(dir.join("t.girocrab").display().to_string(), vec![7; 32]).unwrap();
+        let id = v
+            .add_bank_connection(
+                girocrab_core::ConnectorKind::EquatePlus,
+                "Test EquatePlus".into(),
+                "test".into(),
+            )
+            .unwrap();
+        assert!(EQUATEPLUS_VAULT.set(v).is_ok());
+        let call_ok = |m: &str, a: Value| {
+            call(m, &a, equateplus_vault).unwrap_or_else(|e| panic!("{m}: {e}"))
+        };
+        assert!(handles("import_equateplus_snapshot"));
+        let snapshot = json!({"version":1,"date":"2026-11-15","user":{"participant":{"userId":"test-user"},"reportingCurrency":{"code":"EUR"}},
+          "plans":[{"id":"plan-a","name":"Test Programm","details":{"totals":[{"type":"TOTAL","quantity":{"amount":6.875},"value":{"amount":848.72}}],"entries":[{"entries":[{
+            "marketPrice":{"amount":123.45,"unit":{"code":"EUR"}},"canTrade":true,
+            "entries":[{"VEHICLE":"Test Aktien","QUANTITY":{"amount":2.5},"LOCKED_QTY":{"amount":3.25},"SELL_PURCHASE_PRICE":{"amount":100}},
+                       {"VEHICLE":"Test RSU","LOCKED_PERF_QTY":{"amount":1.125}}]}]}]}}]});
+        let s = call_ok(
+            "import_equateplus_snapshot",
+            json!({ "connection_id": id, "snapshot_json": snapshot.to_string() }),
+        );
+        assert_eq!(s["accounts_updated"], json!(1));
+        let library =
+            json!([{"id": "d1", "date": "2011-05-26T00:00:00", "description": "Test Bestätigung",
+          "documentType": "Dividendenbestätigung", "plan": "Test Programm",
+          "url": "/services/statements/download?documentId=d1"}])
+            .to_string();
+        let args = json!({ "connection_id": id, "documents_json": library });
+        let pending = call_ok("pending_equateplus_documents", args.clone());
+        let pending = pending.as_array().unwrap();
+        assert_eq!(pending.len(), 1);
+        let pdf = base64::engine::general_purpose::STANDARD.encode(b"%PDF-1.4 test");
+        let stored = call_ok(
+            "import_equateplus_document",
+            json!({ "connection_id": id, "document_json": pending[0], "bytes_base64": pdf }),
+        );
+        assert_eq!(stored, json!(true));
+        let again = call_ok("pending_equateplus_documents", args);
+        assert!(again.as_array().unwrap().is_empty(), "stored once");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

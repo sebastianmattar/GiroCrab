@@ -12,10 +12,7 @@ impl Vault {
         let db = self.db()?;
         let (_, mut state) = connection(&db, connection_id)?;
         state.auth_method = method;
-        db.execute(
-            "UPDATE bank_connections SET state_json=?1 WHERE id=?2",
-            params![serialize(&state)?.to_string(), connection_id],
-        )?;
+        store_state(&db, connection_id, &encode_state(&state)?)?;
         Ok(())
     }
 }

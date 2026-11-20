@@ -1,12 +1,11 @@
-GiroCrab v0.8.5 (iOS Build unter Version 0.7.5, Schema v27)
+GiroCrab v0.8.6 (iOS Build 23 unter Version 0.7.5, Schema v31)
 
 Hinweis zur Versionsnummer in TestFlight:
-Weil unsere Entwicklung schneller voranschreitet als Apples Versions-Review fuer neue Release-Zweige, liefern wir das komplette v0.8.5-Release auf iOS ohne Wartezeit direkt als neuen Build unter 0.7.5 aus.
+Weil unsere Entwicklung schneller voranschreitet als Apples Versions-Review fuer neue Release-Zweige, liefern wir das komplette v0.8.6-Release auf iOS ohne Wartezeit direkt als Build 23 unter 0.7.5 aus.
 
 Was ist neu und was kann getestet werden:
-- Integrierte FinTS-Produktregistrierung & automatisches Tresor-Backup vor dem Upgrade.
-- Tags filtern & auswerten (#228, #777): Buchungen nach Tags filtern und in den Diagrammen auswerten.
-- EquatePlus & IBKR-Einzelwaehrungen (#750, #625): Neuer EquatePlus-Connector und native Waehrung pro Depotposition.
-- Revolut OAuth-Popup (#289), ING Business (#721), Sparda Hannover (#619) & C24-Kategorien (#763).
-- iOS-Fix (#768): Schluessel-Einfuegen-Dialog unter Einstellungen -> Sicherheit bleibt stabil geoeffnet.
-- Performance-Schub & UI-Feinschliff: ListCache (#760), Split-Buchungs-Kategorien (#654), Analyse-Button in der Filterleiste (#757) und Seitenleisten-Zaehler (#592).
+- Natuerliche Buchungssuche, neue Beleg-Filter & Postfach-Filter nach Bankzugang (#1056).
+- Neue Konto-Einstellungen auf iOS & macOS; offizielle FinTS-Produktregistrierung direkt aktiv (#1092).
+- Echtzeitueberweisung-Statuspruefung bei Code 3045 (#1121), FFB-Postfach-PDFs (#1105) & FFB-Depot-Zusammenfuehrung (#1103).
+- Trade-Republic-Verrechnungskonto beim Import (#1114), PayPal-Fremdwaehrungen (#1110), offene Reservierungen (#1111) & ING Business (#974).
+- Advanzia-Wiederanlegen (#1115), Ford-Money-/Opel-Steuerabgleich (#1102) & N26-90-Tage-Consent (#1082).

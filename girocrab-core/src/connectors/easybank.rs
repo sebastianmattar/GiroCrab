@@ -8,20 +8,23 @@
 //! response), the `XSRF-TOKEN` cookie and an Application-Insights style
 //! `Request-Id` (`<trace uuid>.2.<uuid>`); other ids are rejected with
 //! `VINZ_PV_001`. Details: `docs/easybank-connector.md`.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use reqwest::cookie::{CookieStore, Jar};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use super::{
-    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, FetchResult, Phase,
-    RemoteAccount, RemoteTransaction,
+    BankConnector, Challenge, ChallengeKind, ChallengeResponse, ConnectContext, Documents,
+    FetchResult, Phase, RemoteAccount, RemoteTransaction,
 };
 use crate::{
     error::{CoreError, CoreResult},
     i18n::tr,
     models::AccountKind,
+    secret::{SecretJson, SecretString},
 };
 
 const BASE: &str = "https://banking.easybank.de";
@@ -59,7 +62,7 @@ fn required<'a>(v: &'a Value, key: &str) -> CoreResult<&'a str> {
 /// `YYYY-MM-DD` of an ISO timestamp; `None` for the portal's empty `0001-01-01`.
 fn date(v: &Value, key: &str) -> Option<String> {
     let s = text(v, key).get(..10)?;
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()?;
+    jiff::civil::Date::strptime("%Y-%m-%d", s).ok()?;
     (!s.starts_with("0001-")).then(|| s.to_string())
 }
 
@@ -133,21 +136,23 @@ fn transaction(account_ref: &str, t: &Value) -> CoreResult<Option<RemoteTransact
     } else {
         String::new()
     };
-    if let Ok((original, currency)) = money(t, "Amount") {
-        if original != 0 && !currency.is_empty() && currency != local_currency {
-            let foreign = format!(
-                "{} {}.{:02}",
-                currency,
-                original.abs() / 100,
-                original.abs() % 100
-            );
-            purpose = [purpose.as_str(), &foreign]
-                .iter()
-                .filter(|s| !s.is_empty())
-                .copied()
-                .collect::<Vec<_>>()
-                .join(" · ");
-        }
+    if let Ok((original, currency)) = money(t, "Amount")
+        && original != 0
+        && !currency.is_empty()
+        && currency != local_currency
+    {
+        let foreign = format!(
+            "{} {}.{:02}",
+            currency,
+            original.abs() / 100,
+            original.abs() % 100
+        );
+        purpose = [purpose.as_str(), &foreign]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" · ");
     }
     let booking_text = [
         text(t, "TransactionCodeDescription"),
@@ -242,12 +247,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -279,15 +285,16 @@ fn persistent_cookies(header: &str) -> Vec<String> {
 
 /// Request body for one page of bookings (all fields are required).
 fn transactions_query(account: &Value, days: i64, page: u32) -> Value {
-    let end = chrono::Utc::now();
-    let start = end - chrono::Duration::days(days);
+    let end = jiff::Timestamp::now();
+    let start = end - jiff::SignedDuration::from_hours(days * 24);
+    let millis = |t: jiff::Timestamp| t.strftime("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     json!({
         "SelectedApprovalRule": 0, "SelectedApprovalSubRule": 0, "DisableNonStp": false,
         "IsSourceFutureDated": false, "OpenCaseAndExecuteTransaction": false,
         "OpenConditionalCase": false, "OpenCaseAndNotExecute": false,
         "Account": account,
-        "StartDate": start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "EndDate": end.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "StartDate": millis(start),
+        "EndDate": millis(end),
         "HasStartAmountValue": false, "HasEndAmountValue": false, "TransactionFlag": "All",
         "TransactionTypeIndicator": 0, "Status": "ALL", "OTPAlreadyChecked": false,
         "IsExporting": false, "hasOptionDetail": false, "CardNetwork": "Undefined",
@@ -313,8 +320,8 @@ fn initial_account_list(flow: &Value) -> Vec<Value> {
 
 /// Days from `since` (YYYY-MM-DD) until today, within the portal's limits.
 fn days_since(since: &str) -> i64 {
-    chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d")
-        .map(|d| (chrono::Local::now().date_naive() - d).num_days() + 1)
+    jiff::civil::Date::strptime("%Y-%m-%d", since)
+        .map(|d| crate::dates::days_between(d, crate::dates::today()) + 1)
         .unwrap_or(MAX_DAYS)
         .clamp(1, MAX_DAYS)
 }
@@ -353,10 +360,11 @@ impl EasybankConnector {
         Ok(c)
     }
 
-    fn restore_cookies(&self, state: &Value) {
+    fn restore_cookies(&self, cookies: &[SecretString]) {
         let url = Self::url();
-        for c in state["cookies"].as_array().into_iter().flatten() {
-            if let Some(c) = c.as_str().filter(|c| valid_cookie(c)) {
+        for c in cookies {
+            let c = c.expose();
+            if valid_cookie(c) {
                 self.jar.add_cookie_str(
                     &format!("{c}; Domain=banking.easybank.de; Path=/; Secure; HttpOnly"),
                     &url,
@@ -519,7 +527,7 @@ impl BankConnector for EasybankConnector {
                 message: tr("Benutzername und Passwort erforderlich").into(),
             });
         }
-        self.restore_cookies(&ctx.state);
+        self.restore_cookies(&stored_state(&ctx.state).cookies);
         self.trace_id = uuid::Uuid::new_v4().to_string();
         let client = self.client()?;
         let html =
@@ -602,15 +610,14 @@ impl BankConnector for EasybankConnector {
             return Err(CoreError::SessionClosed);
         }
         // "Kontoauszüge abrufen" for one card: statements only, no bookings.
-        if let Some(card) = ctx.settings.get(super::STATEMENTS_ONLY) {
-            let card = card.expose().to_string();
-            let mut known = known_statements(&ctx.state);
+        if let Documents::StatementsOnly(card) = &ctx.documents {
+            let mut known = stored_state(&ctx.state).statements;
             let documents = self
-                .statements(std::slice::from_ref(&card), &mut known, true)
+                .statements(std::slice::from_ref(card), &mut known, true)
                 .await?;
             return Ok(FetchResult {
                 documents,
-                state: Some(self.state(&known)),
+                state: self.state(known),
                 ..Default::default()
             });
         }
@@ -632,8 +639,7 @@ impl BankConnector for EasybankConnector {
             .filter(|a| !text(a, "Number").is_empty() && text(a, "AccountStatus") != "Closed")
         {
             let external = format!("card:{}", text(account, "Number"));
-            let since = ctx.since_by_account.get(&external).unwrap_or(&ctx.since);
-            let days = days_since(since);
+            let days = days_since(ctx.since_for(&external));
             let transactions = match self.bookings(account, days).await? {
                 Some(t) => t,
                 None => self
@@ -644,32 +650,45 @@ impl BankConnector for EasybankConnector {
             cards.push(json!({ "account": account, "transactions": transactions }));
         }
         let mut out = snapshot(&json!({ "version": 1, "cards": cards }).to_string())?;
-        let auto: Vec<String> = ctx
-            .settings
-            .get(super::STATEMENTS_AUTO)
-            .map(|v| v.expose().split(',').map(str::to_string).collect())
-            .unwrap_or_default();
-        let mut known = known_statements(&ctx.state);
-        if !auto.is_empty() {
-            // Optional: a failed statement download never fails the sync.
-            if let Ok(docs) = self.statements(&auto, &mut known, false).await {
+        let due = ctx.documents.due_statements();
+        let mut known = stored_state(&ctx.state).statements;
+        if !due.is_empty() {
+            // Optional: a failed download never fails the sync. On failure the
+            // dates of what was downloaded so far are dropped with the documents.
+            let mut fetched = known.clone();
+            if let Ok(docs) = self.statements(due, &mut fetched, false).await {
                 out.documents = docs;
-                out.statements_fetched = auto;
+                out.statements_fetched = due.to_vec();
+                known = fetched;
             }
         }
-        out.state = Some(self.state(&known));
+        out.state = self.state(known);
         Ok(out)
     }
 }
 
-/// Statement dates already downloaded per card (`card:<n>` → `[YYYY-MM-DD]`).
-fn known_statements(state: &Value) -> std::collections::HashMap<String, Vec<String>> {
-    serde_json::from_value(state["statements"].clone()).unwrap_or_default()
+/// Connection state saved between syncs (inside the encrypted vault).
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct StoredState {
+    cookies: Vec<SecretString>,
+    /// Statement dates already downloaded per card (`card:<n>` → `[YYYY-MM-DD]`).
+    statements: HashMap<String, Vec<String>>,
+}
+
+fn stored_state(state: &SecretJson) -> StoredState {
+    state.decode().unwrap_or_default()
 }
 
 impl EasybankConnector {
-    fn state(&self, known: &std::collections::HashMap<String, Vec<String>>) -> Value {
-        json!({ "cookies": persistent_cookies(&self.cookie_header()), "statements": known })
+    fn state(&self, statements: HashMap<String, Vec<String>>) -> Option<SecretJson> {
+        let header = SecretString::from(self.cookie_header());
+        let cookies = persistent_cookies(header.expose());
+        SecretJson::encode(&StoredState {
+            cookies: cookies.into_iter().map(SecretString::from).collect(),
+            statements,
+        })
+        .ok()
     }
 
     /// Monthly statements (PDF) of the given cards. Opens the statements
@@ -678,7 +697,7 @@ impl EasybankConnector {
     async fn statements(
         &mut self,
         cards: &[String],
-        known: &mut std::collections::HashMap<String, Vec<String>>,
+        known: &mut HashMap<String, Vec<String>>,
         all: bool,
     ) -> CoreResult<Vec<crate::documents::RemoteDocument>> {
         let flow = self
@@ -762,7 +781,7 @@ impl EasybankConnector {
             "exportRequest": { "Account": account, "StatementDocument": statement },
             "isLandscape": false,
             "fileName": file_name,
-            "uniqueID": chrono::Utc::now().timestamp_millis(),
+            "uniqueID": crate::dates::now_ms(),
         });
         let client = self.client()?;
         let resp = client
@@ -920,14 +939,14 @@ mod tests {
     #[test]
     fn restore_cookies_rejects_attribute_and_header_injection() {
         let c = EasybankConnector::new();
-        c.restore_cookies(&json!({"cookies": [
+        let cookies = [
             "good=1",
             "evil=1; Domain=attacker.example",
             "crlf=1\r\nX-Injected: 1",
             "=novalue",
             "noequals",
-            42,
-        ]}));
+        ];
+        c.restore_cookies(&cookies.map(SecretString::from));
         let header = c.cookie_header();
         assert!(header.contains("good=1"), "{header}");
         for bad in ["evil", "crlf", "Injected", "noequals", "novalue"] {
@@ -1017,12 +1036,11 @@ mod tests {
             ("kontoauszug", "2026-11-10")
         );
         assert_eq!(d.account_ref, "card:1234567890");
-        let state = json!({"cookies": [], "statements": {"card:1234567890": ["2026-10-10"]}});
-        assert_eq!(
-            known_statements(&state)["card:1234567890"],
-            vec!["2026-10-10".to_string()]
-        );
-        assert!(known_statements(&json!({})).is_empty());
+        let state = json!({"cookies": ["c=1"], "statements": {"card:1234567890": ["2026-10-10"]}});
+        let stored = stored_state(&state.clone().into());
+        assert_eq!(stored.statements["card:1234567890"], ["2026-10-10"]);
+        assert_eq!(serde_json::to_value(&stored).unwrap(), state);
+        assert!(stored_state(&SecretJson::default()).statements.is_empty());
     }
 
     #[test]

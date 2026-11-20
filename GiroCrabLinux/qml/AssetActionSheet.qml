@@ -157,9 +157,9 @@ Sheet {
                         spacing: 8
                         Text { text: Fmt.medium(modelData.date); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Layout.fillWidth: true }
                         // per piece; with several pieces then what they were worth together
-                        Text { text: Fmt.money(modelData.value_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text }
+                        Text { text: Fmt.money(modelData.value_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                         Text { visible: parent.held > 0 && parent.held !== 1; font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.secondary
-                               text: qsTr("gesamt %1").arg(Fmt.money(Math.round(modelData.value_cents * parent.held))) }
+                               text: qsTr("gesamt %1").arg(Fmt.money(Math.round(modelData.value_cents * parent.held))); Sensitive { amounts: true } }
                         RemoveButton { visible: modelData.date !== sheet.item.setup.purchase_date
                                        onClicked: sheet.change("delete_asset_value", { item_id: sheet.item.id, date: modelData.date }) }
                     }
@@ -195,6 +195,7 @@ Sheet {
                     visible: sheet.otherValue !== null
                     label: sheet.entryMode === "total" ? qsTr("Wert je Stück") : qsTr("Wert gesamt")
                     value: sheet.otherValue !== null ? Fmt.money(sheet.otherValue) : ""
+                    amounts: true
                 }
             }
 

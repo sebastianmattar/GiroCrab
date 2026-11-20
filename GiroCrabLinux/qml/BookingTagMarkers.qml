@@ -34,7 +34,7 @@ RowLayout {
                 }
             }
             HoverHandler { id: pillHover }
-            ToolTip.visible: pillHover.hovered && AppModel.redaction === 0
+            ToolTip.visible: pillHover.hovered && (AppModel.effectiveRedaction & AppModel.redactPersonal) === 0
             ToolTip.delay: 600
             ToolTip.text: pill.modelData.name
         }

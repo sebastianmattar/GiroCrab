@@ -40,7 +40,9 @@ fn check() -> Result<(), String> {
     }
     let secret = password()?;
     let file = KeyFile::open(&bytes, secret.as_bytes()).map_err(|e| e.to_string())?;
-    println!("Offline-Prüfung erfolgreich: Passwort und Datei-Prüfwert stimmen; enthaltene private RSA-Schlüssel sind mathematisch konsistent.");
+    println!(
+        "Offline-Prüfung erfolgreich: Passwort und Datei-Prüfwert stimmen; enthaltene private RSA-Schlüssel sind mathematisch konsistent."
+    );
     println!(
         "Bankzugänge: {}. Bankschlüssel: {}. Keine Bank kontaktiert, keine Datei verändert.",
         file.identities.len(),
@@ -54,7 +56,9 @@ fn check() -> Result<(), String> {
                 .any(|k| k.blz == identity.blz && k.kind == *kind)
         })
     }) {
-        println!("Für einen Bankabruf fehlen öffentliche Bankschlüssel. Diese im Einrichtungsdialog abrufen und anhand der offiziellen Commerzbank-Prüfwerte bestätigen.");
+        println!(
+            "Für einen Bankabruf fehlen öffentliche Bankschlüssel. Diese im Einrichtungsdialog abrufen und anhand der offiziellen Commerzbank-Prüfwerte bestätigen."
+        );
     }
     println!("Dies bestätigt noch keine erfolgreiche RAH-10-Anmeldung bei der Bank.");
     Ok(())

@@ -334,11 +334,7 @@ fn decimal_cents(s: &str) -> Option<i64> {
 
 /// "20261107" or "20261107120000" → "2026-11-07"
 fn date(s: &str) -> Option<String> {
-    let d = s.get(..8)?;
-    if !d.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    Some(format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..8]))
+    crate::dates::parse_yyyymmdd(s).map(crate::dates::iso)
 }
 
 #[cfg(test)]
@@ -381,7 +377,9 @@ mod tests {
     #[test]
     fn empty_depot_is_zero_and_percent_quotes_have_no_price() {
         assert_eq!(parse(":16R:GENL\n:16S:GENL\n-").value_cents(), Some(0));
-        let st = parse(":16R:FIN\n:35B:ISIN DE0000000003\n:90A::MRKT//PRCT/101,5\n:93B::AGGR//FAMT/1000,\n:16S:FIN\n-");
+        let st = parse(
+            ":16R:FIN\n:35B:ISIN DE0000000003\n:90A::MRKT//PRCT/101,5\n:93B::AGGR//FAMT/1000,\n:16S:FIN\n-",
+        );
         assert_eq!(st.holdings[0].price_cents, None);
         assert_eq!(st.holdings[0].quantity, 1000.0);
         assert_eq!(st.value_cents(), None);

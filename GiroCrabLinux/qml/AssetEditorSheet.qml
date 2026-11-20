@@ -327,6 +327,7 @@ Sheet {
                             placeholderText: sheet.automatic ? qsTr("optional") : qsTr("z. B. %1").arg(Fmt.plain(2500000))
                             text: sheet.priceText; onTextEdited: sheet.priceText = text
                             Accessible.name: qsTr("Kaufpreis")
+                            Sensitive { amounts: true; when: parent.text !== "" }
                         }
                     }
                     // the other way round, read-only: per piece for a total and vice versa
@@ -334,6 +335,7 @@ Sheet {
                         visible: sheet.otherPrice !== null
                         label: sheet.priceMode === "total" ? qsTr("Kaufpreis je Stück") : qsTr("Kaufpreis gesamt")
                         value: sheet.otherPrice !== null ? Fmt.money(sheet.otherPrice) : ""
+                        amounts: true
                     }
                 }
 

@@ -134,9 +134,10 @@ fn preview_counts_without_storing() {
         .unwrap();
     assert_eq!((all.sum_cents, all.counted, all.older), (-700, 3, 0));
     assert_eq!(account(&v, id).opening_balance_cents, None);
-    assert!(v
-        .preview_account_opening_balance(id, "1.2.2026".into())
-        .is_err());
+    assert!(
+        v.preview_account_opening_balance(id, "1.2.2026".into())
+            .is_err()
+    );
 }
 
 #[test]
@@ -226,9 +227,10 @@ fn bank_balances_depots_and_bad_dates_are_refused() {
         )
         .unwrap();
     assert!(!account(&v, depot).balance_derived);
-    assert!(v
-        .set_account_opening_balance(depot, Some(1), String::new())
-        .is_err());
+    assert!(
+        v.set_account_opening_balance(depot, Some(1), String::new())
+            .is_err()
+    );
 
     let bad = v.set_account_opening_balance(id, Some(1), "31.12.2025".into());
     assert!(
@@ -285,7 +287,7 @@ fn merge_takes_the_newer_opening_balance() {
 
 #[test]
 fn simulated_bank_sync_does_not_mark_accounts_derived() {
-    use crate::connectors::{store_fetch, FetchResult, RemoteAccount};
+    use crate::connectors::{FetchResult, RemoteAccount, store_fetch};
     use crate::models::ConnectorKind;
     let v = vault("ob-simulated");
     let c = v

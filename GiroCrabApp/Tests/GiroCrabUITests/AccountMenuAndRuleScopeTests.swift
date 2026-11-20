@@ -10,13 +10,13 @@ final class AccountMenuAndRuleScopeTests: XCTestCase {
     private var model: AppModel!
 
     override func setUp() async throws {
-        for k in ["sidebar.accountView"] { UserDefaults.standard.removeObject(forKey: k) }
+        for k in ["sidebar.accountView"] { AppDefaults.store.removeObject(forKey: k) }
         model = AppModel(options: LaunchOptions(arguments: ["--demo-seed"], environment: [:]))
         XCTAssertEqual(model.vaultState, .open)
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: "sidebar.accountView")
+        AppDefaults.store.removeObject(forKey: "sidebar.accountView")
         model = nil
     }
 

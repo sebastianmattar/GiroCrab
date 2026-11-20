@@ -58,6 +58,7 @@ pub mod payday_periods;
 pub mod payment_input;
 pub mod planned;
 pub mod planning;
+pub mod recipients;
 pub mod recurring;
 pub mod report_sanitizer;
 pub mod rules;
@@ -83,11 +84,11 @@ pub mod wealth_optimizer;
 pub(crate) mod test_support;
 
 pub use connectors::{
-    bank_catalog, BankDescriptor, Challenge, ChallengeKind, SyncSession, SyncStep, TransferSession,
-    TransferStep,
+    BankDescriptor, Challenge, ChallengeKind, SyncSession, SyncStep, TransferSession, TransferStep,
+    bank_catalog,
 };
 pub use error::CoreError;
-pub use merchants::{resolve_merchant, FlowKind, MerchantInfo, MerchantKind, MerchantResolver};
+pub use merchants::{FlowKind, MerchantInfo, MerchantKind, MerchantResolver, resolve_merchant};
 pub use models::*;
 pub use money::{format_cents, parse_amount_to_cents};
 pub use vault::Vault;

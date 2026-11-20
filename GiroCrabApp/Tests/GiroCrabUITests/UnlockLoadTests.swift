@@ -12,12 +12,12 @@ final class UnlockLoadTests: XCTestCase {
     private var url: URL!
 
     override func setUp() async throws {
-        hadRealData = UserDefaults.standard.object(forKey: realDataKey)
+        hadRealData = AppDefaults.store.object(forKey: realDataKey)
         url = FileManager.default.temporaryDirectory.appendingPathComponent("unlock-load-\(UUID().uuidString).girocrab")
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.set(hadRealData, forKey: realDataKey)
+        AppDefaults.store.set(hadRealData, forKey: realDataKey)
         for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) }
     }
 

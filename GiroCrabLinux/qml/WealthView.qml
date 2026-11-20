@@ -457,7 +457,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Text { text: wv.grouping === "instrument" ? qsTr("Instrumente · Vermögenswerte (brutto)") : qsTr("Anlageklassen · Vermögenswerte (brutto)")
                        font.pixelSize: Theme.subheadline + 1; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                Text { text: Fmt.money(wv.classRows.reduce((t, r) => t + r.cents, 0)); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                Text { text: Fmt.money(wv.classRows.reduce((t, r) => t + r.cents, 0)); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
             }
             ClassCards { visible: wv.classMode; Layout.fillWidth: true }
             // after the classes, where cash and property are listed too
@@ -530,7 +530,7 @@ Rectangle {
                             font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; color: Theme.text
                             Sensitive { when: chip.modelData.startsWith("owner:") }
                         }
-                        Text { text: Fmt.money(chip.net); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive {} }
+                        Text { text: Fmt.money(chip.net); font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } }
                     }
                     TapHandler { cursorShape: Qt.PointingHandCursor; onTapped: wv.ownerFilter = chip.modelData }
                     Accessible.role: Accessible.Button
@@ -570,7 +570,7 @@ Rectangle {
                 font.pixelSize: 36; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
                 color: Theme.text
                 fontSizeMode: Text.HorizontalFit; minimumPixelSize: 22; elide: Text.ElideNone
-                Sensitive {}
+                Sensitive { amounts: true }
             }
             Bar { visible: wv.scope === "all"; title: qsTr("Vermögenswerte"); cents: sc.assets; fraction: sc.assets / sc.maxCents; tint: Theme.accent }
             Bar { visible: wv.scope === "all"; title: qsTr("Verbindlichkeiten"); cents: -sc.debts; fraction: sc.debts / sc.maxCents; tint: Theme.negative
@@ -631,7 +631,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Text { text: bar.title; font.pixelSize: Theme.subheadline + 1; font.weight: Font.Medium; color: Theme.text; Layout.fillWidth: true }
-            Text { text: Fmt.money(bar.cents); font.pixelSize: Theme.subheadline + 1; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+            Text { text: Fmt.money(bar.cents); font.pixelSize: Theme.subheadline + 1; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
         }
         Item {
             Layout.fillWidth: true; implicitHeight: 6
@@ -699,7 +699,7 @@ Rectangle {
                                 Text { text: entry.modelData.label; font.pixelSize: Theme.callout + 1; font.weight: entry.isSelected ? Font.DemiBold : Font.Normal
                                        color: Theme.text; Sensitive {} }
                                 Text { text: Fmt.money(entry.modelData.cents) + " (" + wv.percent(entry.modelData.cents / Math.max(cc.total, 1)) + ")"
-                                       font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive {} } }
+                                       font.pixelSize: Theme.caption; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } } }
                             TapHandler { cursorShape: Qt.PointingHandCursor; onTapped: wv.toggleClassFilter(entry.modelData.id) }
                             Accessible.role: Accessible.Button
                             Accessible.name: entry.modelData.label
@@ -795,7 +795,7 @@ Rectangle {
             width: 100; spacing: 0
             Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; text: Fmt.money(donut.selected ? donut.selected.cents : donut.total)
                    font.pixelSize: Theme.callout + 1; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.text
-                   fontSizeMode: Text.HorizontalFit; minimumPixelSize: 8; Sensitive {} }
+                   fontSizeMode: Text.HorizontalFit; minimumPixelSize: 8; Sensitive { amounts: true } }
             Text { Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; text: donut.selected ? qsTr("Auswahl") : qsTr("Summe")
                    font.pixelSize: Theme.caption2; color: Theme.secondary }
         }
@@ -828,7 +828,7 @@ Rectangle {
                     RowLayout {
                         Layout.fillWidth: true
                         Text { text: groupCard.modelData.group.title; font.pixelSize: Theme.subheadline + 2; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true }
-                        Text { text: Fmt.money(groupCard.modelData.rows.reduce((t, r) => t + r.cents, 0)); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                        Text { text: Fmt.money(groupCard.modelData.rows.reduce((t, r) => t + r.cents, 0)); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                     }
                     Divider {}
                     RowLayout {
@@ -857,7 +857,7 @@ Rectangle {
                                        ToolTip.visible: subtitleHover.hovered; ToolTip.delay: 600; ToolTip.text: AssetClassification.sourceDescription(classRow.modelData.classification)
                                        HoverHandler { id: subtitleHover }
                                        Sensitive {} } }
-                            Text { text: Fmt.money(classRow.modelData.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                            Text { text: Fmt.money(classRow.modelData.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                             IconButton {
                                 visible: !!classRow.modelData.classification.security_key
                                 symbol: "pencil"; symbolSize: 14
@@ -879,7 +879,7 @@ Rectangle {
         Layout.fillWidth: true
         Text { text: parent.title; font.pixelSize: Theme.subheadline + 2; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true }
         Text { visible: parent.total !== null; text: parent.total !== null ? Fmt.money(parent.total) : ""
-               font.pixelSize: Theme.subheadline + 2; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+               font.pixelSize: Theme.subheadline + 2; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
     }
     component Divider: Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 
@@ -907,7 +907,7 @@ Rectangle {
                         Text { text: modelData.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
                         Text { visible: modelData.bank_name !== ""; text: modelData.bank_name; font.pixelSize: Theme.caption2; color: Theme.secondary
                                elide: Text.ElideRight; Layout.fillWidth: true } }
-                    Text { text: Fmt.money(modelData.balance_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                    Text { text: Fmt.money(modelData.balance_cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                     TapHandler { cursorShape: Qt.PointingHandCursor; onTapped: AppModel.sidebarSelection = "account:" + modelData.id }
                 }
             }
@@ -949,14 +949,14 @@ Rectangle {
                     ColumnLayout { spacing: 1; Layout.fillWidth: true
                         Text { text: modelData.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { labels: true } }
                         Text { text: wv.qty(modelData.quantity) + " · " + modelData.id; font.pixelSize: Theme.caption2; color: Theme.secondary
-                               elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} } }
+                               elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true } } }
                     ColumnLayout { spacing: 1
-                        Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(modelData.valueCents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                        Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(modelData.valueCents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                         Text { Layout.alignment: Qt.AlignRight; visible: modelData.dayChangeCents !== null
                                text: modelData.dayChangeCents !== null ? Fmt.signed(modelData.dayChangeCents) : ""
-                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: wv.tone(modelData.dayChangeCents); Sensitive {} }
+                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: wv.tone(modelData.dayChangeCents); Sensitive { amounts: true } }
                         Text { Layout.alignment: Qt.AlignRight; visible: pc.total > 0; text: wv.percent(modelData.valueCents / Math.max(pc.total, 1))
-                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive {} } }
+                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } } }
                 }
             }
         }
@@ -966,7 +966,7 @@ Rectangle {
         property real cents
         spacing: 6
         Text { text: parent.title; font.pixelSize: Theme.caption; color: Theme.secondary }
-        Text { text: Fmt.signed(parent.cents); font.pixelSize: Theme.callout + 1; font.weight: Font.Medium; font.features: { "tnum": 1 }; color: wv.tone(parent.cents); Sensitive {} }
+        Text { text: Fmt.signed(parent.cents); font.pixelSize: Theme.callout + 1; font.weight: Font.Medium; font.features: { "tnum": 1 }; color: wv.tone(parent.cents); Sensitive { amounts: true } }
     }
 
     component TangiblesCard: Card {
@@ -985,11 +985,11 @@ Rectangle {
                     ColumnLayout { spacing: 1; Layout.fillWidth: true
                         Text { text: modelData.name; font.pixelSize: Theme.body; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} }
                         Text { visible: modelData.subtitle !== ""; text: modelData.subtitle; font.pixelSize: Theme.caption2; color: Theme.secondary
-                               elide: Text.ElideRight; Layout.fillWidth: true; Sensitive {} } }
+                               elide: Text.ElideRight; Layout.fillWidth: true; Sensitive { amounts: true } } }
                     ColumnLayout { spacing: 1
-                        Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(modelData.valueCents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive {} }
+                        Text { Layout.alignment: Qt.AlignRight; text: Fmt.money(modelData.valueCents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: Theme.text; Sensitive { amounts: true } }
                         Text { Layout.alignment: Qt.AlignRight; visible: tc.total > 0; text: wv.percent(modelData.valueCents / Math.max(tc.total, 1))
-                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive {} } }
+                               font.pixelSize: Theme.caption2; font.features: { "tnum": 1 }; color: Theme.secondary; Sensitive { amounts: true } } }
                 }
             }
         }
@@ -1016,7 +1016,7 @@ Rectangle {
         visible: cents !== 0
         Layout.fillWidth: true
         Text { text: parent.title; font.pixelSize: Theme.body; color: Theme.text; Layout.fillWidth: true }
-        Text { text: Fmt.money(parent.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: parent.tint; Sensitive {} }
+        Text { text: Fmt.money(parent.cents); font.pixelSize: Theme.body; font.features: { "tnum": 1 }; color: parent.tint; Sensitive { amounts: true } }
     }
 
     // MARK: cash history (area chart, back-calculated from bookings)
@@ -1107,7 +1107,7 @@ Rectangle {
                 x: cash.plotWidth + 6
                 y: Math.max(0, Math.min(cash.height - height, cash.yAt(modelData) - height / 2))
                 text: Fmt.money(Math.round(modelData)); font.pixelSize: Theme.caption2; color: Theme.secondary
-                Sensitive {}   // chart axis values
+                Sensitive { amounts: true }   // chart axis values
             }
         }
     }

@@ -8,8 +8,19 @@ extension AppModel {
     }
 
     static func storedExpandedCategories(demo: Bool) -> Set<Int64> {
-        Set(UserDefaults.standard.array(forKey: expandedCategoriesKey(demo: demo)) as? [Int64] ?? [])
+        Set(AppDefaults.store.array(forKey: expandedCategoriesKey(demo: demo)) as? [Int64] ?? [])
     }
+
+    #if os(macOS)
+    func selectFromSidebar(_ selection: SidebarItem?) {
+        let previous = sidebarSelection
+        interactiveSidebarSelection = selection
+        if autoReviewDelay == .onAccountSwitch, previous != selection,
+           case .account(let id)? = previous, case .account? = selection {
+            markAllChecked(accountIDs: [id], quietWhenEmpty: true)
+        }
+    }
+    #endif
 
     /// Marks the selected booking as checked after `autoReviewDelay`, unless
     /// the selection moved on (or became a multiple one) in the meantime.
@@ -49,7 +60,7 @@ extension AppModel {
 
     /// Click on a booking row: plain = only this one, `toggle` (⌘) adds or
     /// removes it, `extend` (⇧) selects the range from the current booking.
-    func selectBooking(_ id: Booking.ID, toggle: Bool = false, extend: Bool = false) {
+    func selectBooking(_ id: Booking.ID, toggle: Bool = false, extend: Bool = false, fromListClick: Bool = false) {
         let list = visibleBookings.map(\.id)
         if extend, let anchor = selectedBookingID, let a = list.firstIndex(of: anchor), let b = list.firstIndex(of: id) {
             selectedBookingIDs = Set(list[min(a, b)...max(a, b)])
@@ -68,6 +79,12 @@ extension AppModel {
             selectedBookingIDs = [id]
             selectedBookingID = id
         }
+        #if os(macOS)
+        if fromListClick, autoReviewDelay == .onAccountSwitch, !isMultiSelection,
+           selectedBookingID == id, let booking = selectedBooking, !booking.checked {
+            setChecked(true, for: booking)
+        }
+        #endif
     }
 
     /// Bearbeiten › Alles auswählen (⌘A) in the booking list.
@@ -106,6 +123,7 @@ extension AppModel {
     func settlePendingSelectionLoad() {
         guard selectionLoadTask != nil else { return }
         endSelectionLoad()
+        showSelection()
         if streamTopPending { scrollStreamTop() }
         refreshSalaryCycle()
         refreshRecurring()
@@ -140,15 +158,22 @@ extension AppModel {
         streamTopRequest &+= 1
     }
 
-    /// The load is slow: empty list and chart, so nothing of the previous
-    /// selection stays under the new title.
+    /// The load is slow: the column switches to the new selection with an empty
+    /// list and chart, so nothing of the previous selection stays under its title.
     private func showSelectionPlaceholder() {
         isLoadingSelection = true
+        showSelectionWithoutData()
+    }
+
+    /// The column switches to the new selection with nothing of the previous one in it.
+    private func showSelectionWithoutData() {
+        showSelection()
         page = nil
         bookings = []
         listBalances = ListBalances()
         history = []
         categoryHistory = []
+        categoryOtherCurrencies = []
     }
 
     /// Everything a selection change needs, loaded off the main thread and
@@ -213,12 +238,16 @@ extension AppModel {
                     let categoryHistory = try categoryChart.map {
                         try vault.categoryHistoryByUnit(categoryId: $0.id, accountIds: $0.accounts, dateFrom: $0.from, dateTo: $0.to, keyLength: $0.keyLength)
                     } ?? []
-                    return (page: page, flow: flow, recurring: recurring, categories: categories, uncategorized: uncategorized, history: history, categoryHistory: categoryHistory)
+                    let otherCurrencies = try categoryChart.map {
+                        try vault.categoryOtherCurrencies(categoryId: $0.id, accountIds: $0.accounts, dateFrom: $0.from, dateTo: $0.to)
+                    } ?? []
+                    return (page: page, flow: flow, recurring: recurring, categories: categories, uncategorized: uncategorized, history: history, categoryHistory: categoryHistory, otherCurrencies: otherCurrencies)
                 }
                 // A newer selection or a synchronous reload cancelled this request.
                 guard !Task.isCancelled else { return }
                 self.selectionLoadTask = nil
                 self.endSelectionLoad()
+                self.showSelection()
                 if self.streamTopPending { self.scrollStreamTop() }
                 let publish = Perf.signposter.beginInterval("publishSelection")
                 self.publish(loaded.page)
@@ -231,15 +260,23 @@ extension AppModel {
                 self.categoryTree = Self.buildTree(loaded.categories)
                 self.history = Self.trimmedHistory(loaded.history, from: from, to: to)
                 self.categoryHistory = loaded.categoryHistory
+                self.categoryOtherCurrencies = loaded.otherCurrencies
                 Perf.signposter.endInterval("publishSelection", publish)
             } catch {
                 guard !Task.isCancelled, let self else { return }
-                self.selectionLoadTask = nil
-                self.endSelectionLoad()
-                self.errorMessage = describe(error)
+                self.failSelectionLoad(error)
             }
         }
         selectionLoadTask = task
+    }
+
+    /// The selection load threw. A failed refresh keeps what the column shows; a new
+    /// selection must not show the previous one's data under its title.
+    func failSelectionLoad(_ error: Error) {
+        selectionLoadTask = nil
+        endSelectionLoad()
+        if shownSelection != sidebarSelection { showSelectionWithoutData() }
+        errorMessage = describe(error)
     }
 
     // MARK: - Merchant list (GitHub #495)
@@ -292,11 +329,148 @@ extension AppModel {
 
     func scheduleSearch() {
         searchTask?.cancel()
+        let query = searchText
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.naturalSearch?.query != query, query != self.literalSearchQuery,
+                  self.naturalSearchEnabled() else {
+                self.reloadListInBackground() // the literal search, as ever
+                return
+            }
+            // One or two words naming a category ("mieten", "mietzahlungen", "kredite"): the category
+            // filter, deterministic and without the model.
+            if self.categories.isEmpty { self.reloadCategories() }
+            if let parsed = NaturalSearch.categoryOnly(query, categories: self.categories) {
+                if !self.applyParsedSearch(parsed) { self.reloadListInBackground() }
+                return
+            }
+            guard NaturalSearch.looksNatural(query) else {
+                self.reloadListInBackground()
+                return
+            }
+            // A keyword wrapped in filler words ("zeige alle amazon") needs no model and no literal
+            // search first (that one would only flash "Keine Treffer").
+            if let keyword = NaturalSearch.keywordOnly(query, categoryNames: self.categories.map(\.name)) {
+                if !self.applyParsedSearch(ParsedSearchQuery(text: keyword)) { self.reloadListInBackground() }
+                return
+            }
+            self.reloadListInBackground() // the literal search while the model reads the phrase
+            try? await Task.sleep(nanoseconds: 650_000_000) // ~800 ms after the last keystroke
             guard !Task.isCancelled else { return }
-            self?.reloadListInBackground()
+            await self.applyNaturalSearch(query)
         }
+    }
+
+    /// The text the list searches: the natural reading of the typed phrase, else the phrase itself.
+    var effectiveSearchText: String { naturalSearch?.keyword ?? searchText }
+
+    /// What the core searches for: the model's keyword, or the typed text with German plurals cut
+    /// back to the stem ("kredite" → "kredit") so the substring search also finds the singular.
+    /// Always a superset of the literal search. The field keeps showing what was typed.
+    var coreSearchText: String {
+        naturalSearch?.keyword ?? NaturalSearch.literalSearchTerm(searchText)
+    }
+
+    /// Refines the literal search (opt-in, Einstellungen › Allgemein) through the on-device model.
+    /// Period, category and amount range become the existing filters, the rest the effective search
+    /// text. Without a model answer the phrase loses only its filler words; a stale result changes nothing.
+    private func applyNaturalSearch(_ query: String) async {
+        let parsed = await NaturalSearch.understand(
+            query, categoryNames: categories.map(\.name), today: DateText.iso(Date()))
+        // The user may have typed on, cleared the field or locked the vault meanwhile.
+        guard !Task.isCancelled, searchText == query, naturalSearch == nil, isUnlocked else { return }
+        applyParsedSearch(parsed)
+    }
+
+    private func naturalSearchState(text: String) -> NaturalSearchState {
+        var category: Int64?
+        if case .category(let id)? = sidebarSelection { category = id }
+        return NaturalSearchState(searchText: text, period: period, customFrom: customPeriodFrom,
+                                  customTo: customPeriodTo, categoryID: category, amountFilter: amountFilter)
+    }
+
+    /// Applies a parsed reading of the typed phrase next to it: `searchText` (the field) stays as typed,
+    /// the list searches `effectiveSearchText` and the parsed filters. Reloads the list once; false
+    /// (nothing changed, nothing reloaded) when the reading adds nothing to the literal search.
+    @discardableResult
+    func applyParsedSearch(_ reading: ParsedSearchQuery, today: Date = Date()) -> Bool {
+        let query = searchText
+        // A phrase that names no period never filters by date, whatever the reading says.
+        let parsed = NaturalSearch.withoutUnnamedDates(reading, for: query)
+        revertNaturalSearch() // a new reading starts from the user's own filters
+        let old = naturalSearchState(text: query)
+        var new = old
+        NaturalSearch.apply(parsed: parsed, to: &new, categories: categories, today: today)
+        guard new != old else { return false }
+
+        // Set first: the reloads the filters below start already search for the keyword.
+        let selection = sidebarSelection
+        naturalSearch = NaturalSearchOverride(query: query, keyword: new.searchText, before: old,
+                                              beforeSelection: selection, applied: new, appliedSelection: selection)
+        listLimit = Self.defaultListLimit
+        if new.amountFilter != old.amountFilter {
+            let suspended = suspendsFilterReloads
+            suspendsFilterReloads = true // the reload at the end covers it
+            amountFilter = new.amountFilter
+            suspendsFilterReloads = suspended
+        }
+        // The category first: it may bring its own default period, which the parsed one then replaces.
+        if new.categoryID != old.categoryID, let id = new.categoryID {
+            // Without a period in the phrase the category's own default period must not move it.
+            let namesPeriod = parsed.fromDate != nil || parsed.toDate != nil
+            keepsPeriodOnCategorySelection = !namesPeriod
+            interactiveSidebarSelection = .category(id)
+            keepsPeriodOnCategorySelection = false
+        }
+        if new.period != old.period || new.customFrom != old.customFrom || new.customTo != old.customTo,
+           let from = DateText.date(new.customFrom), let to = DateText.date(new.customTo) {
+            loadsSelectionInBackground = true
+            applyCustomPeriod(from: from, to: to)
+            loadsSelectionInBackground = false
+        }
+        naturalSearch?.applied = naturalSearchState(text: new.searchText)
+        naturalSearch?.appliedSelection = sidebarSelection
+        reloadListInBackground()
+        return true
+    }
+
+    /// Ends the natural reading (typed on, field cleared, „wörtlich suchen“): the list searches the
+    /// typed text again and every filter the reading set and the user left alone returns to its
+    /// previous value. The caller's search change reloads the list; this only reloads what it restores.
+    func revertNaturalSearch() {
+        guard let natural = naturalSearch else { return }
+        naturalSearch = nil
+        let before = natural.before, applied = natural.applied
+        if amountFilter == applied.amountFilter, amountFilter != before.amountFilter {
+            let suspended = suspendsFilterReloads
+            suspendsFilterReloads = true // the caller's search reload covers it
+            amountFilter = before.amountFilter
+            suspendsFilterReloads = suspended
+        }
+        if sidebarSelection == natural.appliedSelection, sidebarSelection != natural.beforeSelection {
+            interactiveSidebarSelection = natural.beforeSelection
+        }
+        let periodNow = (period, customPeriodFrom, customPeriodTo)
+        if periodNow == (applied.period, applied.customFrom, applied.customTo),
+           periodNow != (before.period, before.customFrom, before.customTo) {
+            customPeriodFrom = before.customFrom
+            customPeriodTo = before.customTo
+            UserDefaults.standard.set(customPeriodFrom, forKey: "period.customFrom")
+            UserDefaults.standard.set(customPeriodTo, forKey: "period.customTo")
+            loadsSelectionInBackground = true
+            if period == before.period { periodDidChange() } else { period = before.period }
+            loadsSelectionInBackground = false
+            rememberPeriod()
+        }
+    }
+
+    /// The filter chip's „wörtlich suchen“: drops the natural reading of the current phrase for good.
+    func searchLiterally() {
+        guard naturalSearch != nil else { return }
+        literalSearchQuery = searchText
+        revertNaturalSearch()
+        scheduleSearch()
     }
 
     // MARK: - Pay cycle (GitHub #37)
@@ -336,8 +510,8 @@ extension AppModel {
         let (a, b) = from <= to ? (from, to) : (to, from)
         customPeriodFrom = DateText.iso(a)
         customPeriodTo = DateText.iso(b)
-        UserDefaults.standard.set(customPeriodFrom, forKey: "period.customFrom")
-        UserDefaults.standard.set(customPeriodTo, forKey: "period.customTo")
+        AppDefaults.store.set(customPeriodFrom, forKey: "period.customFrom")
+        AppDefaults.store.set(customPeriodTo, forKey: "period.customTo")
         if period == .custom { periodDidChange() } else { period = .custom }
         rememberPeriod()
     }
@@ -346,26 +520,26 @@ extension AppModel {
 
     /// The period last chosen in the period menu (#840); `.custom` uses the saved start/end.
     static var storedPeriod: Period? {
-        UserDefaults.standard.string(forKey: lastPeriodKey).flatMap { Period(lastChoiceKey: $0) }
+        AppDefaults.store.string(forKey: lastPeriodKey).flatMap { Period(lastChoiceKey: $0) }
     }
 
     func rememberPeriod() {
-        UserDefaults.standard.set(period.lastChoiceKey(), forKey: Self.lastPeriodKey)
+        AppDefaults.store.set(period.lastChoiceKey(), forKey: Self.lastPeriodKey)
     }
 
     private static let categoryPeriodsKey = "period.byCategory"
 
     /// The period the user last chose for this category (#425); `nil` = follows the current one.
     func categoryPeriod(_ id: Int64) -> Period? {
-        let map = UserDefaults.standard.dictionary(forKey: Self.categoryPeriodsKey) as? [String: String]
+        let map = AppDefaults.store.dictionary(forKey: Self.categoryPeriodsKey) as? [String: String]
         return map?[String(id)].flatMap { Period(storageKey: $0) }
     }
 
     func setCategoryPeriod(_ period: Period, for id: Int64) {
         guard let key = period.storageKey() else { return }
-        var map = UserDefaults.standard.dictionary(forKey: Self.categoryPeriodsKey) as? [String: String] ?? [:]
+        var map = AppDefaults.store.dictionary(forKey: Self.categoryPeriodsKey) as? [String: String] ?? [:]
         map[String(id)] = key
-        UserDefaults.standard.set(map, forKey: Self.categoryPeriodsKey)
+        AppDefaults.store.set(map, forKey: Self.categoryPeriodsKey)
     }
 
     func periodDidChange() {

@@ -160,6 +160,80 @@ extension View {
     }
 }
 
+// MARK: - Progress (#1008)
+
+/// Where the order fetch stands. Shown as a panel over the page, which itself
+/// does not change while the scripts read the orders in the background.
+enum AmazonFetchProgress: Equatable {
+    /// Reading the order list of `year`, the `index`-th (from 0) of `count` years.
+    case orderLists(year: Int, index: Int, count: Int, found: Int)
+    /// Reading the details of order `index` (from 0) of `total`, placed in `year`.
+    case orderDetails(index: Int, total: Int, year: Int?)
+
+    /// Short text for the header line (and VoiceOver).
+    var caption: String {
+        switch self {
+        case let .orderLists(year, _, _, _): String(localized: "Bestellliste \(String(year)) …")
+        case let .orderDetails(index, total, _): String(localized: "Bestellung \(index + 1) von \(total) …")
+        }
+    }
+
+    var title: String {
+        switch self {
+        case let .orderLists(year, _, _, _): String(localized: "Jahr \(String(year))")
+        case let .orderDetails(index, total, _): String(localized: "Bestellung \(index + 1) von \(total)")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case let .orderLists(_, index, count, found):
+            let step = String(localized: "Bestellliste \(index + 1) von \(count)")
+            if found == 0 { return step }
+            let orders = found == 1 ? String(localized: "1 Bestellung gefunden") : String(localized: "\(found) Bestellungen gefunden")
+            return "\(step) · \(orders)"
+        case let .orderDetails(_, _, year):
+            return year.map { String(localized: "Bestelldetails aus \(String($0))") } ?? String(localized: "Bestelldetails")
+        }
+    }
+
+    /// Share done, 0…1. For "Alles" the lists usually end early (two empty years in a row).
+    var fraction: Double {
+        let (done, all) = switch self {
+        case let .orderLists(_, index, count, _): (index, count)
+        case let .orderDetails(index, total, _): (index, total)
+        }
+        guard all > 0 else { return 0 }
+        return min(max(Double(done) / Double(all), 0), 1)
+    }
+}
+
+/// Covers the (unchanging) page while the orders are read, so the fetch is
+/// clearly visible and the page cannot be navigated away under the scripts.
+private struct AmazonFetchPanel: View {
+    let progress: AmazonFetchProgress
+    let stop: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Bestellungen werden abgerufen").appFont(.headline).foregroundStyle(Theme.secondary)
+            Text(progress.title).appFont(.title, weight: .semibold, monospacedDigit: true)
+            ProgressView(value: progress.fraction)
+                .frame(width: 280)
+                .accessibilityLabel(progress.caption)
+            Text(progress.detail).appFont(.callout, monospacedDigit: true).foregroundStyle(Theme.secondary)
+            // HIG: a long task can be stopped without closing the window.
+            Button("Abrufen stoppen", action: stop)
+                .padding(.top, 4)
+        }
+        .padding(24)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.35))
+        .accessibilityElement(children: .contain)
+    }
+}
+
 // MARK: - Sheet
 
 struct AmazonWebSheet: View {
@@ -173,10 +247,8 @@ struct AmazonWebSheet: View {
     static let domains = PortalDomains(["amazon.de", "amazon.com"])
     @State private var years = 2
     @State private var running = false
-    @State private var progress = ""
-    /// Order details read so far / to read (determinate progress bar).
-    @State private var done = 0
-    @State private var total = 0
+    /// Set while `running`: shown as the panel over the page (#1008).
+    @State private var progress: AmazonFetchProgress?
     @State private var task: Task<Void, Never>?
 
     @State private var pageIsOrders = false
@@ -197,7 +269,7 @@ struct AmazonWebSheet: View {
     """
 
     private var info: String {
-        if running { return progress }
+        if running { return progress?.caption ?? "" }
         if let notice { return notice }
         if let blocked = browser.blockedHost {
             return String(localized: "Unsichere Seite blockiert (\(blocked)) – nur HTTPS-Seiten werden geöffnet.")
@@ -221,6 +293,11 @@ struct AmazonWebSheet: View {
             Divider()
             PortalWebView(browser: browser)
                 .macFrame(minWidth: 760, minHeight: 520)
+                .overlay {
+                    if running, let progress {
+                        AmazonFetchPanel(progress: progress) { task?.cancel() }
+                    }
+                }
             Divider()
             HStack {
                 Button("Abbrechen", role: .cancel) { task?.cancel(); close() }
@@ -234,15 +311,6 @@ struct AmazonWebSheet: View {
                 .fixedSize()
                 .disabled(running)
                 Spacer()
-                if running && total > 0 {
-                    ProgressView(value: Double(done), total: Double(total))
-                        .frame(width: 160)
-                        .accessibilityLabel(progress)
-                }
-                if running {
-                    // HIG: a long task can be stopped without closing the window.
-                    Button("Abrufen stoppen") { task?.cancel() }
-                }
                 Button("Bestellungen abrufen") { start() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
@@ -272,10 +340,9 @@ struct AmazonWebSheet: View {
     private func start() {
         running = true
         notice = nil
-        done = 0
-        total = 0
+        progress = nil
         task = Task {
-            defer { running = false; total = 0 }
+            defer { running = false; progress = nil }
             do {
                 let json = try await scrape()
                 if model.importAmazonOrders(connection, json: json) { close() }
@@ -309,26 +376,26 @@ struct AmazonWebSheet: View {
     private func scrape() async throws -> String {
         let thisYear = Calendar.current.component(.year, from: Date())
         var codes: [String] = []
+        /// Year of each order's list, for the panel.
+        var yearOf: [String: Int] = [:]
         var emptyYears = 0
         for y in 0..<years {
             try Task.checkCancellation()
-            progress = String(localized: "Bestellliste \(String(thisYear - y)) …")
+            progress = .orderLists(year: thisYear - y, index: y, count: years, found: codes.count)
             let r = try await run(AmazonScripts.orderCodes, ["filter": "year-\(thisYear - y)"])
             let found = (r["codes"] as? [String] ?? []).filter { !codes.contains($0) }
             codes += found
+            for code in found { yearOf[code] = thisYear - y }
             emptyYears = found.isEmpty ? emptyYears + 1 : 0
             if years > 5 && emptyYears >= 2 { break }
         }
         if codes.isEmpty { throw AmazonError.noOrders }
         var orders: [[String: Any]] = []
-        total = codes.count
         for (i, code) in codes.enumerated() {
             try Task.checkCancellation()
-            done = i
-            progress = String(localized: "Bestellung \(i + 1) von \(codes.count) …")
+            progress = .orderDetails(index: i, total: codes.count, year: yearOf[code])
             orders.append(try await run(AmazonScripts.orderDetails, ["code": code]))
         }
-        done = codes.count
         let data = try JSONSerialization.data(withJSONObject: ["orders": orders])
         return String(decoding: data, as: UTF8.self)
     }

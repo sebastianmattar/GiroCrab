@@ -397,7 +397,7 @@
 30030880	HSBC Trinkaus & Burkhardt AG	https://www.bv-activebanking.de/hbciTunnel/hbciTransfer.jsp
 30030900	Merck Finck & Co.	https://www.bv-activebanking.de/hbciTunnel/hbciTransfer.jsp
 30050110	Stadt-Sparkasse Düsseldorf	https://banking-rl1.s-fints-pt-rl.de/fints30
-30060601	Deutsche Apotheker- und Ärztebank (apoBank)	https://fints1.atruvia.de/cgi-bin/hbciservlet
+30060601	Deutsche Apotheker- und Ärztebank (apoBank)	https://fints.apobank.de/FinTs30PinTanHttpGate
 30060992	PSD Bank Rhein-Ruhr (Düsseldorf)	https://fints1.atruvia.de/cgi-bin/hbciservlet
 30070010	Deutsche Bank	https://fints.deutsche-bank.de/
 30070024	Deutsche Bank Privat und Geschäftskunden	https://fints.deutsche-bank.de/
@@ -766,7 +766,7 @@
 50020200	BHF-Bank AG	https://www.bv-activebanking.de/hbciTunnel/hbciTransfer.jsp
 50030100	HKB-Bank GmbH	https://fints1.atruvia.de/cgi-bin/hbciservlet
 50031000	Triodos Bank Deutschland	https://fints1.atruvia.de/cgi-bin/hbciservlet
-50050201	1822direkt	https://banking-hs5.s-fints-pt-hs.de/fints30
+50050201	1822direkt	https://banking-hs6.s-fints-pt-hs.de/fints30
 50050222	1822direkt (PIN/TAN)	https://fints.1822direkt.com/fints/hbci
 50060474	GENO Broker GmbH	https://fints1.atruvia.de/cgi-bin/hbciservlet
 50061741	Raiffeisenbank Oberursel	https://fints1.atruvia.de/cgi-bin/hbciservlet

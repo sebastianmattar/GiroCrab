@@ -5,7 +5,7 @@ use crate::{
     models::ConnectorKind,
     vault::Vault,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 
@@ -34,16 +34,12 @@ fn load(db: &Connection, id: i64) -> CoreResult<Vec<ConnectionAccountChoice>> {
         )
         .optional()?;
     raw.map(|s| {
-        serde_json::from_str(&s).map_err(|_| CoreError::InvalidInput {
-            message: "Invalid account selection".into(),
-        })
+        serde_json::from_str(&s).map_err(|_| CoreError::invalid("Invalid account selection"))
     })
     .unwrap_or_else(|| Ok(vec![]))
 }
 fn save(db: &Connection, id: i64, rows: &[ConnectionAccountChoice]) -> CoreResult<()> {
-    let raw = serde_json::to_string(rows).map_err(|e| CoreError::InvalidInput {
-        message: e.to_string(),
-    })?;
+    let raw = serde_json::to_string(rows).map_err(|e| CoreError::invalid(e.to_string()))?;
     db.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key(db,id)?,raw])?;
     Ok(())
 }
@@ -100,18 +96,31 @@ pub(super) fn prepare(
             |r| r.get(0),
         )?;
         let mut existing = String::new();
+        // An imported account with this IBAN, parked on a PSD2 connection that
+        // never synced, is not "another connection's account": the fetch takes
+        // it over (`moneymoney_db::adopt_account` matches by the same IBAN), so
+        // it is not held back for it. Without an IBAN nothing is taken over and
+        // the account is held back as before.
         if !already {
-            let mut q = db.prepare("SELECT a.iban,a.account_number,a.bank_name,c.bank_code,c.connector,c.display_name FROM accounts a JOIN bank_connections c ON c.id=a.connection_id WHERE a.connection_id<>?1 AND a.deleted_ms IS NULL AND a.archived_unix IS NULL AND a.access_revoked=0 AND c.deleted_ms IS NULL AND a.currency=?2 AND a.kind=?3 ORDER BY c.id,a.id")?;
-            let candidates = q.query_map(params![id, a.currency, a.kind.as_str()], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                ))
-            })?;
+            let mut q = db.prepare("SELECT a.iban,a.account_number,a.bank_name,c.bank_code,c.connector,c.display_name FROM accounts a JOIN bank_connections c ON c.id=a.connection_id WHERE a.connection_id<>?1 AND a.deleted_ms IS NULL AND a.archived_unix IS NULL AND a.access_revoked=0 AND c.deleted_ms IS NULL AND a.currency=?2 AND a.kind=?3 AND NOT (a.external_ref LIKE 'moneymoney-db:%' AND c.connector LIKE 'enablebanking%' AND c.last_sync_unix IS NULL AND ?4 <> '' AND upper(replace(a.iban, ' ', '')) = ?4) ORDER BY c.id,a.id")?;
+            let candidates = q.query_map(
+                params![
+                    id,
+                    a.currency,
+                    a.kind.as_str(),
+                    crate::iban::normalize_iban(&a.iban)
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                },
+            )?;
             for row in candidates {
                 let (iban, number, bank, code, connector, name) = row?;
                 let same_iban =
@@ -187,15 +196,7 @@ pub(super) fn skipped_refs(db: &Connection, connection_id: i64) -> CoreResult<Ve
 /// Retain only pending accounts for an immediate replay after the user chooses.
 pub(super) fn deferred(data: &FetchResult, pending: &HashSet<String>) -> FetchResult {
     let mut copy = data.clone();
-    copy.accounts.retain(|a| pending.contains(&a.external_ref));
-    copy.transactions
-        .retain(|a| pending.contains(&a.account_ref));
-    copy.holdings.retain(|a| pending.contains(&a.account_ref));
-    copy.security_transactions
-        .retain(|a| pending.contains(&a.account_ref));
-    copy.holdings_fetched.retain(|a| pending.contains(a));
-    copy.balances_unknown.retain(|a| pending.contains(a));
-    copy.documents.retain(|a| pending.contains(&a.account_ref));
+    copy.retain_accounts(|r| pending.contains(r));
     copy.accounts_complete = false;
     copy.state = None;
     copy.revoked_refs.clear();
@@ -254,9 +255,7 @@ impl Vault {
             .iter()
             .any(|r| !rows.iter().any(|c| &c.account_ref == r))
         {
-            return Err(CoreError::InvalidInput {
-                message: "Unknown account selection".into(),
-            });
+            return Err(CoreError::invalid("Unknown account selection"));
         }
         for c in &mut rows {
             c.enabled = enabled_refs.contains(&c.account_ref);

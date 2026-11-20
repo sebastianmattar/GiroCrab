@@ -456,9 +456,11 @@ mod tests {
         assert_eq!(parse_date("2026-11-16").as_deref(), Some("2026-11-16"));
         assert_eq!(parse_date(" 16.11.2026 ").as_deref(), Some("2026-11-16"));
         assert_eq!(parse_date("2026-13-01"), None);
-        assert!(require_date("x", "Kaufdatum")
-            .unwrap_err()
-            .starts_with("Kaufdatum:"));
+        assert!(
+            require_date("x", "Kaufdatum")
+                .unwrap_err()
+                .starts_with("Kaufdatum:")
+        );
     }
 
     #[test]

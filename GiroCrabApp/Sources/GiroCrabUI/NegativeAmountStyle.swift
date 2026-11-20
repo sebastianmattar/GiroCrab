@@ -65,7 +65,7 @@ enum NegativeAmountStyle: String, CaseIterable, Identifiable {
     var positiveBadge: Color { self == .contrast ? Self.contrastColors.badge : Theme.inflowBadge }
 
     /// The stored choice; unknown or missing values fall back to `.neutral`.
-    static func current(_ defaults: UserDefaults = .standard) -> NegativeAmountStyle {
+    static func current(_ defaults: UserDefaults = AppDefaults.store) -> NegativeAmountStyle {
         defaults.string(forKey: defaultsKey).flatMap(NegativeAmountStyle.init(rawValue:)) ?? .neutral
     }
 }

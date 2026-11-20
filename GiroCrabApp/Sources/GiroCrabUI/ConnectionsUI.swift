@@ -252,6 +252,10 @@ struct ConnectionEditSheet: View {
     /// comdirect via FinTS: PostBox through the bank's API as well (#838).
     @State private var postbox = false
     /// comdirect logins can switch between FinTS and comdirect's own API.
+    /// Consorsbank via FinTS: documents from the Online-Archiv as well (#1024).
+    private var isConsorsbankFinTS: Bool {
+        connection.connector == .finTsGeneric && connection.bankCode == "76030080"
+    }
     private var isComdirect: Bool {
         connection.connector == .comdirect
             || (connection.connector == .finTsGeneric && ["20041111", "20041133", "20041144", "20041155"].contains(connection.bankCode))
@@ -445,6 +449,35 @@ struct ConnectionEditSheet: View {
                                 .appFont(.caption).foregroundStyle(Theme.secondary)
                                 .leadingFooter()
                         }
+                    }
+                }
+                if isConsorsbankFinTS {
+                    Section {
+                        Toggle("Online-Archiv abrufen", isOn: Binding(
+                            get: { postbox },
+                            set: { on in
+                                model.setComdirectPostbox(connection.id, on)
+                                postbox = model.comdirectPostboxEnabled(connection.id)
+                            }))
+                            .disabled(documentsBlocked)
+                        if documentsBlocked {
+                            Label("Wird nicht abgerufen, solange „Dokumente abrufen“ oben ausgeschaltet ist.", systemImage: "info.circle")
+                                .appFont(.caption).foregroundStyle(Theme.secondary)
+                        }
+                        if postbox {
+                            Button {
+                                save()
+                                dismiss()
+                                model.fetchComdirectPostbox(model.connections.first { $0.id == connection.id } ?? connection)
+                            } label: { Label("Online-Archiv jetzt abrufen", systemImage: "tray.and.arrow.down") }
+                                .disabled(model.syncingConnectionID != nil || documentsBlocked)
+                        }
+                    } header: {
+                        Text("Online-Archiv").appSectionHeader()
+                    } footer: {
+                        Text("Kontoauszüge, Abrechnungen, Depotauszüge und Steuerdokumente aus dem Online-Archiv der Consorsbank, höchstens einmal pro Woche beim Abruf. GiroCrab meldet sich dafür mit Kontonummer und PIN dieses Zugangs im Online-Banking an, die Anmeldung geben Sie in der Consorsbank App frei. Die Schnittstelle ist inoffiziell. Gespeicherte Dokumente werden nicht erneut geladen, denn jeder Abruf markiert ein Dokument bei der Bank als gelesen.")
+                            .appFont(.caption).foregroundStyle(Theme.secondary)
+                            .leadingFooter()
                     }
                 }
                 Section {
@@ -671,7 +704,7 @@ struct ConnectionEditSheet: View {
             Task { @MainActor in
                 guard let updated = await advanziaSettings.save(connection: connection, name: name, login: login, model: model) else { return }
                 dismiss()
-                if thenSync { model.requestSync(updated) }
+                if thenSync { model.requestFullSync(updated) }
             }
             return
         }
@@ -680,7 +713,7 @@ struct ConnectionEditSheet: View {
         let draft = selection
         Task { @MainActor in
             if await draft.saveIfChanged(model: model, connectionId: id) {
-                if thenSync, let c = model.connections.first(where: { $0.id == id }) { model.requestSync(c) }
+                if thenSync, let c = model.connections.first(where: { $0.id == id }) { model.requestFullSync(c) }
             } else if let message = draft.error {
                 model.showError(String(localized: "Kontenauswahl nicht gespeichert"), message)
             }
@@ -693,7 +726,7 @@ struct ConnectionEditSheet: View {
         login = connection.loginName
         status = model.connectionStatus(connection.id)
         storePin = status?.hasPin ?? false
-        if isComdirect, connection.connector == .finTsGeneric { postbox = model.comdirectPostboxEnabled(connection.id) }
+        if isComdirect || isConsorsbankFinTS, connection.connector == .finTsGeneric { postbox = model.comdirectPostboxEnabled(connection.id) }
         documentsSupported = model.documentsFetchSupported(connection.id)
         documentsFetch = model.documentsFetchEnabled(connection.id)
         initialDocumentsFetch = documentsFetch
