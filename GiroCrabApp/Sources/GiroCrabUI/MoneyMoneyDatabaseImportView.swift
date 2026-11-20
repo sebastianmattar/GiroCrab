@@ -439,7 +439,7 @@ struct MoneyMoneyDatabaseImportView: View {
                     ForEach(p.banks, id: \.mmId) { b in bankRow(b) }
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        if p.banks.contains(where: \.closed) {
+                        if p.banks.contains(where: allClosed) {
                             footerText("Bei Zugängen, deren Konten alle aufgelöst sind, ist „Nicht verbinden“ vorgewählt.")
                         }
                         if createConnections, chosenEnableBanking, !enableBankingReady {
@@ -476,6 +476,7 @@ struct MoneyMoneyDatabaseImportView: View {
                 }
                 .labelsHidden()
                 .fixedSize()
+                .disabled(selectedAccounts(b).isEmpty) // no account imported: no login (#1437)
             } else {
                 Text("Nicht verfügbar").foregroundStyle(Theme.tertiary)
             }
@@ -823,19 +824,32 @@ struct MoneyMoneyDatabaseImportView: View {
 
     private func bankBinding(_ b: MoneyMoneyDbBank) -> Binding<String> {
         Binding(
-            get: { bankChoice[b.mmId] ?? defaultKey(b) },
+            get: { selectedAccounts(b).isEmpty ? "" : bankChoice[b.mmId] ?? defaultKey(b) },
             set: { bankChoice[b.mmId] = $0 }
         )
     }
 
-    /// The preselected connection: the best one, none ("") for a login whose
-    /// accounts are all closed in MoneyMoney (#1437).
-    private func defaultKey(_ b: MoneyMoneyDbBank) -> String {
-        b.closed ? "" : connectionOptions(b).first?.key ?? ""
+    /// The accounts of login `b` chosen for import.
+    private func selectedAccounts(_ b: MoneyMoneyDbBank) -> [MoneyMoneyDbAccount] {
+        (preview?.accounts ?? []).filter { $0.mmBankId == b.mmId && (choices[$0.mmId]?.selected ?? true) }
     }
 
-    /// The connection chosen for a bank (nil = none).
+    /// Every account of the login chosen for import is closed in MoneyMoney (#1437).
+    private func allClosed(_ b: MoneyMoneyDbBank) -> Bool {
+        let accounts = selectedAccounts(b)
+        return !accounts.isEmpty && accounts.allSatisfy(\.closed)
+    }
+
+    /// The preselected connection: the best one, none ("") for a login whose
+    /// imported accounts are all closed (#1437).
+    private func defaultKey(_ b: MoneyMoneyDbBank) -> String {
+        allClosed(b) ? "" : connectionOptions(b).first?.key ?? ""
+    }
+
+    /// The connection chosen for a bank (nil = none). A login without an
+    /// imported account gets none: the import would leave it empty (#1437).
     private func chosenOption(_ b: MoneyMoneyDbBank) -> MoneyMoneyDbConnectionOption? {
+        guard !selectedAccounts(b).isEmpty else { return nil }
         let key = bankChoice[b.mmId] ?? defaultKey(b)
         return connectionOptions(b).first { $0.key == key }
     }
@@ -866,8 +880,7 @@ struct MoneyMoneyDatabaseImportView: View {
         return p.banks.filter { chosenOption($0)?.via == .enableBanking }.map { b in
             MoneyMoneyDbPsd2Connection(
                 connectionId: -b.mmId, bankName: b.name, created: true,
-                accounts: p.accounts
-                    .filter { $0.mmBankId == b.mmId && (choices[$0.mmId]?.selected ?? true) }
+                accounts: selectedAccounts(b)
                     .map { MoneyMoneyDbPsd2Account(name: $0.name, iban: $0.iban, accountNumber: $0.accountNumber) })
         }
     }
@@ -1087,7 +1100,7 @@ extension AppModel {
                                 owner: "Max Mustermann", groupName: group, mmBankId: bankId, isPortfolio: portfolio, suggestedKind: kind,
                                 existingAccountId: existing?.id, existingAccountName: existing?.name, bookingCount: count, pendingCount: pending, holdingCount: portfolio ? 3 : 0,
                                 notesCount: 0, firstDate: from, lastDate: to, statementCount: kind == .checking ? 48 : 0, computedBalanceCents: balance,
-                                balanceSource: "Anfangssaldo laut Saldenverlauf der Datenbank + Umsätze")
+                                balanceSource: "Anfangssaldo laut Saldenverlauf der Datenbank + Umsätze", closed: false)
         }
         let accounts = [
             acc(1, "Girokonto", "comdirect", "20041111", iban: "DE89370400440532013000", kind: .checking, existing: existingGiro,
@@ -1110,19 +1123,19 @@ extension AppModel {
         }
         let banks = [
             MoneyMoneyDbBank(mmId: 1, bankCode: "20041111", name: "comdirect", loginName: "12345678", customerId: "12345678",
-                             connector: .comdirect, existingConnectionId: nil, accountCount: 3, closed: false,
+                             connector: .comdirect, existingConnectionId: nil, accountCount: 3,
                              connectionOptions: [direct(.ownApi, .comdirect, "comdirect")]),
             MoneyMoneyDbBank(mmId: 2, bankCode: "50050201", name: "1822direkt", loginName: "max.mustermann", customerId: "",
-                             connector: .direkt1822, existingConnectionId: nil, accountCount: 1, closed: false,
+                             connector: .direkt1822, existingConnectionId: nil, accountCount: 1,
                              connectionOptions: [direct(.finTs, .direkt1822, "direkt1822")]),
             MoneyMoneyDbBank(mmId: 3, bankCode: "", name: "PayPal", loginName: "max@example.com", customerId: "",
-                             connector: .payPal, existingConnectionId: nil, accountCount: 1, closed: false,
+                             connector: .payPal, existingConnectionId: nil, accountCount: 1,
                              connectionOptions: [direct(.ownApi, .payPal, "paypal")]),
             MoneyMoneyDbBank(mmId: 4, bankCode: "12345678", name: "Musterbank", loginName: "mustermann", customerId: "",
-                             connector: nil, existingConnectionId: nil, accountCount: 1, closed: false, connectionOptions: []),
+                             connector: nil, existingConnectionId: nil, accountCount: 1, connectionOptions: []),
             // no own connector, but reachable through Enable Banking (PSD2)
             MoneyMoneyDbBank(mmId: 5, bankCode: "50024024", name: "C24 Bank", loginName: "max.mustermann", customerId: "",
-                             connector: nil, existingConnectionId: nil, accountCount: 1, closed: false,
+                             connector: nil, existingConnectionId: nil, accountCount: 1,
                              connectionOptions: psd2Catalog().filter { $0.aspsp == "C24" }.map {
                                  MoneyMoneyDbConnectionOption(via: .enableBanking, connector: .enableBanking,
                                                               key: "enablebanking:\($0.country):\($0.aspsp)", psd2Bank: $0)

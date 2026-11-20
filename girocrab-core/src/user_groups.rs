@@ -1204,19 +1204,14 @@ impl Vault {
     /// rule runs skip their bookings and they leave the overall total. The
     /// state syncs like the account's name (newest change wins).
     pub fn set_account_archived(&self, account_id: i64, archived: bool) -> Result<(), CoreError> {
-        // keeps the original date when archiving an already archived account
-        let n = self.db()?.execute(
-            "UPDATE accounts SET archived_unix = CASE WHEN ?2 THEN IFNULL(archived_unix, strftime('%s','now')) END,
-                                 archived_ms = ?3
-             WHERE id = ?1",
-            params![account_id, archived, now_ms()],
-        )?;
-        if n == 0 {
+        let conn = self.db()?;
+        if set_archived_inner(&conn, account_id, archived)? == 0 {
             return Err(CoreError::NotFound {
                 what: trf("Konto {0}", &[&account_id]),
             });
         }
-        Ok(())
+        // the user's choice: a MoneyMoney import keeps it from now on (#890)
+        crate::importers::moneymoney_db::forget_archive_unknown(&conn, account_id)
     }
 
     /// Sets an account's SF Symbol (chosen by the user instead of the one
@@ -1353,6 +1348,24 @@ fn renumber(tx: &Connection, ids: &[i64]) -> CoreResult<()> {
         )?;
     }
     Ok(())
+}
+
+/// [`Vault::set_account_archived`] on a held connection; the number of accounts
+/// changed (0: no such account). Time and stamp come from the same second, and
+/// archiving an archived account keeps both: the #998 repair (schema step 34)
+/// tells the old MoneyMoney import's archives by a gap between them.
+pub(crate) fn set_archived_inner(
+    conn: &Connection,
+    account_id: i64,
+    archived: bool,
+) -> CoreResult<usize> {
+    let now = now_ms();
+    Ok(conn.execute(
+        "UPDATE accounts SET archived_unix = CASE WHEN ?2 THEN IFNULL(archived_unix, ?3) END,
+                             archived_ms = CASE WHEN ?2 AND archived_unix IS NOT NULL THEN archived_ms ELSE ?4 END
+         WHERE id = ?1",
+        params![account_id, archived, now / 1000, now],
+    )?)
 }
 
 #[cfg(test)]

@@ -104,27 +104,20 @@ pub(crate) fn note_archive_unknown(conn: &Connection, ids: &[i64]) -> CoreResult
     store_archive_unknown(conn, &all)
 }
 
-/// Takes `id` out of [`ARCHIVE_UNKNOWN_KEY`]; `true` if it was in there.
-fn take_archive_unknown(conn: &Connection, id: i64) -> CoreResult<bool> {
+/// Takes `id` out of [`ARCHIVE_UNKNOWN_KEY`]: the user chose its state (#890).
+pub(crate) fn forget_archive_unknown(conn: &Connection, id: i64) -> CoreResult<()> {
     let mut ids = archive_unknown(conn)?;
     let before = ids.len();
     ids.retain(|x| *x != id);
-    if ids.len() == before {
-        return Ok(false);
+    if ids.len() != before {
+        store_archive_unknown(conn, &ids)?;
     }
-    store_archive_unknown(conn, &ids)?;
-    Ok(true)
+    Ok(())
 }
 
-/// Archives an account closed in MoneyMoney (offline, stays readable). Time and
-/// stamp come from the same second like `set_account_archived`, so the #998
-/// repair never takes it for a wrong one ([`crate::schema::ARCHIVE_STAMP_GAP_MS`]).
+/// Archives an account closed in MoneyMoney (offline, stays readable).
 fn archive_closed(conn: &Connection, account_id: i64) -> CoreResult<()> {
-    let now = now_ms();
-    conn.execute(
-        "UPDATE accounts SET archived_unix = ?1, archived_ms = ?2 WHERE id = ?3 AND archived_unix IS NULL",
-        params![now / 1000, now, account_id],
-    )?;
+    crate::user_groups::set_archived_inner(conn, account_id, true)?;
     Ok(())
 }
 
@@ -171,6 +164,9 @@ pub struct MoneyMoneyDbAccount {
     pub computed_balance_cents: i64,
     /// Where the starting value of the balance came from (German, for the UI).
     pub balance_source: String,
+    /// Closed in MoneyMoney: imported archived. A login whose imported
+    /// accounts are all closed gets no connection unless chosen (#1437).
+    pub closed: bool,
 }
 
 /// One bank login in MoneyMoney. Secrets are never part of this record.
@@ -186,9 +182,6 @@ pub struct MoneyMoneyDbBank {
     pub connector: Option<ConnectorKind>,
     pub existing_connection_id: Option<i64>,
     pub account_count: u32,
-    /// Every account of this login is closed in MoneyMoney: no connection is
-    /// set up for it unless chosen, the UI preselects "Nicht verbinden" (#1437).
-    pub closed: bool,
     /// Every way GiroCrab can connect to this bank, best first: FinTS, then
     /// the bank's own API, then Enable Banking (from the PSD2 catalogue; the
     /// app may add one from the live list, `match_psd2_bank_by_name`). The
@@ -1867,12 +1860,6 @@ struct AccountRows {
 }
 
 impl Source {
-    /// The login has accounts and MoneyMoney marks all of them closed.
-    fn login_closed(&self, b: &SrcBank) -> bool {
-        let mut accounts = self.accounts.iter().filter(|a| a.bank_key == Some(b.id));
-        accounts.next().is_some_and(|a| a.closed) && accounts.all(|a| a.closed)
-    }
-
     /// The account groups from the top level down to `key`: (rowid, name).
     /// Groups without a name are skipped.
     fn group_chain(&self, key: Option<i64>) -> Vec<(i64, String)> {
@@ -2563,6 +2550,7 @@ fn preview(
             last_date: l,
             computed_balance_cents: r.balance_cents,
             balance_source: r.balance_source,
+            closed: a.closed,
         });
     }
     let mut banks = Vec::new();
@@ -2591,7 +2579,6 @@ fn preview(
                 .iter()
                 .filter(|a| a.bank_key == Some(b.id))
                 .count() as u32,
-            closed: src.login_closed(b),
             connection_options: connection_options(src, b, &catalog),
         });
     }
@@ -2853,16 +2840,21 @@ fn import(
         cat_cache: HashMap::new(),
         res: MoneyMoneyDbImportResult::default(),
         to_link: Vec::new(),
+        archive_unknown: archive_unknown(conn)?,
         created_groups: Vec::new(),
     };
     if options.import_categories {
         cx.import_categories()?;
     }
+    let unknown_before = cx.archive_unknown.len();
     for (choice, a, r) in plan {
         cx.report.state.account_index += 1;
         cx.report.state.account_name = src.account_name(a);
         cx.report.emit()?;
         cx.import_account(choice, a, &r)?;
+    }
+    if cx.archive_unknown.len() != unknown_before {
+        store_archive_unknown(conn, &cx.archive_unknown)?;
     }
     cx.order_created_groups()?;
 
@@ -2892,9 +2884,11 @@ struct ImportCtx<'a> {
     files: Option<StatementFiles>,
     cat_cache: HashMap<String, i64>,
     res: MoneyMoneyDbImportResult,
-    /// (account id, MoneyMoney bank rowid) of the importer's own accounts,
-    /// linked to the bank's login once the connections exist
-    to_link: Vec<(i64, i64)>,
+    /// (account id, MoneyMoney bank rowid, closed there) of the importer's own
+    /// accounts, linked to the bank's login once the connections exist
+    to_link: Vec<(i64, i64, bool)>,
+    /// [`ARCHIVE_UNKNOWN_KEY`], stored again after the accounts
+    archive_unknown: Vec<i64>,
     /// (MoneyMoney group rowid, uuid) of the groups this import creates
     created_groups: Vec<(i64, String)>,
 }
@@ -2997,7 +2991,7 @@ impl ImportCtx<'_> {
             !owned,
         )?);
         if let (true, Some(bank)) = (owned, a.bank_key) {
-            self.to_link.push((account_id, bank));
+            self.to_link.push((account_id, bank, a.closed));
         }
         Ok(())
     }
@@ -3032,7 +3026,9 @@ impl ImportCtx<'_> {
             let revived = crate::sync_merge::revive_account_if_deleted(conn, id)?;
             // Nobody chose the archive state of a revived account (it comes back
             // active) or of one the #998 repair reactivated: MoneyMoney's applies.
-            let unknown = take_archive_unknown(conn, id)?;
+            let before = self.archive_unknown.len();
+            self.archive_unknown.retain(|x| *x != id);
+            let unknown = self.archive_unknown.len() != before;
             if a.closed && (revived || unknown) {
                 archive_closed(conn, id)?;
             }
@@ -3206,14 +3202,13 @@ impl ImportCtx<'_> {
         let mut bank_connection: HashMap<i64, i64> = HashMap::new();
         // Enable Banking connections set up here: (connection id, bank name, created)
         let mut psd2 = Vec::new();
-        // A login none of whose accounts is imported would stay empty (#1437).
-        let imported: HashSet<i64> = src
-            .accounts
-            .iter()
-            .filter(|a| options.accounts.iter().any(|c| c.mm_id == a.id && c.import))
-            .filter_map(|a| a.bank_key)
-            .collect();
-        for b in src.banks.iter().filter(|b| imported.contains(&b.id)) {
+        // Only logins this import links an account to, or they would stay empty;
+        // `true`: all of those accounts are closed in MoneyMoney (#1437)
+        let mut logins: HashMap<i64, bool> = HashMap::new();
+        for (_, bank, closed) in &self.to_link {
+            *logins.entry(*bank).or_insert(true) &= *closed;
+        }
+        for b in src.banks.iter().filter(|b| logins.contains_key(&b.id)) {
             let default = src
                 .connector_key(b)
                 .map(|(kind, key)| MoneyMoneyDbConnectionOption::direct(kind, key));
@@ -3228,7 +3223,7 @@ impl ImportCtx<'_> {
             let chosen = match options.bank_choices.iter().find(|c| c.mm_bank_id == b.id) {
                 Some(c) => c.connection.clone(),
                 // every account closed: nothing left to fetch (#1437)
-                None if src.login_closed(b) => None,
+                None if logins[&b.id] => None,
                 None => default,
             };
             let Some(chosen) = chosen else { continue };
@@ -3314,7 +3309,7 @@ impl ImportCtx<'_> {
     /// Shows imported accounts under their bank login right away; the first
     /// sync then takes them over (adopt_account) instead of adding new ones.
     fn link_accounts(&self, bank_connection: &HashMap<i64, i64>) -> CoreResult<()> {
-        for (account_id, bank) in &self.to_link {
+        for (account_id, bank, _) in &self.to_link {
             if let Some(cid) = bank_connection.get(bank) {
                 self.conn.execute(
                     "UPDATE accounts SET connection_id = ?1 WHERE id = ?2 AND connection_id IS NULL",

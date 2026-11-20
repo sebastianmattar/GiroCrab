@@ -903,8 +903,9 @@ fn iban_match_merges_into_existing_synced_account() {
         (r.bookings_new, r.bookings_duplicates, r.bookings_enriched),
         (3, 1, 1)
     );
-    // only the comdirect login has an imported account (#1437)
-    assert_eq!((r.connections_created, r.connections_existing), (0, 1));
+    // the Girokonto went into the synced account, which has its login: the
+    // import links nothing to a comdirect login, so it sets none up (#1437)
+    assert_eq!((r.connections_created, r.connections_existing), (0, 0));
     let acc = v
         .list_accounts()
         .unwrap()
@@ -3858,9 +3859,8 @@ fn no_login_for_a_bank_whose_accounts_are_all_closed() {
     let p = v
         .preview_moneymoney_database(path.clone(), PW.into(), None)
         .unwrap();
-    let closed = |id: i64| p.banks.iter().find(|b| b.mm_id == id).unwrap().closed;
-    assert!(closed(2), "every account of the login is closed");
-    assert!(!closed(1), "the closed card is not the only account");
+    let closed = |id: i64| p.accounts.iter().find(|a| a.mm_id == id).unwrap().closed;
+    assert!(closed(2) && closed(5) && !closed(1));
     let r = import_with(&v, &path, |o| o.create_connections = true);
     assert_eq!(r.connections_created, 1);
     let account = account_by_name(&v, "Volksbank-Konto");
@@ -3899,4 +3899,63 @@ fn no_login_for_a_bank_without_imported_accounts() {
             .iter()
             .all(|c| c.connector != ConnectorKind::VolksbankKasselGoettingen)
     );
+}
+
+#[test]
+fn no_login_when_only_closed_accounts_of_a_bank_are_imported() {
+    // #1437: comdirect's open accounts are left out, only its closed card comes
+    let v = vault();
+    let r = import_with(&v, &fake_db_with(false, CARD_CLOSED), |o| {
+        o.create_connections = true;
+        o.accounts.retain(|c| c.mm_id == 2);
+    });
+    assert_eq!(r.connections_created, 0);
+    assert_eq!(account_by_name(&v, "Visa-Karte").connection_id, None);
+}
+
+#[test]
+fn the_users_archive_choice_ends_the_repair_note() {
+    // #890 after the #998 repair: once the user decides, the next import keeps it
+    let v = vault();
+    import_with(&v, &fake_db(), |_| {});
+    let card = account_by_name(&v, "Visa-Karte").id;
+    note_archive_unknown(&v.db().unwrap(), &[card]).unwrap();
+    v.set_account_archived(card, false).unwrap();
+    assert!(archive_unknown(&v.db().unwrap()).unwrap().is_empty());
+    import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
+    assert!(account_by_name(&v, "Visa-Karte").archived_unix.is_none());
+}
+
+#[test]
+fn archiving_an_archived_account_keeps_its_time_and_stamp() {
+    // otherwise the old time next to a new stamp looks like the #998 pattern
+    let v = vault();
+    import_with(&v, &fake_db(), |_| {});
+    let card = account_by_name(&v, "Visa-Karte").id;
+    let pair = || -> (Option<i64>, i64) {
+        v.db()
+            .unwrap()
+            .query_row(
+                "SELECT archived_unix, archived_ms FROM accounts WHERE id = ?1",
+                [card],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    };
+    v.set_account_archived(card, true).unwrap();
+    // an archive from a minute ago
+    v.db()
+        .unwrap()
+        .execute(
+            "UPDATE accounts SET archived_unix = archived_unix - 60, archived_ms = archived_ms - 60000 WHERE id = ?1",
+            [card],
+        )
+        .unwrap();
+    let first = pair();
+    assert!(first.0.is_some());
+    v.set_account_archived(card, true).unwrap();
+    assert_eq!(pair(), first);
+    v.set_account_archived(card, false).unwrap();
+    assert_eq!(pair().0, None);
+    assert!(pair().1 >= first.1);
 }
