@@ -438,8 +438,13 @@ struct MoneyMoneyDatabaseImportView: View {
                 Section {
                     ForEach(p.banks, id: \.mmId) { b in bankRow(b) }
                 } footer: {
-                    if createConnections, chosenEnableBanking, !enableBankingReady {
-                        footerText("Enable Banking richten Sie im nächsten Schritt ein.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        if p.banks.contains(where: \.closed) {
+                            footerText("Bei Zugängen, deren Konten alle aufgelöst sind, ist „Nicht verbinden“ vorgewählt.")
+                        }
+                        if createConnections, chosenEnableBanking, !enableBankingReady {
+                            footerText("Enable Banking richten Sie im nächsten Schritt ein.")
+                        }
                     }
                 }
                 .disabled(!createConnections)
@@ -459,17 +464,18 @@ struct MoneyMoneyDatabaseImportView: View {
     private func bankRow(_ b: MoneyMoneyDbBank) -> some View {
         let options = connectionOptions(b)
         return LabeledContent {
-            if options.count > 1 {
+            if let first = options.first {
+                // "Nicht verbinden" for every login, preselected when all its accounts are closed (#1437)
                 Picker("Verbindung für \(b.name)", selection: bankBinding(b)) {
-                    ForEach(options, id: \.key) { o in Text(label(o)).tag(o.key) }
+                    ForEach(options, id: \.key) { o in
+                        let existing = o.key == first.key && b.existingConnectionId != nil
+                        Text(label(o) + (existing ? " · " + String(localized: "vorhanden") : "")).tag(o.key)
+                    }
                     Divider()
                     Text("Nicht verbinden").tag("")
                 }
                 .labelsHidden()
                 .fixedSize()
-            } else if let o = options.first {
-                Text(label(o) + (b.existingConnectionId != nil ? " · " + String(localized: "vorhanden") : ""))
-                    .foregroundStyle(Theme.secondary)
             } else {
                 Text("Nicht verfügbar").foregroundStyle(Theme.tertiary)
             }
@@ -817,14 +823,20 @@ struct MoneyMoneyDatabaseImportView: View {
 
     private func bankBinding(_ b: MoneyMoneyDbBank) -> Binding<String> {
         Binding(
-            get: { bankChoice[b.mmId] ?? connectionOptions(b).first?.key ?? "" },
+            get: { bankChoice[b.mmId] ?? defaultKey(b) },
             set: { bankChoice[b.mmId] = $0 }
         )
     }
 
+    /// The preselected connection: the best one, none ("") for a login whose
+    /// accounts are all closed in MoneyMoney (#1437).
+    private func defaultKey(_ b: MoneyMoneyDbBank) -> String {
+        b.closed ? "" : connectionOptions(b).first?.key ?? ""
+    }
+
     /// The connection chosen for a bank (nil = none).
     private func chosenOption(_ b: MoneyMoneyDbBank) -> MoneyMoneyDbConnectionOption? {
-        let key = bankChoice[b.mmId] ?? connectionOptions(b).first?.key ?? ""
+        let key = bankChoice[b.mmId] ?? defaultKey(b)
         return connectionOptions(b).first { $0.key == key }
     }
 
@@ -1098,19 +1110,19 @@ extension AppModel {
         }
         let banks = [
             MoneyMoneyDbBank(mmId: 1, bankCode: "20041111", name: "comdirect", loginName: "12345678", customerId: "12345678",
-                             connector: .comdirect, existingConnectionId: nil, accountCount: 3,
+                             connector: .comdirect, existingConnectionId: nil, accountCount: 3, closed: false,
                              connectionOptions: [direct(.ownApi, .comdirect, "comdirect")]),
             MoneyMoneyDbBank(mmId: 2, bankCode: "50050201", name: "1822direkt", loginName: "max.mustermann", customerId: "",
-                             connector: .direkt1822, existingConnectionId: nil, accountCount: 1,
+                             connector: .direkt1822, existingConnectionId: nil, accountCount: 1, closed: false,
                              connectionOptions: [direct(.finTs, .direkt1822, "direkt1822")]),
             MoneyMoneyDbBank(mmId: 3, bankCode: "", name: "PayPal", loginName: "max@example.com", customerId: "",
-                             connector: .payPal, existingConnectionId: nil, accountCount: 1,
+                             connector: .payPal, existingConnectionId: nil, accountCount: 1, closed: false,
                              connectionOptions: [direct(.ownApi, .payPal, "paypal")]),
             MoneyMoneyDbBank(mmId: 4, bankCode: "12345678", name: "Musterbank", loginName: "mustermann", customerId: "",
-                             connector: nil, existingConnectionId: nil, accountCount: 1, connectionOptions: []),
+                             connector: nil, existingConnectionId: nil, accountCount: 1, closed: false, connectionOptions: []),
             // no own connector, but reachable through Enable Banking (PSD2)
             MoneyMoneyDbBank(mmId: 5, bankCode: "50024024", name: "C24 Bank", loginName: "max.mustermann", customerId: "",
-                             connector: nil, existingConnectionId: nil, accountCount: 1,
+                             connector: nil, existingConnectionId: nil, accountCount: 1, closed: false,
                              connectionOptions: psd2Catalog().filter { $0.aspsp == "C24" }.map {
                                  MoneyMoneyDbConnectionOption(via: .enableBanking, connector: .enableBanking,
                                                               key: "enablebanking:\($0.country):\($0.aspsp)", psd2Bank: $0)

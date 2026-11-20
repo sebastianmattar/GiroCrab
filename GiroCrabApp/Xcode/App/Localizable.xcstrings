@@ -6677,6 +6677,17 @@
         }
       }
     },
+    "Bei Zugängen, deren Konten alle aufgelöst sind, ist „Nicht verbinden“ vorgewählt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For logins whose accounts are all closed, “Don't connect” is preselected."
+          }
+        }
+      }
+    },
     "Bei allen ausgewählten Buchungen" : {
       "extractionState" : "manual",
       "localizations" : {

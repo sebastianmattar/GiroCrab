@@ -186,6 +186,9 @@ pub struct MoneyMoneyDbBank {
     pub connector: Option<ConnectorKind>,
     pub existing_connection_id: Option<i64>,
     pub account_count: u32,
+    /// Every account of this login is closed in MoneyMoney: no connection is
+    /// set up for it unless chosen, the UI preselects "Nicht verbinden" (#1437).
+    pub closed: bool,
     /// Every way GiroCrab can connect to this bank, best first: FinTS, then
     /// the bank's own API, then Enable Banking (from the PSD2 catalogue; the
     /// app may add one from the live list, `match_psd2_bank_by_name`). The
@@ -1864,6 +1867,12 @@ struct AccountRows {
 }
 
 impl Source {
+    /// The login has accounts and MoneyMoney marks all of them closed.
+    fn login_closed(&self, b: &SrcBank) -> bool {
+        let mut accounts = self.accounts.iter().filter(|a| a.bank_key == Some(b.id));
+        accounts.next().is_some_and(|a| a.closed) && accounts.all(|a| a.closed)
+    }
+
     /// The account groups from the top level down to `key`: (rowid, name).
     /// Groups without a name are skipped.
     fn group_chain(&self, key: Option<i64>) -> Vec<(i64, String)> {
@@ -2582,6 +2591,7 @@ fn preview(
                 .iter()
                 .filter(|a| a.bank_key == Some(b.id))
                 .count() as u32,
+            closed: src.login_closed(b),
             connection_options: connection_options(src, b, &catalog),
         });
     }
@@ -3196,7 +3206,14 @@ impl ImportCtx<'_> {
         let mut bank_connection: HashMap<i64, i64> = HashMap::new();
         // Enable Banking connections set up here: (connection id, bank name, created)
         let mut psd2 = Vec::new();
-        for b in &src.banks {
+        // A login none of whose accounts is imported would stay empty (#1437).
+        let imported: HashSet<i64> = src
+            .accounts
+            .iter()
+            .filter(|a| options.accounts.iter().any(|c| c.mm_id == a.id && c.import))
+            .filter_map(|a| a.bank_key)
+            .collect();
+        for b in src.banks.iter().filter(|b| imported.contains(&b.id)) {
             let default = src
                 .connector_key(b)
                 .map(|(kind, key)| MoneyMoneyDbConnectionOption::direct(kind, key));
@@ -3210,6 +3227,8 @@ impl ImportCtx<'_> {
             }
             let chosen = match options.bank_choices.iter().find(|c| c.mm_bank_id == b.id) {
                 Some(c) => c.connection.clone(),
+                // every account closed: nothing left to fetch (#1437)
+                None if src.login_closed(b) => None,
                 None => default,
             };
             let Some(chosen) = chosen else { continue };

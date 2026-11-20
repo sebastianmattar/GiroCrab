@@ -99,6 +99,11 @@ pub(crate) fn fake_db() -> String {
     fake_db_with(false, "")
 }
 
+/// An account under the Volksbank login, which has none in `DATA`: the import
+/// sets up a login only for a bank with an imported account (#1437).
+const VOLKSBANK_ACCOUNT: &str = "INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred) VALUES
+  (5, 2, '4712', '52090000', 0, '', 'EUR', 'Volksbank-Konto', 'Max Mustermann', 0, 0, 5, 0, 1, 'GEHEIM');";
+
 fn vault() -> Arc<Vault> {
     Vault::open(
         temp("vault.db").to_string_lossy().to_string(),
@@ -493,7 +498,7 @@ fn import_categories_splits_pending_notes_and_balance() {
 #[test]
 fn reimport_is_idempotent() {
     let v = vault();
-    let path = fake_db();
+    let path = fake_db_with(false, VOLKSBANK_ACCOUNT);
     let p = v
         .preview_moneymoney_database(path.clone(), PW.into(), None)
         .unwrap();
@@ -530,7 +535,7 @@ fn reimport_is_idempotent() {
         .import_moneymoney_database(path, PW.into(), options_from(&p, true))
         .unwrap();
     for r in [&second, &third] {
-        assert_eq!((r.accounts_created, r.accounts_merged), (0, 4));
+        assert_eq!((r.accounts_created, r.accounts_merged), (0, 5));
         assert_eq!(
             (r.bookings_new, r.bookings_duplicates),
             (0, first.bookings_new)
@@ -898,7 +903,8 @@ fn iban_match_merges_into_existing_synced_account() {
         (r.bookings_new, r.bookings_duplicates, r.bookings_enriched),
         (3, 1, 1)
     );
-    assert_eq!((r.connections_created, r.connections_existing), (1, 1));
+    // only the comdirect login has an imported account (#1437)
+    assert_eq!((r.connections_created, r.connections_existing), (0, 1));
     let acc = v
         .list_accounts()
         .unwrap()
@@ -1172,7 +1178,9 @@ fn fints_server_url_is_imported_from_moneymoney() {
     const MM_URL: &str = "https://banking-by2.s-fints-pt-by.de/fints30";
     let extra = format!(
         "INSERT INTO banks (rowid, country, bankcode, username, customer, credential, name, server, systemid, local_storage) \
-         VALUES (4, 'DE', '71150000', 'max.m', 'max.m', 'GEHEIM-4', 'Sparkasse Rosenheim', '{MM_URL}', 'SYS', 'LS');"
+         VALUES (4, 'DE', '71150000', 'max.m', 'max.m', 'GEHEIM-4', 'Sparkasse Rosenheim', '{MM_URL}', 'SYS', 'LS');
+         INSERT INTO accounts (rowid, bank_key, account, bankcode, portfolio, iban, currency, name, owner, kind, type, sort, initial_balance, group_key, cred) \
+         VALUES (5, 4, '4713', '71150000', 0, '', 'EUR', 'Sparkassen-Konto', 'Max Mustermann', 0, 0, 5, 0, 1, 'GEHEIM');"
     );
     let path = fake_db_with(false, &extra);
     let v = vault();
@@ -1215,7 +1223,7 @@ fn fints_server_url_is_rejected_when_not_https() {
 #[test]
 fn connections_for_supported_banks_only_and_never_a_pin() {
     let v = vault();
-    let path = fake_db();
+    let path = fake_db_with(false, VOLKSBANK_ACCOUNT);
     let p = v
         .preview_moneymoney_database(path.clone(), PW.into(), None)
         .unwrap();
@@ -3837,4 +3845,58 @@ fn accounts_the_repair_reactivated_take_moneymoney_state_on_the_next_import() {
     v.set_account_archived(card, false).unwrap();
     import_with(&v, &fake_db_with(false, CARD_CLOSED), |_| {});
     assert!(account_by_name(&v, "Visa-Karte").archived_unix.is_none());
+}
+
+#[test]
+fn no_login_for_a_bank_whose_accounts_are_all_closed() {
+    // #1437: the Volksbank account is closed in MoneyMoney; comdirect has open ones
+    let v = vault();
+    let path = fake_db_with(
+        false,
+        &format!("{VOLKSBANK_ACCOUNT}\nUPDATE accounts SET refresh = 19 WHERE rowid IN (2, 5);"),
+    );
+    let p = v
+        .preview_moneymoney_database(path.clone(), PW.into(), None)
+        .unwrap();
+    let closed = |id: i64| p.banks.iter().find(|b| b.mm_id == id).unwrap().closed;
+    assert!(closed(2), "every account of the login is closed");
+    assert!(!closed(1), "the closed card is not the only account");
+    let r = import_with(&v, &path, |o| o.create_connections = true);
+    assert_eq!(r.connections_created, 1);
+    let account = account_by_name(&v, "Volksbank-Konto");
+    assert!(account.archived_unix.is_some());
+    assert_eq!(account.connection_id, None);
+    // chosen in the UI anyway (e.g. for statements): set up
+    let option = p
+        .banks
+        .iter()
+        .find(|b| b.mm_id == 2)
+        .unwrap()
+        .connection_options[0]
+        .clone();
+    let r = import_with(&v, &path, |o| {
+        o.create_connections = true;
+        o.bank_choices = vec![MoneyMoneyDbBankChoice {
+            mm_bank_id: 2,
+            connection: Some(option),
+        }];
+    });
+    assert_eq!(r.connections_created, 1);
+}
+
+#[test]
+fn no_login_for_a_bank_without_imported_accounts() {
+    // #1437: the Volksbank account is left out
+    let v = vault();
+    let r = import_with(&v, &fake_db_with(false, VOLKSBANK_ACCOUNT), |o| {
+        o.create_connections = true;
+        o.accounts.retain(|c| c.mm_id != 5);
+    });
+    assert_eq!(r.connections_created, 1);
+    assert!(
+        v.list_bank_connections()
+            .unwrap()
+            .iter()
+            .all(|c| c.connector != ConnectorKind::VolksbankKasselGoettingen)
+    );
 }
