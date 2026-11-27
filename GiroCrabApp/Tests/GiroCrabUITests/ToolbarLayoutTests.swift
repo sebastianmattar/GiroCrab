@@ -107,4 +107,53 @@ final class ToolbarLayoutTests: XCTestCase {
         defaults.set(Data("nope".utf8), forKey: ToolbarLayout.defaultsKey)
         XCTAssertEqual(ToolbarLayout.load(from: defaults), .standard)
     }
+
+    // MARK: Editing (dialog „Symbolleiste anpassen“)
+
+    private var sample: ToolbarLayout { ToolbarLayout(showsScope: true, leading: [.transfer, .sync, .privacy], trailing: [.settings]) }
+
+    func testMoveWithinAGroup() {
+        var layout = sample
+        layout.move(in: .leading, from: [2], to: 0)
+        XCTAssertEqual(layout.leading, [.privacy, .transfer, .sync])
+        XCTAssertEqual(layout.trailing, [.settings])
+    }
+
+    func testMoveBetweenGroupsAppendsOnTheOtherSide() {
+        var layout = sample
+        layout.add(.sync, to: .trailing)
+        XCTAssertEqual(layout.leading, [.transfer, .privacy])
+        XCTAssertEqual(layout.trailing, [.settings, .sync])
+        layout.add(.settings, to: .leading)
+        XCTAssertEqual(layout.leading, [.transfer, .privacy, .settings])
+        XCTAssertEqual(layout.trailing, [.sync])
+    }
+
+    func testAddAndRemove() {
+        var layout = sample
+        XCTAssertEqual(layout.hidden, [.newBooking, .inspector, .palette, .export, .print, .rules, .lock])
+        layout.add(.print, to: .trailing)
+        layout.remove(.transfer)
+        XCTAssertEqual(layout.leading, [.sync, .privacy])
+        XCTAssertEqual(layout.trailing, [.settings, .print])
+        XCTAssertEqual(layout.hidden, [.transfer, .newBooking, .inspector, .palette, .export, .rules, .lock])
+    }
+
+    func testMoveAsOneGroupMergesIntoLeading() {
+        var layout = sample
+        layout.moveAsOneGroup(from: [3], to: 1) // settings, shown last before macOS 26
+        XCTAssertEqual(layout.leading, [.transfer, .settings, .sync, .privacy])
+        XCTAssertEqual(layout.trailing, [])
+    }
+
+    @MainActor
+    func testStoreKeepsEditsResetAndScope() {
+        let store = ToolbarLayoutStore(defaults: defaults)
+        store.layout.showsScope = false
+        store.layout.add(.lock, to: .trailing)
+        XCTAssertEqual(ToolbarLayoutStore(defaults: defaults).layout, ToolbarLayout(
+            showsScope: false, leading: [.transfer, .newBooking, .sync, .inspector, .privacy], trailing: [.lock]))
+        store.layout = .standard
+        XCTAssertEqual(ToolbarLayoutStore(defaults: defaults).layout, .standard)
+    }
 }

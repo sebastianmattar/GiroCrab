@@ -1197,6 +1197,10 @@ public final class AppModel {
                     if name == "collection-files" { self.buildCollection(dueDate: Date().addingTimeInterval(5 * 86_400)) }
                 }
             }
+        #if os(macOS)
+        case "toolbar":
+            ToolbarLayoutStore.shared.isCustomizing = true // Ansicht › Symbolleiste anpassen … (#2049)
+        #endif
         case "tags", "tags-accounts":
             // Konten › Tags verwalten … (#228); `tags-accounts`: the first tag's bookings per account
             showTagManager = true

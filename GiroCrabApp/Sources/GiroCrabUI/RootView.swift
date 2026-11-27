@@ -68,7 +68,7 @@ public struct GiroCrabScenes: Scene {
             BookingCommands(model: model)
             AppCommands(model: model, openWindow: openWindow)
             SidebarCommands()
-            ToolbarCommands()
+            MainToolbarCommands(model: model)
             ViewCommands(model: model)
         }
         #endif
@@ -767,6 +767,9 @@ struct MainSplitView: View {
                 .environment(model)
         }
         #if os(macOS)
+        .capturableSheet(isPresented: Bindable(ToolbarLayoutStore.shared).isCustomizing) {
+            ToolbarCustomizeSheet()
+        }
         // the draft is stored once the sheet is really gone, not when another
         // sheet opens on top of it
         .capturableSheet(isPresented: $model.showTagManager, onDismiss: { model.applyTagDraft() }) {

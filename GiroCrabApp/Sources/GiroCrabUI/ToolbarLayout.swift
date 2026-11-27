@@ -1,5 +1,4 @@
-import Foundation
-import Observation
+import SwiftUI
 
 /// The macOS main toolbar as GiroCrab stores it (#2049): which buttons it shows in which order, in a leading
 /// and a trailing group, and whether the scope control is shown. SwiftUI's own customizable toolbar
@@ -75,6 +74,42 @@ struct ToolbarLayout: Codable, Equatable {
     }
 }
 
+/// Editing, for the dialog „Symbolleiste anpassen“ (`ToolbarCustomizeSheet`).
+extension ToolbarLayout {
+    enum Group { case leading, trailing }
+
+    subscript(group: Group) -> [Item] {
+        get { group == .leading ? leading : trailing }
+        set { if group == .leading { leading = newValue } else { trailing = newValue } }
+    }
+
+    /// Buttons in neither group.
+    var hidden: [Item] { Item.allCases.filter { !leading.contains($0) && !trailing.contains($0) } }
+
+    mutating func remove(_ item: Item) {
+        leading.removeAll { $0 == item }
+        trailing.removeAll { $0 == item }
+    }
+
+    /// Appends `item` to `group`, taking it out of the other group.
+    mutating func add(_ item: Item, to group: Group) {
+        remove(item)
+        self[group].append(item)
+    }
+
+    mutating func move(in group: Group, from source: IndexSet, to destination: Int) {
+        self[group].move(fromOffsets: source, toOffset: destination)
+    }
+
+    /// Before macOS 26 both groups show as one: reorders that single list, which then is the leading group.
+    mutating func moveAsOneGroup(from source: IndexSet, to destination: Int) {
+        var all = leading + trailing
+        all.move(fromOffsets: source, toOffset: destination)
+        leading = all
+        trailing = []
+    }
+}
+
 /// The app's toolbar layout. `MainToolbar` reads `layout` from here rather than through `@AppStorage`: an observable
 /// property re-renders the toolbar only when the layout itself changes, never on a selection (see `MainToolbar`).
 /// Created on the first toolbar build, so the takeover of the old layout runs before the toolbar exists.
@@ -86,6 +121,10 @@ final class ToolbarLayoutStore {
     var layout: ToolbarLayout {
         didSet { layout.save(to: defaults) }
     }
+    /// The dialog „Symbolleiste anpassen“ is open (Ansicht menu, `--demo-sheet toolbar`).
+    var isCustomizing = false
+    /// Whether the main window shows its toolbar, for the title of Ansicht › Symbolleiste ein-/ausblenden.
+    var isToolbarShown = true
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
