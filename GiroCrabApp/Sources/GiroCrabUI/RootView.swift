@@ -497,21 +497,17 @@ struct MainSplitView: View {
     private var bookingColumn: some View {
         Group {
             switch model.mainColumn {
-            // These views have no search of their own. A field is attached anyway, so the toolbar has the
-            // same items in every view: a customized layout is never applied to a different set.
             case .documents: DocumentsView()
-            case .planned: PlannedPaymentsView().toolbarSearchPlaceholder()
-            case .directDebits: DirectDebitsView().toolbarSearchPlaceholder()
-            case .subscriptions: SubscriptionsView().toolbarSearchPlaceholder()
-            case .wealth: WealthView().toolbarSearchPlaceholder()
+            case .planned: PlannedPaymentsView()
+            case .directDebits: DirectDebitsView()
+            case .subscriptions: SubscriptionsView()
+            case .wealth: WealthView()
             case .bookings: AccountColumn()
             }
         }
         #if os(macOS)
-        .background(ToolbarSearchVisibility(hidden: [.planned, .directDebits, .wealth].contains(model.mainColumn)))
-        // The customizable toolbar belongs to the column, not to the view in
-        // it: its items must stay when Belege replaces the booking list
-        // (AppKit crashes on customizable items that come and go).
+        // The toolbar belongs to the column, not to the view in it: its items
+        // stay when Belege replaces the booking list.
         .modifier(MainToolbar())
         // Window title for both views here too, so the toolbar keeps the same
         // compact style (and height) when switching to Belege.
@@ -1020,80 +1016,14 @@ struct MacHeroIcon: View {
 #if os(macOS)
 import AppKit
 
-/// A search field for the views of the booking column that have none (Vermögen, Geplant, Lastschriften), so
-/// the toolbar has the same items in every view. Without it the search item comes and goes with the view,
-/// AppKit re-applies a customized layout to a changed set: items jump, and some layouts crash SwiftUI
-/// (`applyItemCustomizations`, #1832). The item is hidden (`ToolbarSearchVisibility`), not removed: a hidden
-/// `NSToolbarItem` stays in `toolbar.items`. macOS 14 cannot hide it and disables the field instead.
-struct ToolbarSearchPlaceholder: ViewModifier {
-    @State private var text = ""
-
-    func body(content: Content) -> some View {
-        content.searchable(text: $text, placement: .toolbar, prompt: "")
-    }
-}
-
-/// Hides (macOS 15+) or disables (macOS 14) the toolbar's search item of the window that hosts the view. The item is not
-/// re-created when the view in the column changes (`NSToolbar.willAddItemNotification` is not sent for it
-/// after launch), so applying the state when it changes and when the view gets its window is enough.
-struct ToolbarSearchVisibility: NSViewRepresentable {
-    let hidden: Bool
-
-    func makeNSView(context: Context) -> SearchVisibilityView { SearchVisibilityView() }
-
-    func updateNSView(_ view: SearchVisibilityView, context: Context) { view.hidesSearch = hidden }
-
-    final class SearchVisibilityView: NSView {
-        var hidesSearch = false { didSet { apply() } }
-        private var enabledObservation: NSKeyValueObservation?
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            apply()
-        }
-
-        private func apply() {
-            let items = window?.toolbar?.items.compactMap { $0 as? NSSearchToolbarItem } ?? []
-            items.forEach { ToolbarSearch.setUnavailable(hidesSearch, $0) }
-            // macOS 14: SwiftUI re-enables the field on its own (e.g. after the Privatmodus toggle): disable it again
-            enabledObservation = ToolbarSearch.canHideItems ? nil : items.first.flatMap { item in
-                item.searchField.observe(\.isEnabled) { [weak self, weak item] _, _ in
-                    MainActor.assumeIsolated { if let self, let item { ToolbarSearch.setUnavailable(self.hidesSearch, item) } }
-                }
-            }
-        }
-    }
-}
-
 /// Bearbeiten › Suchen … (⌘F): puts the cursor into the window's toolbar search
 /// field (`.searchable(placement: .toolbar)`; `searchFocused` needs macOS 15).
 enum ToolbarSearch {
-    /// macOS 15+ can hide a toolbar item; macOS 14 cannot, so its search field is disabled instead.
-    nonisolated static var canHideItems: Bool {
-        if #available(macOS 15, *) { return true }
-        return false
-    }
-
-    @MainActor
-    static func setUnavailable(_ unavailable: Bool, _ item: NSSearchToolbarItem) {
-        if canHideItems {
-            if #available(macOS 15, *), item.isHidden != unavailable { item.isHidden = unavailable }
-        } else if item.searchField.isEnabled == unavailable {
-            item.searchField.isEnabled = !unavailable // the item is reused by views with search: re-enable it too
-        }
-    }
-
-    @MainActor
-    private static func isUnavailable(_ item: NSSearchToolbarItem) -> Bool {
-        if #available(macOS 15, *), canHideItems { return item.isHidden }
-        return !item.searchField.isEnabled
-    }
-
     @MainActor
     static func focus() {
         let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first { $0.toolbar != nil }
-        // A hidden or disabled item (a view without search, #1832) takes no focus: ⌘F does nothing there.
-        guard let window, let item = window.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first(where: { !isUnavailable($0) }) else {
+        // A view without search has no search item: ⌘F does nothing there.
+        guard let window, let item = window.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first else {
             FileHandle.standardError.write("ToolbarSearch: no search field\n".data(using: .utf8)!)
             return
         }
@@ -1102,13 +1032,3 @@ enum ToolbarSearch {
 }
 #endif
 
-extension View {
-    /// macOS only: see `ToolbarSearchPlaceholder`; iOS has no customizable toolbar.
-    func toolbarSearchPlaceholder() -> some View {
-        #if os(macOS)
-        modifier(ToolbarSearchPlaceholder())
-        #else
-        self
-        #endif
-    }
-}

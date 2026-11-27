@@ -1484,11 +1484,11 @@ struct WindowTitle: ViewModifier {
     }
 }
 
-/// Toolbar of the booking list. macOS: customizable (View › Symbolleiste
-/// anpassen …) – Überweisen and Abrufen are shown by default, the rest can be
-/// added; every command is also in the menu bar. iOS: unchanged.
+/// Toolbar of the booking list. macOS: built from the stored `ToolbarLayout` (#2049), a plain toolbar
+/// without SwiftUI's customization; every command is also in the menu bar. iOS: unchanged.
 ///
-/// macOS: the modifier's body reads no model state and holds no `@AppStorage`; each item's
+/// macOS: the modifier's body reads no model state and holds no `@AppStorage` (only the observable
+/// `ToolbarLayoutStore.shared.layout`, which changes only when the layout does); each item's
 /// content is a view of its own that reads what it shows. Rebuilding the toolbar content
 /// re-bridges every item to AppKit (`ToolbarBridge`), so it must not happen on each sidebar
 /// or booking selection: a read here (or an `@AppStorage`, which never compares equal when
@@ -1527,61 +1527,22 @@ struct MainToolbar: ViewModifier {
             }
         }
         #else
-        content.toolbar(id: "girocrab.main") {
-            ToolbarItem(id: "scope", placement: .principal) {
-                ScopeToolbarControl()
+        let layout = ToolbarLayoutStore.shared.layout
+        content.toolbar {
+            if layout.showsScope {
+                ToolbarItem(placement: .principal) { ScopeToolbarControl() }
             }
-            .defaultCustomization(.visible, options: .alwaysAvailable) // always in the palette; SwiftUI still lets the user remove it from the bar (#609, #1832)
-            ToolbarItem(id: "transfer", placement: .primaryAction) {
-                TransferToolbarButton()
+            if #available(macOS 26, *) {
+                ToolbarItemGroup(placement: .primaryAction) { MainToolbarButtons(items: layout.leading) }
+                ToolbarSpacer(.flexible, placement: .primaryAction)
+                ToolbarItemGroup(placement: .primaryAction) { MainToolbarButtons(items: layout.trailing) }
+            } else {
+                // no ToolbarSpacer before macOS 26: one group
+                ToolbarItemGroup(placement: .primaryAction) { MainToolbarButtons(items: layout.leading + layout.trailing) }
             }
-            ToolbarItem(id: "newBooking", placement: .primaryAction) {
-                NewBookingToolbarButton()
-            }
-            ToolbarItem(id: "sync", placement: .primaryAction) {
-                SyncToolbarButton()
-            }
-            ToolbarItem(id: "inspector", placement: .primaryAction) {
-                InspectorToolbarButton()
-            }
-            ToolbarItem(id: "privacy", placement: .primaryAction) {
-                PrivacyToolbarToggle()
-            }
-            extraToolbarItems
         }
         #endif
     }
-
-    #if os(macOS)
-    /// Second half of the customizable toolbar: `ToolbarContentBuilder` has no `buildBlock` for more than
-    /// 10 children, so the items are split in two (IDs, order and `showsByDefault` unchanged).
-    @ToolbarContentBuilder
-    private var extraToolbarItems: some CustomizableToolbarContent {
-        ToolbarItem(id: "palette", placement: .primaryAction, showsByDefault: false) {
-            Button { model.showCommandPalette = true } label: { Label("Befehle", systemImage: "command") }
-                .help("Befehlspalette (⌘K)")
-        }
-        ToolbarItem(id: "export", placement: .primaryAction, showsByDefault: false) {
-            Button { model.openBookingExport() } label: { Label("Umsätze exportieren", systemImage: "square.and.arrow.up") }
-                .help("Umsätze als PDF, CSV oder CAMT.053 exportieren … (#53 / #372)")
-        }
-        ToolbarItem(id: "print", placement: .primaryAction, showsByDefault: false) {
-            Button { model.showPrintSheet = true } label: { Label("Drucken", systemImage: "printer") }
-                .help("Gefilterte Buchungen drucken … (⌘P)")
-        }
-        ToolbarItem(id: "rules", placement: .primaryAction, showsByDefault: false) {
-            Button { model.openRuleEditor() } label: { Label("Regeln", systemImage: "wand.and.stars") }
-                .help("Kategorisierungsregeln … (⌥⌘K)")
-        }
-        ToolbarItem(id: "lock", placement: .primaryAction, showsByDefault: false) {
-            LockToolbarButton()
-        }
-        ToolbarItem(id: "settings", placement: .primaryAction, showsByDefault: false) {
-            SettingsLink { Label("Einstellungen", systemImage: "gearshape") }
-                .help("Einstellungen … (⌘,)")
-        }
-    }
-    #endif
 }
 
 #if os(macOS)
@@ -1590,7 +1551,7 @@ private struct ScopeToolbarControl: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        // Keep one customizable toolbar item, with the filter for the current view.
+        // One toolbar item, with the filter for the current view.
         if model.mainColumn == .wealth {
             WealthScopePicker()
         } else if model.mainColumn == .documents {
@@ -1598,10 +1559,43 @@ private struct ScopeToolbarControl: View {
         } else {
             switch model.presentation {
             case .securities: DepotTabPicker()
-            // Sachwerte have neither booking scopes nor depot tabs; the item stays so the
-            // customizable toolbar keeps its layout
+            // Sachwerte have neither booking scopes nor depot tabs
             case .tangible: Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
             case .bookings: BookingScopePicker().disabled(model.sidebarRowSelection(for: .newBookings).isSelected)
+            }
+        }
+    }
+}
+
+/// The buttons of one toolbar group, in the stored order (`ToolbarLayout`).
+private struct MainToolbarButtons: View {
+    let items: [ToolbarLayout.Item]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ForEach(items, id: \.self) { item in
+            switch item {
+            case .transfer: TransferToolbarButton()
+            case .newBooking: NewBookingToolbarButton()
+            case .sync: SyncToolbarButton()
+            case .inspector: InspectorToolbarButton()
+            case .privacy: PrivacyToolbarToggle()
+            case .palette:
+                Button { model.showCommandPalette = true } label: { Label("Befehle", systemImage: "command") }
+                    .help("Befehlspalette (⌘K)")
+            case .export:
+                Button { model.openBookingExport() } label: { Label("Umsätze exportieren", systemImage: "square.and.arrow.up") }
+                    .help("Umsätze als PDF, CSV oder CAMT.053 exportieren … (#53 / #372)")
+            case .print:
+                Button { model.showPrintSheet = true } label: { Label("Drucken", systemImage: "printer") }
+                    .help("Gefilterte Buchungen drucken … (⌘P)")
+            case .rules:
+                Button { model.openRuleEditor() } label: { Label("Regeln", systemImage: "wand.and.stars") }
+                    .help("Kategorisierungsregeln … (⌥⌘K)")
+            case .lock: LockToolbarButton()
+            case .settings:
+                SettingsLink { Label("Einstellungen", systemImage: "gearshape") }
+                    .help("Einstellungen … (⌘,)")
             }
         }
     }
