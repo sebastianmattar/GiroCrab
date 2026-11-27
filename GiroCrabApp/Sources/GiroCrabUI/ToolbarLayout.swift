@@ -111,6 +111,35 @@ extension ToolbarLayout {
     var shown: Set<Item> { Set(leading + trailing) }
 }
 
+/// Moving without dragging (context menu and VoiceOver actions of the dialog).
+extension [ToolbarListRow] {
+    /// Whether `row` can move one step up (`step` -1) or down (+1).
+    func canMove(_ row: ToolbarListRow, by step: Int) -> Bool {
+        guard let i = firstIndex(of: row) else { return false }
+        return indices.contains(i + step)
+    }
+
+    /// Swaps `row` with its neighbour above (`step` -1) or below (+1); does nothing at the edge.
+    mutating func move(_ row: ToolbarListRow, by step: Int) {
+        guard canMove(row, by: step), let i = firstIndex(of: row) else { return }
+        swapAt(i, i + step)
+    }
+
+    /// The button stands below the flexible space, i.e. next to the search.
+    func isNextToSearch(_ item: ToolbarLayout.Item) -> Bool {
+        guard let space = firstIndex(of: .flexibleSpace), let i = firstIndex(of: .item(item)) else { return false }
+        return i > space
+    }
+
+    /// Moves the button across the flexible space, to the row right next to it.
+    mutating func switchSide(_ item: ToolbarLayout.Item) {
+        guard let i = firstIndex(of: .item(item)), let space = firstIndex(of: .flexibleSpace) else { return }
+        remove(at: i)
+        // above: the space moved up by one, so `space` is the row below it; below: `space` is the row above it
+        insert(.item(item), at: space)
+    }
+}
+
 /// The app's toolbar layout. `MainToolbar` reads `layout` from here rather than through `@AppStorage`: an observable
 /// property re-renders the toolbar only when the layout itself changes, never on a selection (see `MainToolbar`).
 /// Created on the first toolbar build, so the takeover of the old layout runs before the toolbar exists.

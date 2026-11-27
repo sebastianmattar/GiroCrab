@@ -5592,13 +5592,13 @@
         }
       }
     },
-    "Ansichtsfilter" : {
+    "Ansichtsfilter in der Mitte anzeigen" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "View filter"
+            "value" : "Show View Filter in the Middle"
           }
         }
       }
@@ -16237,7 +16237,7 @@
         }
       }
     },
-    "Flexibler Abstand" : {
+    "Flexibler Zwischenraum" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -24986,6 +24986,17 @@
         }
       }
     },
+    "Nach links" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move to the Left"
+          }
+        }
+      }
+    },
     "Nach oben" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25241,6 +25252,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Natural search"
+          }
+        }
+      }
+    },
+    "Neben die Suche" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next to Search"
           }
         }
       }
@@ -37027,24 +37049,24 @@
         }
       }
     },
-    "Ziehen zum Sortieren." : {
+    "Ziehen oder Kontextmenü zum Sortieren." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Drag to reorder."
+            "value" : "Drag or use the context menu to reorder."
           }
         }
       }
     },
-    "Ziehen zum Sortieren. Was unter „Flexibler Abstand“ steht, erscheint neben der Suche." : {
+    "Ziehen oder Kontextmenü zum Sortieren. Was unter „Flexibler Zwischenraum“ steht, erscheint neben der Suche." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Drag to reorder. Items below “Flexible Space” appear next to the search field."
+            "value" : "Drag or use the context menu to reorder. Items below “Flexible Space” appear next to the search field."
           }
         }
       }

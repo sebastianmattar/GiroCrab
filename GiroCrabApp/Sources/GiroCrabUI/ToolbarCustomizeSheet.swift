@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// Ansicht › Symbolleiste anpassen … (#2049): one list that mirrors the toolbar. A checkbox shows or hides an entry,
-/// dragging reorders; the „Flexibler Abstand“ row splits the buttons into the group after the view filter and the
+/// dragging or the context menu (also VoiceOver actions) reorders; the „Flexibler Zwischenraum“ row splits the buttons into the group after the view filter and the
 /// group next to the search. Edits the stored `ToolbarLayout`, the toolbar follows live.
 /// Design page: `docs/SYMBOLLEISTE_UI.md`.
 struct ToolbarCustomizeSheet: View {
@@ -12,7 +12,7 @@ struct ToolbarCustomizeSheet: View {
     /// The list order, hidden buttons included: kept here so that unchecking a button does not move its row.
     @State private var rows = ToolbarLayoutStore.shared.layout.listRows(oneGroup: !Self.twoGroups)
 
-    /// Before macOS 26 the toolbar has no flexible spacer: one group, no „Flexibler Abstand“ row.
+    /// Before macOS 26 the toolbar has no flexible spacer: one group, no „Flexibler Zwischenraum“ row.
     private static var twoGroups: Bool {
         if #available(macOS 26, *) { return true }
         return false
@@ -25,15 +25,26 @@ struct ToolbarCustomizeSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 6)
+            // fixed in the middle of the bar: not a row of the list
+            Toggle("Ansichtsfilter in der Mitte anzeigen", isOn: $store.layout.showsScope)
+                .appFont(.body)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
             List {
-                Toggle(isOn: $store.layout.showsScope) {
-                    ToolbarRowLabel(title: "Ansichtsfilter", systemImage: "line.3.horizontal.decrease.circle")
-                }
                 ForEach(rows, id: \.self) { row in
-                    switch row {
-                    case .item(let item): Toggle(isOn: shown(item)) { ToolbarItemLabel(item: item) }
-                    case .flexibleSpace: FlexibleSpaceRow().listRowSeparator(.hidden)
+                    Group {
+                        switch row {
+                        case .item(let item):
+                            let isShown = store.layout.shown.contains(item)
+                            Toggle(isOn: shown(item)) {
+                                // what is not in the bar reads as secondary (Theme.secondary keeps 4.5:1)
+                                ToolbarItemLabel(item: item).foregroundStyle(isShown ? Theme.text : Theme.secondary)
+                            }
+                        case .flexibleSpace: FlexibleSpaceRow().listRowSeparator(.hidden)
+                        }
                     }
+                    .contextMenu { moveCommands(row, onlyAvailable: false) }
+                    .accessibilityActions { moveCommands(row, onlyAvailable: true) }
                 }
                 .onMove { from, to in
                     rows.move(fromOffsets: from, toOffset: to)
@@ -42,7 +53,9 @@ struct ToolbarCustomizeSheet: View {
             }
             .listStyle(.inset)
             .toggleStyle(.checkbox)
-            Text(Self.twoGroups ? "Ziehen zum Sortieren. Was unter „Flexibler Abstand“ steht, erscheint neben der Suche." : "Ziehen zum Sortieren.")
+            Text(Self.twoGroups
+                ? "Ziehen oder Kontextmenü zum Sortieren. Was unter „Flexibler Zwischenraum“ steht, erscheint neben der Suche."
+                : "Ziehen oder Kontextmenü zum Sortieren.")
                 .appFont(.caption)
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -62,7 +75,31 @@ struct ToolbarCustomizeSheet: View {
             .padding(16)
         }
         // room for every row at once (13 at most) without scrolling
-        .frame(width: 400 * textScale, height: CGFloat(rows.count + 1) * 25 * textScale + 150)
+        .frame(width: 400 * textScale, height: CGFloat(rows.count + 1) * 25 * textScale + 180)
+    }
+
+    /// „Nach oben“, „Nach unten“ and the side switch: in the context menu (disabled where they do nothing) and as
+    /// VoiceOver actions (only those that apply).
+    @ViewBuilder
+    private func moveCommands(_ row: ToolbarListRow, onlyAvailable: Bool) -> some View {
+        let up = rows.canMove(row, by: -1), down = rows.canMove(row, by: 1)
+        if up || !onlyAvailable {
+            Button("Nach oben") { step(row, by: -1) }.disabled(!up)
+        }
+        if down || !onlyAvailable {
+            Button("Nach unten") { step(row, by: 1) }.disabled(!down)
+        }
+        if Self.twoGroups, case .item(let item) = row {
+            Button(rows.isNextToSearch(item) ? "Nach links" : "Neben die Suche") {
+                rows.switchSide(item)
+                apply(shown: store.layout.shown)
+            }
+        }
+    }
+
+    private func step(_ row: ToolbarListRow, by step: Int) {
+        rows.move(row, by: step)
+        apply(shown: store.layout.shown)
     }
 
     private func shown(_ item: ToolbarLayout.Item) -> Binding<Bool> {
@@ -83,7 +120,7 @@ private struct FlexibleSpaceRow: View {
     var body: some View {
         HStack(spacing: 8) {
             line
-            Label("Flexibler Abstand", systemImage: "arrow.left.and.right")
+            Label("Flexibler Zwischenraum", systemImage: "arrow.left.and.right")
                 .appFont(.caption, weight: .medium)
                 .foregroundStyle(Theme.secondary)
                 .fixedSize()

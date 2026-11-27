@@ -155,6 +155,46 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.settings, .transfer, .sync], trailing: []))
     }
 
+    func testStepUpAndDownStopsAtTheEdges() {
+        var rows = sample.listRows(oneGroup: false)
+        XCTAssertFalse(rows.canMove(.item(.transfer), by: -1))
+        XCTAssertTrue(rows.canMove(.item(.transfer), by: 1))
+        XCTAssertFalse(rows.canMove(.item(.lock), by: 1))
+        let before = rows
+        rows.move(.item(.transfer), by: -1)
+        rows.move(.item(.lock), by: 1)
+        XCTAssertEqual(rows, before, "nothing moves past the first or last row")
+        rows.move(.item(.transfer), by: 1)
+        XCTAssertEqual(layout(rows).leading, [.sync, .transfer])
+    }
+
+    func testSteppingAcrossTheSpaceSwitchesTheGroup() {
+        var rows = sample.listRows(oneGroup: false)
+        rows.move(.item(.sync), by: 1) // below the space
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.transfer], trailing: [.sync, .settings]))
+        rows.move(.flexibleSpace, by: -1) // the space up: Überweisen goes next to the search
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [], trailing: [.transfer, .sync, .settings]))
+    }
+
+    func testSwitchSidePlacesTheButtonRightAcrossTheSpace() {
+        var rows = sample.listRows(oneGroup: false)
+        XCTAssertFalse(rows.isNextToSearch(.transfer))
+        rows.switchSide(.transfer)
+        XCTAssertTrue(rows.isNextToSearch(.transfer))
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.sync], trailing: [.transfer, .settings]))
+        rows.switchSide(.settings)
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.sync, .settings], trailing: [.transfer]))
+        XCTAssertEqual(Array(rows.prefix(4)), [.item(.sync), .item(.settings), .flexibleSpace, .item(.transfer)])
+    }
+
+    func testWithoutSpaceThereIsNoSideToSwitch() {
+        var rows = sample.listRows(oneGroup: true)
+        let before = rows
+        rows.switchSide(.transfer)
+        XCTAssertEqual(rows, before)
+        XCTAssertFalse(rows.isNextToSearch(.settings))
+    }
+
     @MainActor
     func testStoreKeepsEditsResetAndScope() {
         let store = ToolbarLayoutStore(defaults: defaults)
