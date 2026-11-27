@@ -1,4 +1,5 @@
-import SwiftUI
+import Foundation
+import Observation
 
 /// The macOS main toolbar as GiroCrab stores it (#2049): which buttons it shows in which order, in a leading
 /// and a trailing group, and whether the scope control is shown. SwiftUI's own customizable toolbar
@@ -74,40 +75,40 @@ struct ToolbarLayout: Codable, Equatable {
     }
 }
 
-/// Editing, for the dialog „Symbolleiste anpassen“ (`ToolbarCustomizeSheet`).
+/// The list of the dialog „Symbolleiste anpassen“ (`ToolbarCustomizeSheet`): every button in one order, with
+/// the flexible space as a row of its own. Checked buttons above it form the leading group, those below it the
+/// trailing group (next to the search); before macOS 26 there is no such row and all checked buttons are leading.
+enum ToolbarListRow: Hashable {
+    case item(ToolbarLayout.Item)
+    case flexibleSpace
+}
+
 extension ToolbarLayout {
-    enum Group { case leading, trailing }
-
-    subscript(group: Group) -> [Item] {
-        get { group == .leading ? leading : trailing }
-        set { if group == .leading { leading = newValue } else { trailing = newValue } }
-    }
-
     /// Buttons in neither group.
     var hidden: [Item] { Item.allCases.filter { !leading.contains($0) && !trailing.contains($0) } }
 
-    mutating func remove(_ item: Item) {
-        leading.removeAll { $0 == item }
-        trailing.removeAll { $0 == item }
+    /// The dialog's rows for this layout: leading, flexible space, trailing, then the hidden buttons.
+    func listRows(oneGroup: Bool) -> [ToolbarListRow] {
+        let space: [ToolbarListRow] = oneGroup ? [] : [.flexibleSpace]
+        return leading.map(ToolbarListRow.item) + space + trailing.map(ToolbarListRow.item) + hidden.map(ToolbarListRow.item)
     }
 
-    /// Appends `item` to `group`, taking it out of the other group.
-    mutating func add(_ item: Item, to group: Group) {
-        remove(item)
-        self[group].append(item)
+    /// The layout the dialog's rows describe; `shown` are the checked buttons.
+    static func from(rows: [ToolbarListRow], shown: Set<Item>, showsScope: Bool) -> ToolbarLayout {
+        var layout = ToolbarLayout(showsScope: showsScope, leading: [], trailing: [])
+        var afterSpace = false
+        for row in rows {
+            switch row {
+            case .flexibleSpace: afterSpace = true
+            case .item(let item) where shown.contains(item):
+                if afterSpace { layout.trailing.append(item) } else { layout.leading.append(item) }
+            case .item: break
+            }
+        }
+        return layout
     }
 
-    mutating func move(in group: Group, from source: IndexSet, to destination: Int) {
-        self[group].move(fromOffsets: source, toOffset: destination)
-    }
-
-    /// Before macOS 26 both groups show as one: reorders that single list, which then is the leading group.
-    mutating func moveAsOneGroup(from source: IndexSet, to destination: Int) {
-        var all = leading + trailing
-        all.move(fromOffsets: source, toOffset: destination)
-        leading = all
-        trailing = []
-    }
+    var shown: Set<Item> { Set(leading + trailing) }
 }
 
 /// The app's toolbar layout. `MainToolbar` reads `layout` from here rather than through `@AppStorage`: an observable

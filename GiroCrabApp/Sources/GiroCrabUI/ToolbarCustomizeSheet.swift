@@ -1,145 +1,132 @@
 #if os(macOS)
 import SwiftUI
 
-/// Ansicht › Symbolleiste anpassen … (#2049): edits the stored `ToolbarLayout`, the toolbar follows live.
+/// Ansicht › Symbolleiste anpassen … (#2049): one list that mirrors the toolbar. A checkbox shows or hides an entry,
+/// dragging reorders; the „Flexibler Abstand“ row splits the buttons into the group after the view filter and the
+/// group next to the search. Edits the stored `ToolbarLayout`, the toolbar follows live.
 /// Design page: `docs/SYMBOLLEISTE_UI.md`.
 struct ToolbarCustomizeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.textScale) private var textScale
     @Bindable private var store = ToolbarLayoutStore.shared
+    /// The list order, hidden buttons included: kept here so that unchecking a button does not move its row.
+    @State private var rows = ToolbarLayoutStore.shared.layout.listRows(oneGroup: !Self.twoGroups)
 
-    /// Before macOS 26 the toolbar has no flexible spacer, so left and right look the same: one list.
-    private var twoGroups: Bool {
+    /// Before macOS 26 the toolbar has no flexible spacer: one group, no „Flexibler Abstand“ row.
+    private static var twoGroups: Bool {
         if #available(macOS 26, *) { return true }
         return false
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Toggle("Ansichtsfilter", isOn: $store.layout.showsScope)
-                } footer: {
-                    Text("Der Filter der gewählten Ansicht in der Mitte der Symbolleiste.").leadingFooter()
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Symbolleiste anpassen")
+                .appFont(.headline)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 6)
+            List {
+                Toggle(isOn: $store.layout.showsScope) {
+                    ToolbarRowLabel(title: "Ansichtsfilter", systemImage: "line.3.horizontal.decrease.circle")
                 }
-                if twoGroups {
-                    group(.leading, title: "Links")
-                    group(.trailing, title: "Rechts, neben der Suche")
-                } else {
-                    Section {
-                        ForEach(store.layout.leading + store.layout.trailing, id: \.self) { row($0, in: nil) }
-                            .onMove { store.layout.moveAsOneGroup(from: $0, to: $1) }
-                    } header: { Text("Symbole").appSectionHeader() }
-                }
-                Section {
-                    ForEach(store.layout.hidden, id: \.self) { item in
-                        HStack {
-                            ToolbarItemLabel(item: item)
-                            Spacer()
-                            if twoGroups {
-                                Menu {
-                                    Button("Links hinzufügen") { store.layout.add(item, to: .leading) }
-                                    Button("Rechts hinzufügen") { store.layout.add(item, to: .trailing) }
-                                } label: { Label("Hinzufügen", systemImage: "plus.circle").labelStyle(.iconOnly) }
-                                    .menuStyle(.borderlessButton)
-                                    .menuIndicator(.hidden)
-                                    .fixedSize()
-                                    .help("Hinzufügen")
-                            } else {
-                                rowButton("Hinzufügen", systemImage: "plus.circle") { store.layout.add(item, to: .trailing) }
-                            }
-                        }
+                ForEach(rows, id: \.self) { row in
+                    switch row {
+                    case .item(let item): Toggle(isOn: shown(item)) { ToolbarItemLabel(item: item) }
+                    case .flexibleSpace: FlexibleSpaceRow().listRowSeparator(.hidden)
                     }
-                } header: { Text("Weitere Symbole").appSectionHeader() }
-            }
-            .formStyle(.grouped)
-            .navigationTitle("Symbolleiste anpassen")
-            .toolbar {
-                ToolbarItem(placement: .destructiveAction) {
-                    Button("Standard wiederherstellen") { store.layout = .standard }
-                        .disabled(store.layout == .standard)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
+                .onMove { from, to in
+                    rows.move(fromOffsets: from, toOffset: to)
+                    apply(shown: store.layout.shown)
                 }
             }
+            .listStyle(.inset)
+            .toggleStyle(.checkbox)
+            Text(Self.twoGroups ? "Ziehen zum Sortieren. Was unter „Flexibler Abstand“ steht, erscheint neben der Suche." : "Ziehen zum Sortieren.")
+                .appFont(.caption)
+                .foregroundStyle(Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+            Divider()
+            HStack {
+                Button("Standard wiederherstellen") {
+                    store.layout = .standard
+                    rows = ToolbarLayout.standard.listRows(oneGroup: !Self.twoGroups)
+                }
+                .disabled(store.layout == .standard)
+                Spacer()
+                Button("Fertig") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
         }
-        .desktopFrame(minWidth: 420 * textScale, idealWidth: 460 * textScale, minHeight: 520, idealHeight: 720)
+        // room for every row at once (13 at most) without scrolling
+        .frame(width: 400 * textScale, height: CGFloat(rows.count + 1) * 25 * textScale + 150)
     }
 
-    private func group(_ group: ToolbarLayout.Group, title: LocalizedStringKey) -> some View {
-        Section {
-            ForEach(store.layout[group], id: \.self) { row($0, in: group) }
-                .onMove { store.layout.move(in: group, from: $0, to: $1) }
-            if store.layout[group].isEmpty {
-                Text("Keine Symbole").appFont(.callout).foregroundStyle(Theme.secondary)
-            }
-        } header: { Text(title).appSectionHeader() }
+    private func shown(_ item: ToolbarLayout.Item) -> Binding<Bool> {
+        Binding(get: { store.layout.shown.contains(item) }, set: { on in
+            var shown = store.layout.shown
+            if on { shown.insert(item) } else { shown.remove(item) }
+            apply(shown: shown)
+        })
     }
 
-    /// A shown button: drag to reorder, move to the other side (two groups only), remove.
-    private func row(_ item: ToolbarLayout.Item, in group: ToolbarLayout.Group?) -> some View {
-        HStack {
-            ToolbarItemLabel(item: item)
-            Spacer()
-            if let group {
-                let toRight = group == .leading
-                rowButton(toRight ? "Nach rechts" : "Nach links", systemImage: toRight ? "arrow.right.circle" : "arrow.left.circle") {
-                    store.layout.add(item, to: toRight ? .trailing : .leading)
-                }
-            }
-            rowButton("Entfernen", systemImage: "minus.circle") { store.layout.remove(item) }
+    private func apply(shown: Set<ToolbarLayout.Item>) {
+        store.layout = .from(rows: rows, shown: shown, showsScope: store.layout.showsScope)
+    }
+}
+
+/// The row that stands for the toolbar's flexible space: drawn as a divider, dragged like the buttons.
+private struct FlexibleSpaceRow: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            line
+            Label("Flexibler Abstand", systemImage: "arrow.left.and.right")
+                .appFont(.caption, weight: .medium)
+                .foregroundStyle(Theme.secondary)
+                .fixedSize()
+            line
         }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 
-    private func rowButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Label(title, systemImage: systemImage).labelStyle(.iconOnly) }
-            .buttonStyle(.borderless)
-            .help(Text(title))
+    private var line: some View {
+        Rectangle().fill(Theme.border).frame(height: 1).frame(maxWidth: .infinity)
     }
 }
 
 /// Icon and name of a toolbar button, as in the toolbar itself (`MainToolbarButtons`).
 private struct ToolbarItemLabel: View {
     let item: ToolbarLayout.Item
+
+    var body: some View {
+        switch item {
+        case .transfer: ToolbarRowLabel(title: "Überweisen", systemImage: "paperplane")
+        case .newBooking: ToolbarRowLabel(title: "Neue Buchung", systemImage: "plus")
+        case .sync: ToolbarRowLabel(title: "Abrufen", systemImage: "arrow.triangle.2.circlepath")
+        case .inspector: ToolbarRowLabel(title: "Informationen", systemImage: "sidebar.trailing")
+        case .privacy: ToolbarRowLabel(title: "Privatmodus", systemImage: "eye")
+        case .palette: ToolbarRowLabel(title: "Befehle", systemImage: "command")
+        case .export: ToolbarRowLabel(title: "Umsätze exportieren", systemImage: "square.and.arrow.up")
+        case .print: ToolbarRowLabel(title: "Drucken", systemImage: "printer")
+        case .rules: ToolbarRowLabel(title: "Regeln", systemImage: "wand.and.stars")
+        case .lock: ToolbarRowLabel(title: "Tresor sperren", systemImage: "lock")
+        case .settings: ToolbarRowLabel(title: "Einstellungen", systemImage: "gearshape")
+        }
+    }
+}
+
+private struct ToolbarRowLabel: View {
+    let title: LocalizedStringKey
+    let systemImage: String
     @Environment(\.textScale) private var textScale
 
     var body: some View {
         Label { Text(title) } icon: { Image(systemName: systemImage).frame(width: 22 * textScale) }
             .appFont(.body)
-    }
-
-    private var title: LocalizedStringKey {
-        switch item {
-        case .transfer: "Überweisen"
-        case .newBooking: "Neue Buchung"
-        case .sync: "Abrufen"
-        case .inspector: "Informationen"
-        case .privacy: "Privatmodus"
-        case .palette: "Befehle"
-        case .export: "Umsätze exportieren"
-        case .print: "Drucken"
-        case .rules: "Regeln"
-        case .lock: "Tresor sperren"
-        case .settings: "Einstellungen"
-        }
-    }
-
-    private var systemImage: String {
-        switch item {
-        case .transfer: "paperplane"
-        case .newBooking: "plus"
-        case .sync: "arrow.triangle.2.circlepath"
-        case .inspector: "sidebar.trailing"
-        case .privacy: "eye"
-        case .palette: "command"
-        case .export: "square.and.arrow.up"
-        case .print: "printer"
-        case .rules: "wand.and.stars"
-        case .lock: "lock"
-        case .settings: "gearshape"
-        }
     }
 }
 

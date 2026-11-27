@@ -11206,17 +11206,6 @@
         }
       }
     },
-    "Der Filter der gewählten Ansicht in der Mitte der Symbolleiste." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The filter of the selected view in the middle of the toolbar."
-          }
-        }
-      }
-    },
     "Der Import wird abgebrochen …" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16244,6 +16233,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flex token"
+          }
+        }
+      }
+    },
+    "Flexibler Abstand" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flexible Space"
           }
         }
       }
@@ -21373,17 +21373,6 @@
         }
       }
     },
-    "Keine Symbole" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No items"
-          }
-        }
-      }
-    },
     "Keine Tagespreise vorhanden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23551,28 +23540,6 @@
         }
       }
     },
-    "Links" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Left"
-          }
-        }
-      }
-    },
-    "Links hinzufügen" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add on the Left"
-          }
-        }
-      }
-    },
     "Liquidität & Geldmarkt" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25019,17 +24986,6 @@
         }
       }
     },
-    "Nach links" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move to the Left"
-          }
-        }
-      }
-    },
     "Nach oben" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25043,17 +24999,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Move Up"
-          }
-        }
-      }
-    },
-    "Nach rechts" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move to the Right"
           }
         }
       }
@@ -29245,28 +29190,6 @@
         }
       }
     },
-    "Rechts hinzufügen" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add on the Right"
-          }
-        }
-      }
-    },
-    "Rechts, neben der Suche" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Right, next to search"
-          }
-        }
-      }
-    },
     "Rechtzeitig gekündigt (Frist %@)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32511,17 +32434,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Icon: %@"
-          }
-        }
-      }
-    },
-    "Symbole" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Items"
           }
         }
       }
@@ -35924,17 +35836,6 @@
         }
       }
     },
-    "Weitere Symbole" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "More Items"
-          }
-        }
-      }
-    },
     "Weitere Teilerstattung" : {
       "localizations" : {
         "de" : {
@@ -37122,6 +37023,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Drag rectangles with the mouse over areas that should also be painted black."
+          }
+        }
+      }
+    },
+    "Ziehen zum Sortieren." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to reorder."
+          }
+        }
+      }
+    },
+    "Ziehen zum Sortieren. Was unter „Flexibler Abstand“ steht, erscheint neben der Suche." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to reorder. Items below “Flexible Space” appear next to the search field."
           }
         }
       }

@@ -4,17 +4,19 @@ Die Symbolleiste des Hauptfensters zeigt den Ansichtsfilter in der Mitte und dar
 
 ## Aufbau
 
-Ansicht › „Symbolleiste anpassen …“ öffnet ein Sheet über dem Hauptfenster. Jede Änderung gilt sofort und wird gespeichert.
+Ansicht › „Symbolleiste anpassen …“ öffnet ein Sheet über dem Hauptfenster. Es zeigt eine Liste, die der Symbolleiste entspricht. Jede Änderung gilt sofort und wird gespeichert.
 
-| Bereich | Inhalt und Aktionen |
+| Zeile | Inhalt und Aktionen |
 |---|---|
-| Ansichtsfilter | Schalter: Filter der gewählten Ansicht in der Mitte der Leiste ein- oder ausblenden. |
-| Links | Symbole der linken Gruppe in ihrer Reihenfolge. Ziehen ändert die Reihenfolge, der Pfeil verschiebt nach rechts, ⊖ entfernt. |
-| Rechts, neben der Suche | Wie „Links“, der Pfeil verschiebt nach links. |
-| Weitere Symbole | Nicht gezeigte Symbole. ⊕ fügt links oder rechts hinzu. |
-| Unten | „Standard wiederherstellen“ (nur wenn etwas geändert ist) und „Fertig“. |
+| Ansichtsfilter | Immer oben. Häkchen blendet den Filter der gewählten Ansicht in der Mitte der Leiste ein oder aus. |
+| Symbole | Häkchen, Symbol und Name wie in der Leiste. Ziehen ändert die Reihenfolge. Ein Symbol ohne Häkchen bleibt an seiner Stelle in der Liste, erscheint aber nicht in der Leiste. |
+| Flexibler Abstand | Trennzeile ohne Häkchen, wird wie die Symbole gezogen. Symbole darüber stehen nach dem Ansichtsfilter, Symbole darunter neben der Suche. |
 
-Vor macOS 26 gibt es keinen flexiblen Abstand zwischen den Gruppen. Das Sheet zeigt dort eine Liste „Symbole“ ohne Links/Rechts. ⊕ hängt am Ende an.
+Unter der Liste stehen ein Hinweis zum Ziehen, „Standard wiederherstellen“ (nur wenn etwas geändert ist) und „Fertig“ (Return). Die Höhe reicht für alle Zeilen ohne Scrollen.
+
+Ausgeblendete Symbole stehen beim nächsten Öffnen am Ende der Liste.
+
+Vor macOS 26 gibt es keinen flexiblen Abstand in der Leiste. Die Liste zeigt dort keine Trennzeile, alle Symbole mit Häkchen bilden eine Gruppe.
 
 Ansicht › „Symbolleiste ausblenden/einblenden“ (⌥⌘T) blendet die Leiste aus und ein.
 

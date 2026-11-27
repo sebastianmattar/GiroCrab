@@ -108,51 +108,58 @@ final class ToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(ToolbarLayout.load(from: defaults), .standard)
     }
 
-    // MARK: Editing (dialog „Symbolleiste anpassen“)
+    // MARK: List of the dialog „Symbolleiste anpassen“
 
-    private var sample: ToolbarLayout { ToolbarLayout(showsScope: true, leading: [.transfer, .sync, .privacy], trailing: [.settings]) }
+    private let sample = ToolbarLayout(showsScope: true, leading: [.transfer, .sync], trailing: [.settings])
 
-    func testMoveWithinAGroup() {
-        var layout = sample
-        layout.move(in: .leading, from: [2], to: 0)
-        XCTAssertEqual(layout.leading, [.privacy, .transfer, .sync])
-        XCTAssertEqual(layout.trailing, [.settings])
+    private func layout(_ rows: [ToolbarListRow], shown: Set<ToolbarLayout.Item>? = nil) -> ToolbarLayout {
+        .from(rows: rows, shown: shown ?? sample.shown, showsScope: sample.showsScope)
     }
 
-    func testMoveBetweenGroupsAppendsOnTheOtherSide() {
-        var layout = sample
-        layout.add(.sync, to: .trailing)
-        XCTAssertEqual(layout.leading, [.transfer, .privacy])
-        XCTAssertEqual(layout.trailing, [.settings, .sync])
-        layout.add(.settings, to: .leading)
-        XCTAssertEqual(layout.leading, [.transfer, .privacy, .settings])
-        XCTAssertEqual(layout.trailing, [.sync])
+    func testRowsMirrorTheToolbarThenHiddenButtons() {
+        XCTAssertEqual(sample.listRows(oneGroup: false), [
+            .item(.transfer), .item(.sync), .flexibleSpace, .item(.settings), .item(.newBooking), .item(.inspector),
+            .item(.privacy), .item(.palette), .item(.export), .item(.print), .item(.rules), .item(.lock),
+        ])
+        XCTAssertEqual(layout(sample.listRows(oneGroup: false)), sample)
+        XCTAssertEqual(ToolbarLayout.from(rows: ToolbarLayout.standard.listRows(oneGroup: false), shown: ToolbarLayout.standard.shown,
+                                          showsScope: true), .standard)
     }
 
-    func testAddAndRemove() {
-        var layout = sample
-        XCTAssertEqual(layout.hidden, [.newBooking, .inspector, .palette, .export, .print, .rules, .lock])
-        layout.add(.print, to: .trailing)
-        layout.remove(.transfer)
-        XCTAssertEqual(layout.leading, [.sync, .privacy])
-        XCTAssertEqual(layout.trailing, [.settings, .print])
-        XCTAssertEqual(layout.hidden, [.transfer, .newBooking, .inspector, .palette, .export, .rules, .lock])
+    func testMovingAButtonBelowTheSpacePutsItNextToTheSearch() {
+        var rows = sample.listRows(oneGroup: false)
+        rows.move(fromOffsets: [0], toOffset: 4) // Überweisen below Einstellungen
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.sync], trailing: [.settings, .transfer]))
     }
 
-    func testMoveAsOneGroupMergesIntoLeading() {
-        var layout = sample
-        layout.moveAsOneGroup(from: [3], to: 1) // settings, shown last before macOS 26
-        XCTAssertEqual(layout.leading, [.transfer, .settings, .sync, .privacy])
-        XCTAssertEqual(layout.trailing, [])
+    func testMovingTheSpaceUpMovesButtonsToTheRight() {
+        var rows = sample.listRows(oneGroup: false)
+        rows.move(fromOffsets: [2], toOffset: 0)
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [], trailing: [.transfer, .sync, .settings]))
+    }
+
+    func testHiddenButtonsKeepTheirRowAndShowWhereTheyStand() {
+        var rows = sample.listRows(oneGroup: false)
+        rows.move(fromOffsets: [5], toOffset: 1) // Informationen (hidden) between Überweisen and Abrufen
+        XCTAssertEqual(layout(rows), sample, "a hidden row changes nothing in the toolbar")
+        var shown = sample.shown
+        shown.insert(.inspector)
+        shown.remove(.settings)
+        XCTAssertEqual(layout(rows, shown: shown), ToolbarLayout(showsScope: true, leading: [.transfer, .inspector, .sync], trailing: []))
+    }
+
+    func testOneGroupBeforeMacOS26() {
+        var rows = sample.listRows(oneGroup: true)
+        XCTAssertFalse(rows.contains(.flexibleSpace))
+        rows.move(fromOffsets: [2], toOffset: 0) // Einstellungen first
+        XCTAssertEqual(layout(rows), ToolbarLayout(showsScope: true, leading: [.settings, .transfer, .sync], trailing: []))
     }
 
     @MainActor
     func testStoreKeepsEditsResetAndScope() {
         let store = ToolbarLayoutStore(defaults: defaults)
-        store.layout.showsScope = false
-        store.layout.add(.lock, to: .trailing)
-        XCTAssertEqual(ToolbarLayoutStore(defaults: defaults).layout, ToolbarLayout(
-            showsScope: false, leading: [.transfer, .newBooking, .sync, .inspector, .privacy], trailing: [.lock]))
+        store.layout = .from(rows: store.layout.listRows(oneGroup: false), shown: [.lock, .sync], showsScope: false)
+        XCTAssertEqual(ToolbarLayoutStore(defaults: defaults).layout, ToolbarLayout(showsScope: false, leading: [.sync], trailing: [.lock]))
         store.layout = .standard
         XCTAssertEqual(ToolbarLayoutStore(defaults: defaults).layout, .standard)
     }
