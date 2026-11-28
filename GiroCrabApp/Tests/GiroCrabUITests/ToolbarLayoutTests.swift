@@ -1,3 +1,4 @@
+// test: serial-defaults
 import XCTest
 @testable import GiroCrabUI
 
